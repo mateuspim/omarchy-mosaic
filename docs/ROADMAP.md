@@ -9,7 +9,8 @@
 - This bar widget: lists sessions, adds web apps or URLs, focuses and removes
   tiles, closes sessions, and re-contains, all through the CLI.
 - The plugin's own engine (`MosaicService.qml`) for the tile list, the web
-  apps, and focusing, removing, closing, and containing tiles.
+  apps, and adding, focusing, removing, closing, and containing tiles; the
+  plugin no longer needs the CLI.
 - Hiding web apps from the panel, and a Hidden web apps tab to bring them
   back.
 

@@ -5,7 +5,7 @@ import vm from "node:vm"
 const source = fs.readFileSync(new URL("../Model.js", import.meta.url), "utf8")
   .replace(/^\.pragma library\s*/m, "")
 const model = {}
-vm.runInNewContext(source + "\nObject.assign(model, { hiddenEntries, showWebapp, nameList, visibleWebapps, hideWebapp, sessionOf, clientFromIpc, parseStore, tileState, buildList, shapeList, parseClients, validAddress, dispatchExpression, listTiles, findTile, planFocus, planRemove, planClose, planContain, restoreAfterMove, webappUrl, webappFromEntry, buildWebapps, shapeWebapps, findWebapp, resolveTarget, parseList, tileLabel, tileMeta, normalizeUrl, sessionName, summary, anyUncontained, errorLine });", { model })
+vm.runInNewContext(source + "\nObject.assign(model, { hiddenEntries, showWebapp, nameList, visibleWebapps, hideWebapp, sessionOf, clientFromIpc, parseStore, tileState, buildList, shapeList, parseClients, validAddress, dispatchExpression, listTiles, findTile, planFocus, planRemove, planClose, planContain, restoreAfterMove, monitorFromIpc, parseMonitors, resolveAddTargets, chooseWorkspace, desktopId, isChromiumFamily, isAppWindow, parseOpenWindow, tileDispatches, pruneRecords, serializeStore, webappUrl, webappFromEntry, buildWebapps, shapeWebapps, findWebapp, resolveTarget, parseList, tileLabel, tileMeta, normalizeUrl, sessionName, summary, anyUncontained, parseManifest });", { model })
 
 // Values built inside the VM belong to another realm, so compare copies.
 const plain = value => JSON.parse(JSON.stringify(value))
@@ -43,9 +43,10 @@ assert.equal(model.sessionName(" streams "), "streams")
 assert.equal(model.sessionName("Streams"), "")
 assert.equal(model.sessionName("a\"b"), "")
 
-assert.equal(model.errorLine("mosaic: Monitor \"X\" is not active\n", "failed"), "Monitor \"X\" is not active")
-assert.equal(model.errorLine("mosaic: bad\nRun `mosaic --help` for usage.\n", "failed"), "bad")
-assert.equal(model.errorLine("", "failed"), "failed")
+const manifest = JSON.parse(fs.readFileSync(new URL("../manifest.json", import.meta.url), "utf8"))
+assert.deepEqual(plain(model.parseManifest(JSON.stringify(manifest))), { name: manifest.name, version: manifest.version })
+assert.equal(model.parseManifest("{"), null)
+assert.equal(model.parseManifest("{}"), null)
 
 const webapps = model.shapeWebapps({ version: 1, webapps: [
   { id: "Twitch", name: "Twitch", url: "https://twitch.tv", icon: "twitch" },
@@ -232,5 +233,71 @@ assert.equal(model.restoreAfterMove(live, ""), "")
 assert.equal(model.restoreAfterMove(model.buildList([client("0x7", ["mosaic"], { floating: true })], [], []), "7,1,1"), "")
 assert.equal(model.restoreAfterMove(model.buildList([client("0x8", ["mosaic"], { fullscreen: 2 })], [], []), "8,1,1"), "")
 assert.equal(model.dispatchExpression("release", "0x1a"), 'hl.dsp.window.fullscreen_state({ internal = 0, client = 0, window = "address:0x1a" })')
+
+// Ported from platform::tests::rotated_scaled_monitor_uses_logical_portrait_size.
+assert.deepEqual(plain(model.monitorFromIpc({ id: 0, name: "DP-1", activeWorkspace: { id: 3 }, x: 0, y: 0, width: 2560, height: 1440,
+  scale: 1.25, transform: 1, reserved: [0, 26, 0, 0] })),
+  { id: 0, name: "DP-1", focused: false, activeWorkspace: 3, size: [1152, 2048], workArea: { x: 0, y: 26, width: 1152, height: 2022 } })
+const monitorsJson = JSON.stringify([
+  { id: 1, name: "DP-4", focused: false, activeWorkspace: { id: 10 }, x: 0, y: 0, width: 1920, height: 1080, scale: 1, transform: 0, reserved: [0, 0, 0, 0] },
+  { id: 0, name: "DP-5", focused: true, activeWorkspace: { id: 1 }, x: 1920, y: 0, width: 2560, height: 1440, scale: 1.25, transform: 0, reserved: [0, 26, 0, 0] },
+  { id: 2, name: "HDMI-A-1", disabled: true, activeWorkspace: { id: 5 }, width: 1, height: 1 }
+])
+const screens = model.parseMonitors(monitorsJson)
+assert.deepEqual(plain(screens.map(m => [m.name, m.activeWorkspace, m.focused, m.size])), [["DP-4", 10, false, [1920, 1080]], ["DP-5", 1, true, [2048, 1152]]])
+assert.equal(model.parseMonitors("nope"), null)
+
+const apps = model.shapeWebapps({ version: 1, webapps: [{ id: "Twitch", name: "Twitch", url: "https://twitch.tv" }] }).apps
+assert.deepEqual(plain(model.resolveAddTargets(["https://kick.com", "twitch", "file:///tmp/a.html"], apps)),
+  { urls: ["https://kick.com", "https://twitch.tv", "file:///tmp/a.html"] })
+assert.deepEqual(plain(model.resolveAddTargets(["twitch", "twich"], apps)),
+  { error: '"twich" is neither a URL (http, https, or file) nor a web app; see `mosaic webapps`' })
+assert.equal(model.resolveAddTargets(["javascript:alert(1)"], apps).error.includes("neither a URL"), true)
+assert.equal(model.resolveAddTargets([], apps).error, "Pass 1 to 9 URLs or web apps")
+assert.equal(model.resolveAddTargets(Array(10).fill("twitch"), apps).error, "Pass 1 to 9 URLs or web apps")
+
+// `live`: news on workspace 10, streams on workspace 1.
+assert.deepEqual(plain(model.chooseWorkspace(live, screens, "news", "")), { workspace: 10 })
+assert.deepEqual(plain(model.chooseWorkspace(live, screens, "fresh", "")), { workspace: 1 })
+assert.deepEqual(plain(model.chooseWorkspace(live, screens, "news", "DP-4")), { workspace: 10 })
+assert.deepEqual(plain(model.chooseWorkspace(live, screens, "fresh", "DP-9")), { error: 'Monitor "DP-9" is not active' })
+assert.equal(model.chooseWorkspace(live, [], "fresh", "").error, "No active Hyprland monitors")
+const floatingFirst = model.buildList([client("0x1", ["mosaic", "mosaic-x"], { floating: true, workspace: 7 }),
+  client("0x2", ["mosaic", "mosaic-x"], { workspace: 8 })], [], [])
+assert.deepEqual(plain(model.chooseWorkspace(floatingFirst, screens, "x", "")), { workspace: 8 })
+
+assert.equal(model.desktopId("brave-origin.desktop\n"), "brave-origin")
+assert.equal(model.desktopId(""), "")
+assert.equal(model.isChromiumFamily("brave-origin"), true)
+assert.equal(model.isChromiumFamily("google-chrome"), true)
+assert.equal(model.isChromiumFamily("firefox"), false)
+assert.equal(model.isAppWindow("brave-youtube.com__-Default"), true)
+assert.equal(model.isAppWindow("brave-origin"), false)
+assert.deepEqual(plain(model.parseOpenWindow("5f4ccef35180,10,brave-youtube.com__-Default,YouTube, the site")),
+  { address: "0x5f4ccef35180", windowClass: "brave-youtube.com__-Default" })
+assert.equal(model.parseOpenWindow("zz,1,a__b,t"), null)
+assert.equal(model.parseOpenWindow("5f4c"), null)
+
+assert.deepEqual(plain(model.tileDispatches("0x1a", "streams", 4)), {
+  tags: ['hl.dsp.window.tag({ window = "address:0x1a", tag = "+mosaic" })',
+    'hl.dsp.window.tag({ window = "address:0x1a", tag = "+mosaic-streams" })'],
+  place: ['hl.dsp.window.move({ window = "address:0x1a", workspace = "4", follow = false })',
+    'hl.dsp.window.float({ window = "address:0x1a", action = "disable" })',
+    'hl.dsp.window.set_prop({ window = "address:0x1a", prop = "opaque", value = "1" })',
+    'hl.dsp.window.fullscreen_state({ internal = 0, client = 2, window = "address:0x1a" })']
+})
+assert.equal(model.tileDispatches("0x1a", 'x" })', 4).error.startsWith("Invalid session name"), true)
+assert.equal(model.tileDispatches("0x1a", "", 4).error.startsWith("Invalid session name"), true)
+assert.equal(model.tileDispatches("zz", "x", 4).error.startsWith("Unexpected Hyprland window address"), true)
+assert.equal(model.tileDispatches("0x1a", "x", "4").error.startsWith("Unexpected workspace"), true)
+
+// Ported from session::tests::prunes_records_for_closed_windows.
+const record = address => ({ address, session: "x", url: "" })
+assert.deepEqual(plain(model.pruneRecords([record("0xa"), record("0xb"), record("0xc")],
+  [client("0xa", ["mosaic", "mosaic-x"]), client("0xb", [])]).map(r => r.address)), ["0xa"])
+// Written the way the Rust CLI writes it, so either can read the other's file.
+assert.equal(model.serializeStore([{ address: "0x5f4ccef35180", session: "default", url: "https://youtube.com/" }]),
+  '{\n  "tiles": [\n    {\n      "address": "0x5f4ccef35180",\n      "session": "default",\n      "url": "https://youtube.com/"\n    }\n  ]\n}')
+assert.equal(model.serializeStore([]), '{\n  "tiles": []\n}')
 
 console.log("model tests passed")

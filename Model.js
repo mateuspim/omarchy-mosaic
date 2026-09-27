@@ -366,14 +366,14 @@ function anyUncontained(tiles) {
   return false
 }
 
-// First line of a failed command's stderr, without mosaic's prefix.
-function errorLine(stderr, fallback) {
-  var lines = String(stderr || "").split("\n")
-  for (var i = 0; i < lines.length; i++) {
-    var line = lines[i].trim()
-    if (line !== "" && line.indexOf("Run `mosaic --help`") !== 0) return line.replace(/^mosaic:\s*/, "")
+// { name, version } from the plugin's manifest.json text, or null.
+function parseManifest(text) {
+  try {
+    var manifest = JSON.parse(String(text || ""))
+    return manifest && manifest.name && manifest.version ? { name: String(manifest.name), version: String(manifest.version) } : null
+  } catch (error) {
+    return null
   }
-  return fallback
 }
 
 // Clients from `hyprctl -j clients`, or null when the text is not that list.
@@ -512,4 +512,179 @@ function restoreAfterMove(list, eventData) {
   if (tile.state === "contained") return dispatchExpression("contain", address)
   if (tile.state === "uncontained") return dispatchExpression("release", address)
   return ""
+}
+
+// How long `add` waits for a launched browser's app window.
+var WINDOW_TIMEOUT_MS = 15000
+// How many targets one `add` accepts.
+var MAX_ADD = 9
+// Desktop ids of browsers known to support `--app` windows. Mirrors
+// `CHROMIUM_FAMILY` in the Rust CLI and Omarchy's `omarchy-launch-webapp`.
+var CHROMIUM_FAMILY = ["chromium", "google-chrome", "brave", "microsoft-edge", "opera", "vivaldi", "helium"]
+
+// A monitor from `hyprctl -j monitors`, with its logical size after scale
+// and rotation and the work area left by reserved edges, or null. Mirrors
+// `platform::monitor_from`.
+function monitorFromIpc(object) {
+  if (!object || typeof object.name !== "string" || typeof object.id !== "number"
+      || typeof object.width !== "number" || typeof object.height !== "number"
+      || !object.activeWorkspace || typeof object.activeWorkspace.id !== "number") return null
+  var scale = object.scale > 0 ? object.scale : 1
+  var width = Math.round(object.width / scale)
+  var height = Math.round(object.height / scale)
+  if (Number(object.transform || 0) % 2 === 1) {
+    var swap = width
+    width = height
+    height = swap
+  }
+  var reserved = Array.isArray(object.reserved) && object.reserved.length === 4 ? object.reserved.map(function(edge) {
+    return Math.trunc(Number(edge) || 0)
+  }) : [0, 0, 0, 0]
+  return {
+    id: object.id,
+    name: object.name,
+    focused: object.focused === true,
+    activeWorkspace: object.activeWorkspace.id,
+    size: [width, height],
+    workArea: {
+      x: Math.trunc(Number(object.x) || 0) + reserved[0],
+      y: Math.trunc(Number(object.y) || 0) + reserved[1],
+      width: Math.max(1, width - reserved[0] - reserved[2]),
+      height: Math.max(1, height - reserved[1] - reserved[3])
+    }
+  }
+}
+
+// Enabled monitors from `hyprctl -j monitors`, or null when the text is not
+// that list.
+function parseMonitors(text) {
+  var parsed
+  try {
+    parsed = JSON.parse(String(text || ""))
+  } catch (error) {
+    return null
+  }
+  if (!Array.isArray(parsed)) return null
+  var monitors = []
+  for (var i = 0; i < parsed.length; i++) {
+    if (parsed[i] && parsed[i].disabled === true) continue
+    var monitor = monitorFromIpc(parsed[i])
+    if (monitor) monitors.push(monitor)
+  }
+  return monitors
+}
+
+// The URLs `add` opens: each target is a URL (http, https, or file) or a
+// web app's name or id. Every target is resolved before anything opens, so a
+// typo opens nothing. Returns { urls } or { error }.
+function resolveAddTargets(targets, apps) {
+  var names = stringList(targets)
+  if (names.length < 1 || names.length > MAX_ADD) return { error: "Pass 1 to 9 URLs or web apps" }
+  var urls = []
+  for (var i = 0; i < names.length; i++) {
+    var target = names[i]
+    if (/^(https?|file):\/\//.test(target)) {
+      urls.push(target)
+      continue
+    }
+    var app = findWebapp(apps, target)
+    if (!app) return { error: JSON.stringify(target) + " is neither a URL (http, https, or file) nor a web app; see `mosaic webapps`" }
+    urls.push(app.url)
+  }
+  return { urls: urls }
+}
+
+// The workspace new tiles of `session` go to: the named monitor's active
+// workspace, else the workspace of the session's first tiled window, else
+// the focused monitor's. Returns { workspace } or { error }.
+function chooseWorkspace(list, monitors, session, monitorName) {
+  if (monitors.length === 0) return { error: "No active Hyprland monitors" }
+  if (monitorName) {
+    for (var i = 0; i < monitors.length; i++) {
+      if (monitors[i].name === monitorName) return { workspace: monitors[i].activeWorkspace }
+    }
+    return { error: "Monitor " + JSON.stringify(String(monitorName)) + " is not active" }
+  }
+  var sessions = list && Array.isArray(list.sessions) ? list.sessions : []
+  for (var s = 0; s < sessions.length; s++) {
+    if (sessions[s].name !== session) continue
+    for (var t = 0; t < sessions[s].tiles.length; t++) {
+      if (sessions[s].tiles[t].state !== "floating") return { workspace: sessions[s].tiles[t].workspace }
+    }
+  }
+  for (var m = 0; m < monitors.length; m++) {
+    if (monitors[m].focused) return { workspace: monitors[m].activeWorkspace }
+  }
+  return { workspace: monitors[0].activeWorkspace }
+}
+
+// The desktop id `xdg-settings get default-web-browser` printed, without
+// `.desktop`, or "".
+function desktopId(text) {
+  var id = String(text || "").trim().split("\n")[0].trim()
+  return id.slice(-8) === ".desktop" ? id.slice(0, -8) : id
+}
+
+function isChromiumFamily(id) {
+  for (var i = 0; i < CHROMIUM_FAMILY.length; i++) {
+    if (String(id).indexOf(CHROMIUM_FAMILY[i]) === 0) return true
+  }
+  return false
+}
+
+// Chromium names Wayland app windows `<browser>-<host>__<path>-<profile>`,
+// which tells them apart from restored normal browser windows.
+function isAppWindow(windowClass) {
+  return String(windowClass || "").indexOf("__") !== -1
+}
+
+// The window Hyprland's `openwindow` event (`ADDRESS,WORKSPACE,CLASS,TITLE`,
+// the address without `0x`) announces, or null.
+function parseOpenWindow(data) {
+  var parts = String(data || "").split(",")
+  if (parts.length < 3) return null
+  var address = parts[0].indexOf("0x") === 0 ? parts[0] : "0x" + parts[0]
+  if (!validAddress(address)) return null
+  return { address: address, windowClass: parts[2] }
+}
+
+// The dispatches that make a new window a tile of `session` on `workspace`:
+// tags first, then (once the store has the record) placement and
+// containment last, because switching between floating and tiled resets it.
+// Mirrors `platform::tag`, `tile_on`, and `contain_fullscreen`. Returns
+// { tags, place } or { error }.
+function tileDispatches(address, session, workspace) {
+  if (!validAddress(address)) return { error: "Unexpected Hyprland window address " + JSON.stringify(String(address)) }
+  if (sessionName(session) !== session) return { error: "Invalid session name " + JSON.stringify(String(session)) }
+  if (typeof workspace !== "number" || Math.floor(workspace) !== workspace) return { error: "Unexpected workspace " + JSON.stringify(workspace) }
+  var window = 'window = "address:' + address + '"'
+  return {
+    tags: [
+      "hl.dsp.window.tag({ " + window + ', tag = "+' + TAG + '" })',
+      "hl.dsp.window.tag({ " + window + ', tag = "+' + TAG + "-" + session + '" })'
+    ],
+    place: [
+      "hl.dsp.window.move({ " + window + ', workspace = "' + workspace + '", follow = false })',
+      "hl.dsp.window.float({ " + window + ', action = "disable" })',
+      "hl.dsp.window.set_prop({ " + window + ', prop = "opaque", value = "1" })',
+      dispatchExpression("contain", address)
+    ]
+  }
+}
+
+// Store records without the ones whose window is gone or no longer a tile.
+// Mirrors `Store::prune`.
+function pruneRecords(records, clients) {
+  var live = []
+  for (var i = 0; i < clients.length; i++) {
+    if (sessionOf(clients[i].tags) !== null) live.push(clients[i].address)
+  }
+  return records.filter(function(record) { return live.indexOf(record.address) !== -1 })
+}
+
+// tiles.json text for `records`, formatted as the Rust CLI writes it.
+function serializeStore(records) {
+  return JSON.stringify({ tiles: records.map(function(record) {
+    return { address: record.address, session: record.session, url: record.url }
+  }) }, null, 2)
 }

@@ -8,9 +8,8 @@ import qs.Ui
 import "Model.js" as Model
 
 // Bar widget for omarchy-mosaic. The tile list and the web apps come from
-// the plugin's service (MosaicService.qml), which also focuses, removes,
-// closes, and contains tiles. Adding still goes through the mosaic CLI until
-// the engine can do it, so this widget holds no session state of its own.
+// the plugin's service (MosaicService.qml), which also does every action, so
+// this widget holds no session state of its own.
 Panel {
   id: root
   moduleName: "pym.mosaic"
@@ -30,24 +29,26 @@ Panel {
   readonly property var hiddenRows: Model.hiddenEntries(webapps, setting("hiddenWebapps", ""))
   // The panel's tab: "tiles", or "hidden" for the hidden web apps.
   property string view: "tiles"
-  property string mosaicVersion: ""
   property string status: ""
   property bool statusIsError: false
-  // The running CLI command's description.
-  property string busyLabel: ""
-  // What is running right now, in the CLI or in the service.
-  readonly property string activity: busyLabel !== "" ? busyLabel : service && service.busy ? service.busyLabel : ""
+  // What the service is doing right now.
+  readonly property string activity: service && service.busy ? service.busyLabel : ""
   property int cursor: 0
   property bool cursorActive: false
-  property bool actionStarted: false
-  readonly property string missingCommand: "Cannot run " + command + ". Install mosaic or set its path in the widget settings."
+  // "Mosaic 0.1.0", from the manifest.
+  readonly property string versionText: {
+    var manifest = Model.parseManifest(manifestFile.text())
+    return manifest ? manifest.name + " " + manifest.version : ""
+  }
 
   readonly property color foreground: bar ? bar.foreground : Color.foreground
   readonly property color urgent: bar ? bar.urgent : Color.urgent
   readonly property color dim: Qt.darker(foreground, 1.55)
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
-  readonly property string command: {
-    var value = String(setting("command", "mosaic")).trim() || "mosaic"
+  // The browser setting: a Chromium-family command used instead of the
+  // default browser, or "".
+  readonly property string browser: {
+    var value = String(setting("browser", "")).trim()
     return value.indexOf("~/") === 0 ? Quickshell.env("HOME") + value.slice(1) : value
   }
   readonly property int cursorCount: view === "tiles" ? tiles.length : hiddenRows.length
@@ -68,7 +69,6 @@ Panel {
       cursor = 0
       cursorActive = false
       refresh()
-      refreshVersion()
     }
   }
 
@@ -82,29 +82,10 @@ Panel {
     if (service) service.refresh()
   }
 
-  function refreshVersion() {
-    if (versionProcess.running) return
-    versionProcess.command = [command, "--version"]
-    versionProcess.running = true
-  }
-
   function iconSource(icon) {
     if (!icon) return ""
     if (icon.indexOf("/") === 0) return "file://" + icon
     return Quickshell.iconPath(icon, true)
-  }
-
-  // Runs one mosaic subcommand at a time. `label` describes it while it runs.
-  function run(args, label) {
-    if (activity !== "") {
-      showStatus("Still busy: " + activity, true)
-      return
-    }
-    busyLabel = label
-    status = ""
-    actionProcess.command = [command].concat(args)
-    actionStarted = false
-    actionProcess.running = true
   }
 
   // Runs a service action, such as `service.focus`, and shows why it could
@@ -112,10 +93,6 @@ Panel {
   function runService(start) {
     if (!service) {
       showStatus(listing.error, true)
-      return
-    }
-    if (busyLabel !== "") {
-      showStatus("Still busy: " + busyLabel, true)
       return
     }
     status = ""
@@ -144,7 +121,9 @@ Panel {
       showStatus("Session names use lowercase letters, digits, - and _", true)
       return false
     }
-    run(["add", "--session", session, url], "Adding " + label + " to " + session)
+    runService(function(engine) {
+      return engine.add([url], { session: session, browser: root.browser }, "Adding " + label + " to " + session)
+    })
     return true
   }
 
@@ -228,37 +207,16 @@ Panel {
     onTriggered: root.findService()
   }
 
-  Process {
-    id: versionProcess
-    running: false
-    stdout: StdioCollector { id: versionStdout; waitForEnd: true }
-    onExited: function(exitCode) {
-      root.mosaicVersion = exitCode === 0 ? String(versionStdout.text).trim() : ""
-    }
+  FileView {
+    id: manifestFile
+    path: Qt.resolvedUrl("manifest.json").toString().replace(/^file:\/\//, "")
+    printErrors: false
   }
 
   Connections {
     target: root.service
     function onActionFinished(label, error, message) {
       if (error) root.showStatus(error, true)
-    }
-  }
-
-  Process {
-    id: actionProcess
-    running: false
-    stdout: StdioCollector { id: actionStdout; waitForEnd: true }
-    stderr: StdioCollector { id: actionStderr; waitForEnd: true }
-    onStarted: root.actionStarted = true
-    // Quickshell never emits `exited` for a command that cannot start.
-    onRunningChanged: if (!running && !root.actionStarted) {
-      root.showStatus(root.missingCommand, true)
-      root.busyLabel = ""
-    }
-    onExited: function(exitCode) {
-      if (exitCode !== 0) root.showStatus(Model.errorLine(actionStderr.text, root.busyLabel + " failed"), true)
-      root.busyLabel = ""
-      root.refresh()
     }
   }
 
@@ -525,10 +483,10 @@ Panel {
           }
 
           Text {
-            visible: root.mosaicVersion !== ""
+            visible: root.versionText !== ""
             width: parent.width
             textFormat: Text.PlainText
-            text: root.mosaicVersion
+            text: root.versionText
             color: root.dim
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption

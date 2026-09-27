@@ -5,10 +5,9 @@
 The plugin is a service (`MosaicService.qml`) plus a bar widget
 (`Panel.qml`), with pure logic in `Model.js`. The service builds the tile list
 from Hyprland and `tiles.json` and the web app list from `DesktopEntries`,
-and it focuses, removes, closes, and contains tiles through `hyprctl`. Only
-`add` still shells out to the Rust `mosaic` CLI. It is being turned into the whole product; `docs/HANDOFF.md` has
-the plan and the parity checklist. Until each action is ported, the widget
-keeps calling the CLI for it, and it must work before and after every step.
+and it adds, focuses, removes, closes, and contains tiles through `hyprctl`,
+without the Rust `mosaic` CLI. `docs/HANDOFF.md` has the plan and the parity
+checklist; the IPC and the `mosaic` wrapper are what parity still lacks.
 
 ## Target shape
 
@@ -109,9 +108,10 @@ The default browser is resolved the way Omarchy's `omarchy-launch-webapp`
 does it: `xdg-settings get default-web-browser`, then the program from that
 desktop entry's `Exec`. Only Chromium-family browsers are accepted
 (Chromium, Chrome, Brave, Edge, Opera, Vivaldi, Helium), because Firefox has
-no `--app` mode. A browser setting overrides the default, which is also how
+no `--app` mode. The widget's **Browser** setting overrides the default, which is also how
 tests point the plugin at a throwaway profile. Launches go through
-`uwsm-app --` when it is available.
+`uwsm-app --`, as an argv list. Unlike the CLI, the plugin doesn't fall back
+to launching the browser directly, since Omarchy always has `uwsm-app`.
 
 ## Finding each tile's window
 
@@ -119,8 +119,10 @@ Chromium-family browsers reuse a running browser process, so the spawned
 process ID doesn't identify the window. A Chromium app window's class is
 `<browser>-<host>__<path>-<profile>`, for example
 `brave-www.twitch.tv__-Default`. The engine launches one URL at a time and
-takes the first new window whose class contains `__`; that skips normal
-windows a cold browser start may restore. A window the user opens during the
+takes the first new window, announced by Hyprland's `openwindow` event,
+whose class contains `__`; that skips normal windows a cold browser start
+may restore. The class is already final in the event (checked with
+Chromium, 2026-09-27). A window the user opens during the
 wait could still be mistaken for a tile.
 
 ## Fullscreen containment

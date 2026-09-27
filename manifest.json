@@ -5,7 +5,7 @@
   "version": "0.1.0",
   "author": "Mateus Pym",
   "license": "MIT",
-  "description": "List, add, focus, and remove omarchy-mosaic web app tiles from the Omarchy bar.",
+  "description": "Tile web apps such as Twitch, Kick, and YouTube as a mosaic on Hyprland, with video fullscreen kept inside each tile.",
   "kinds": ["service", "bar-widget"],
   "entryPoints": {
     "service": "MosaicService.qml",
@@ -18,16 +18,16 @@
     "allowMultiple": false,
     "defaultSection": "right",
     "defaults": {
-      "command": "mosaic",
+      "browser": "",
       "hiddenWebapps": ""
     },
     "schema": [
       {
-        "key": "command",
+        "key": "browser",
         "type": "string",
-        "label": "mosaic command",
-        "defaultValue": "mosaic",
-        "description": "Name or full path of the mosaic binary, for example ~/.local/bin/mosaic when it is not on the shell's PATH."
+        "label": "Browser",
+        "defaultValue": "",
+        "description": "A Chromium-family browser command to open tiles with, such as brave or ~/bin/my-browser. Leave empty to use the default browser, which must be Chromium-based."
       },
       {
         "key": "hiddenWebapps",

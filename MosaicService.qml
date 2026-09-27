@@ -8,8 +8,8 @@ import "Model.js" as Model
 // enabled and destroys it on disable and on every plugin reload; the bar
 // widget reaches it with `bar.shell.serviceFor("pym.mosaic")`. It keeps the
 // v1 tile list current from Hyprland and tiles.json and the v1 web app list
-// current from the desktop entries, and it focuses, removes, closes, and
-// contains tiles. Adding tiles still goes through the mosaic CLI.
+// current from the desktop entries, and it adds, focuses, removes, closes,
+// and contains tiles.
 Scope {
   id: root
 
@@ -24,10 +24,17 @@ Scope {
   // One action runs at a time; `busyLabel` describes it while it runs.
   property bool busy: false
   property string busyLabel: ""
+  // What the running action is waiting for: "plan", "dispatch", or one of
+  // add's steps ("add-clients", "add-monitors", "add-browser",
+  // "add-browser-mime", "add-wait", "add-save").
+  property string phase: ""
   property var pendingPlan: null
-  property var pendingExpressions: []
+  // Dispatches still to run, and what to do once they have.
+  property var pendingQueue: []
+  property var afterQueue: null
   property string pendingMessage: ""
   property bool stepStarted: false
+  property var addState: null
   // Fullscreen state dispatches waiting to run after tiles moved.
   property var restoreQueue: []
 
@@ -83,66 +90,213 @@ Scope {
     return startAction(label || "Containing fullscreen", function(list) { return Model.planContain(list, session) })
   }
 
+  // `mosaic add [--session NAME] [--monitor NAME] [--browser CMD] TARGET...`.
+  // `options` may hold `session` (default "default"), `monitor`, and
+  // `browser`, a Chromium-family command used instead of the default
+  // browser. Targets are resolved before anything opens, so a typo opens
+  // nothing; then each one is launched, found by its openwindow event,
+  // tagged, recorded in tiles.json, tiled, and contained, in that order.
+  function add(targets, options, label) {
+    if (busy) return "Still busy: " + busyLabel
+    var given = options || {}
+    var session = given.session ? String(given.session) : Model.DEFAULT_SESSION
+    if (Model.sessionName(session) !== session)
+      return "Invalid session name " + JSON.stringify(session) + ": use up to 32 lowercase letters, digits, - or _"
+    var resolved = Model.resolveAddTargets(targets, Model.shapeWebapps(webapps).apps)
+    if (resolved.error) return resolved.error
+    addState = {
+      session: session,
+      monitor: given.monitor ? String(given.monitor) : "",
+      browser: given.browser ? String(given.browser) : "",
+      urls: resolved.urls,
+      next: 0,
+      clients: [],
+      seen: [],
+      workspace: 0,
+      program: "",
+      address: ""
+    }
+    begin(label || "Adding " + Model.stringList(targets).join(", ") + " to " + session)
+    phase = "add-clients"
+    runStep(["hyprctl", "-j", "clients"])
+    return ""
+  }
+
   // Starts an action and returns "", or an error when another one is still
   // running. The action reads fresh clients, because containment can change
   // without any Hyprland event, lets `planner(list)` choose the dispatches,
   // then runs them in order and stops at the first one Hyprland rejects.
   function startAction(label, planner) {
     if (busy) return "Still busy: " + busyLabel
-    busy = true
-    busyLabel = label
+    begin(label)
     pendingPlan = planner
-    pendingExpressions = []
-    pendingMessage = ""
-    actionTimeout.restart()
+    phase = "plan"
     runStep(["hyprctl", "-j", "clients"])
     return ""
   }
 
-  function runStep(command) {
+  function begin(label) {
+    busy = true
+    busyLabel = label
+    pendingQueue = []
+    afterQueue = null
+    pendingMessage = ""
+  }
+
+  // Runs one command of the current action, with a time limit.
+  function runStep(command, environment) {
     stepStarted = false
+    stepProcess.environment = environment || ({})
     stepProcess.command = command
+    actionTimeout.restart()
     stepProcess.running = true
+  }
+
+  // Quickshell never emits `exited` for a command that cannot start.
+  function stepFailedToStart() {
+    if (!busy) return
+    var program = stepProcess.command[0]
+    // Without xdg-settings, try xdg-mime, as the CLI does.
+    if (phase === "add-browser") return queryBrowser("add-browser-mime")
+    if (phase === "add-browser-mime") return finishAction("Cannot determine the default browser; set the widget's browser setting")
+    finishAction("Cannot run " + program)
   }
 
   function stepFinished(exitCode, output, errors) {
     if (!busy) return
-    if (exitCode !== 0) {
-      finishAction(String(errors).trim() || "hyprctl failed")
-    } else if (pendingPlan) {
-      var clients = Model.parseClients(output)
+    actionTimeout.stop()
+    var text = String(output)
+    if (phase === "add-browser" || phase === "add-browser-mime")
+      return browserFound(exitCode === 0 ? Model.desktopId(text) : "")
+    if (exitCode !== 0) return finishAction(String(errors).trim() || stepProcess.command[0] + " failed")
+    if (phase === "plan") {
+      var clients = Model.parseClients(text)
       if (clients === null) return finishAction("Unexpected hyprctl clients output")
-      var monitors = []
-      var outputs = Hyprland.monitors.values
-      for (var m = 0; m < outputs.length; m++) monitors.push({ id: outputs[m].id, name: outputs[m].name })
-      var result = pendingPlan(Model.buildList(clients, monitors, records))
+      var result = pendingPlan(Model.buildList(clients, knownMonitors(), records))
       pendingPlan = null
       if (result.error) return finishAction(result.error)
-      pendingExpressions = result.expressions
       pendingMessage = result.message
-      dispatchNext()
-    } else if (String(output).trim() !== "ok") {
-      finishAction("Hyprland rejected " + stepProcess.command[2] + ": " + String(output).trim())
-    } else {
-      dispatchNext()
+      return runQueue(result.expressions, function() { root.finishAction("") })
     }
+    if (phase === "add-clients") {
+      var current = Model.parseClients(text)
+      if (current === null) return finishAction("Unexpected hyprctl clients output")
+      addState.clients = current
+      addState.seen = current.map(function(client) { return client.address })
+      phase = "add-monitors"
+      return runStep(["hyprctl", "-j", "monitors"])
+    }
+    if (phase === "add-monitors") {
+      var monitors = Model.parseMonitors(text)
+      if (monitors === null) return finishAction("Unexpected hyprctl monitors output")
+      records = Model.pruneRecords(records, addState.clients)
+      var chosen = Model.chooseWorkspace(Model.buildList(addState.clients, monitors, records), monitors,
+        addState.session, addState.monitor)
+      if (chosen.error) return finishAction(chosen.error)
+      addState.workspace = chosen.workspace
+      if (addState.browser !== "") {
+        addState.program = addState.browser
+        return launchNext()
+      }
+      return queryBrowser("add-browser")
+    }
+    // A dispatch.
+    if (text.trim() !== "ok") return finishAction("Hyprland rejected " + stepProcess.command[2] + ": " + text.trim())
+    runQueue(pendingQueue, afterQueue)
   }
 
-  function dispatchNext() {
-    if (pendingExpressions.length === 0) return finishAction("")
-    var next = pendingExpressions[0]
-    pendingExpressions = pendingExpressions.slice(1)
+  // Asks for the desktop's default browser. BROWSER is cleared, because
+  // xdg-settings would otherwise answer with it instead of the desktop's.
+  function queryBrowser(nextPhase) {
+    phase = nextPhase
+    if (nextPhase === "add-browser") runStep(["xdg-settings", "get", "default-web-browser"], { BROWSER: null })
+    else runStep(["xdg-mime", "query", "default", "x-scheme-handler/https"], { BROWSER: null })
+  }
+
+  function browserFound(id) {
+    if (id === "" && phase === "add-browser") return queryBrowser("add-browser-mime")
+    if (id === "") return finishAction("Cannot determine the default browser; set the widget's browser setting")
+    if (!Model.isChromiumFamily(id))
+      return finishAction("The default browser (" + id + ") is not Chromium-based. Set the widget's browser setting to a Chromium-family browser such as brave.")
+    var entry = DesktopEntries.byId(id)
+    var command = entry ? Model.stringList(entry.command) : []
+    if (command.length === 0 || command[0] === "") return finishAction("Cannot find an Exec line for " + id)
+    addState.program = command[0]
+    launchNext()
+  }
+
+  // Opens the next URL as an app window and waits for Hyprland to announce
+  // it. `uwsm-app` starts it in its own scope, as Omarchy's launchers do,
+  // and the argv list means a URL can never reach a shell.
+  function launchNext() {
+    if (addState.next >= addState.urls.length) {
+      pendingMessage = "Session " + addState.session + ": " + addState.urls.length + " tile(s) added on workspace "
+        + addState.workspace + " with " + addState.program + "."
+      return finishAction("")
+    }
+    phase = "add-wait"
+    addState.address = ""
+    Quickshell.execDetached(["uwsm-app", "--", addState.program, "--app=" + addState.urls[addState.next]])
+    windowTimeout.restart()
+  }
+
+  // An openwindow event: during add-wait, the first new app window is the
+  // tile. Mirrors `open_tile` in the CLI.
+  function windowOpened(data) {
+    if (!busy || phase !== "add-wait") return
+    var opened = Model.parseOpenWindow(data)
+    if (!opened || addState.seen.indexOf(opened.address) !== -1 || !Model.isAppWindow(opened.windowClass)) return
+    windowTimeout.stop()
+    addState.seen.push(opened.address)
+    addState.address = opened.address
+    var steps = Model.tileDispatches(opened.address, addState.session, addState.workspace)
+    if (steps.error) return finishAction(steps.error)
+    // Record the tile as soon as it is tagged, so a later failure still
+    // leaves it listed with its URL.
+    runQueue(steps.tags, function() {
+      root.saveRecord(function() {
+        root.runQueue(steps.place, function() {
+          root.addState.next++
+          root.launchNext()
+        })
+      })
+    })
+  }
+
+  function saveRecord(then) {
+    phase = "add-save"
+    records = records.concat([{ address: addState.address, session: addState.session, url: addState.urls[addState.next] }])
+    afterQueue = then
     actionTimeout.restart()
-    runStep(["hyprctl", "dispatch", next])
+    store.setText(Model.serializeStore(records))
+  }
+
+  // Runs Hyprland dispatches in order, then `then()`.
+  function runQueue(expressions, then) {
+    if (expressions.length === 0) return then()
+    pendingQueue = expressions.slice(1)
+    afterQueue = then
+    phase = "dispatch"
+    runStep(["hyprctl", "dispatch", expressions[0]])
+  }
+
+  function knownMonitors() {
+    var monitors = []
+    var outputs = Hyprland.monitors.values
+    for (var m = 0; m < outputs.length; m++) monitors.push({ id: outputs[m].id, name: outputs[m].name })
+    return monitors
   }
 
   function finishAction(error) {
     var label = busyLabel
     actionTimeout.stop()
+    windowTimeout.stop()
     busy = false
     busyLabel = ""
+    phase = ""
     pendingPlan = null
-    pendingExpressions = []
+    pendingQueue = []
+    afterQueue = null
     refresh()
     actionFinished(label, error, error ? "" : pendingMessage)
   }
@@ -203,6 +357,7 @@ Scope {
       var name = event.name
       // Checked against the list from before the move, so this runs first.
       if (name === "movewindowv2") root.restoreMoved(event.data)
+      if (name === "openwindow") root.windowOpened(event.data)
       if (name === "openwindow" || name === "closewindow" || name === "movewindowv2"
           || name === "changefloatingmode" || name === "fullscreen" || name === "windowtitlev2"
           || name === "moveworkspacev2" || name === "monitoraddedv2" || name === "monitorremovedv2")
@@ -229,8 +384,7 @@ Scope {
     stdout: StdioCollector { id: stepStdout; waitForEnd: true }
     stderr: StdioCollector { id: stepStderr; waitForEnd: true }
     onStarted: root.stepStarted = true
-    // Quickshell never emits `exited` for a command that cannot start.
-    onRunningChanged: if (!running && !root.stepStarted && root.busy) root.finishAction("Cannot run hyprctl")
+    onRunningChanged: if (!running && !root.stepStarted) root.stepFailedToStart()
     onExited: function(exitCode) { root.stepFinished(exitCode, stepStdout.text, stepStderr.text) }
   }
 
@@ -262,9 +416,18 @@ Scope {
     id: actionTimeout
     interval: 5000
     onTriggered: {
-      root.finishAction("Hyprland did not answer in time")
+      var what = root.phase === "add-save" ? "Saving tiles.json took too long" : stepProcess.command[0] + " did not answer in time"
+      root.finishAction(what)
       stepProcess.running = false
     }
+  }
+
+  // How long a launched browser has to open its app window.
+  Timer {
+    id: windowTimeout
+    interval: Model.WINDOW_TIMEOUT_MS
+    onTriggered: if (root.busy && root.phase === "add-wait")
+      root.finishAction("No browser app window appeared for " + root.addState.urls[root.addState.next])
   }
 
   // DesktopEntries scans the application directories asynchronously and
@@ -286,6 +449,13 @@ Scope {
     watchChanges: true
     printErrors: false
     onFileChanged: root.refresh()
+    onSaved: if (root.busy && root.phase === "add-save") {
+      actionTimeout.stop()
+      root.afterQueue()
+    }
+    onSaveFailed: function(error) {
+      if (root.busy && root.phase === "add-save") root.finishAction("Cannot write " + root.storePath + ": " + error)
+    }
     onLoaded: {
       root.records = Model.parseStore(text())
       rebuildTimer.restart()
