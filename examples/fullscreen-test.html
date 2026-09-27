@@ -1,0 +1,33 @@
+<!doctype html>
+<!-- Manual fullscreen containment check. Open as file:///.../fullscreen-test.html?video=/path/to/video.webm -->
+<html>
+<head>
+<meta charset="utf-8">
+<title>Mosaic fullscreen test</title>
+<style>
+  body { margin: 16px; background: #1e2030; color: #cad3f5; font: 18px sans-serif; }
+  video { width: 100%; max-height: 60vh; background: black; }
+  button { font: inherit; padding: 8px 12px; margin-right: 8px; }
+</style>
+</head>
+<body>
+<h1>Mosaic fullscreen test</h1>
+<video id="video" controls autoplay muted loop></video>
+<p>
+  <button id="fullscreen" autofocus>Request video fullscreen</button>
+  <button onclick="this.textContent = 'Still interactive'">Click to verify this tile</button>
+</p>
+<p id="state">Not fullscreen</p>
+<script>
+  const video = document.getElementById("video");
+  const source = new URLSearchParams(location.search).get("video");
+  if (source) video.src = source;
+  document.getElementById("fullscreen").onclick = () => video.requestFullscreen();
+  document.addEventListener("fullscreenchange", () => {
+    document.getElementById("state").textContent = document.fullscreenElement
+      ? `Fullscreen: page reports ${innerWidth}x${innerHeight}`
+      : "Not fullscreen";
+  });
+</script>
+</body>
+</html>
