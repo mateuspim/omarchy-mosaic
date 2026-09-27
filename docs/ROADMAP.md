@@ -14,20 +14,18 @@
 - Hiding web apps from the panel, and a Hidden web apps tab to bring them
   back.
 
-## 1. Parity: the plugin does everything the CLI did
+## 1. Parity: the plugin does everything the CLI did (done 2026-09-27)
 
-Follow `docs/HANDOFF.md` ("Suggested order" and "Parity checklist"): the
-read-only engine, web apps, simple actions, `add`, then IPC and the `mosaic`
-wrapper. The widget works before and after every step.
-
-Right after `add` is ported: **swap a tile's web app** from the panel, for
-example turning a YouTube tile into Kick in the same slot (requested by the
-user; see "Next feature: swap a tile" in `docs/HANDOFF.md`).
+The read-only engine, web apps, simple actions, `add`, the IPC, and the
+`mosaic` wrapper, each checked against the CLI (see `docs/HANDOFF.md`).
+Beyond the CLI: **swapping a tile's web app** in the same slot, from the
+panel or from a card over the tile opened by a changeable key.
 
 ## 2. Retire the CLI and publish
 
-- Remove `~/.local/bin/mosaic` and the Rust repository's hooks. Rename that
-  repository to `omarchy-mosaic-cli`, point its README here, and archive it.
+- ~~Remove `~/.local/bin/mosaic` and the Rust repository's hooks. Rename that
+  repository to `omarchy-mosaic-cli`, point its README here, and archive it.~~
+  Done 2026-09-27; `mosaic` is now this repository's `bin/mosaic`.
 - Rename this repository to `omarchy-mosaic` (the plugin id stays
   `pym.mosaic`), and update the development symlink.
 - Publish on GitHub with an `omarchy plugin add` install line, a

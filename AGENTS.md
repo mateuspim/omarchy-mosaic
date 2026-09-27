@@ -3,8 +3,9 @@
 `pym.mosaic` is Omarchy Mosaic: web apps such as Twitch, Kick, and YouTube
 tiled as a monitor-aware mosaic on Hyprland, where video fullscreen stays
 inside its tile. It is an Omarchy shell plugin, a service plus a bar widget,
-and it is taking over the whole project from the Rust CLI in
-`~/Projects/omarchy-mosaic`.
+and it took over the whole project from the Rust CLI, now retired in
+`~/Projects/omarchy-mosaic-cli`; `mosaic` on the PATH is this repository's
+`bin/mosaic` wrapper.
 
 **Start with `docs/HANDOFF.md`** for the plan, the parity checklist, and how
 to verify. Read `docs/PROJECT.md`, `docs/ARCHITECTURE.md`, and

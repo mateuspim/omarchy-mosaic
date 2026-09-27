@@ -16,7 +16,7 @@ plugin (`pym.mosaic`): a service that does the work and a bar widget panel
 that is its keyboard-first UI. It needs no separate binary.
 
 This repository replaces the earlier Rust CLI and its planned terminal UI
-(`~/Projects/omarchy-mosaic`). The bar panel is the UI for good.
+(`~/Projects/omarchy-mosaic-cli`). The bar panel is the UI for good.
 
 ## Intended users and platform
 
