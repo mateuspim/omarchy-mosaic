@@ -8,7 +8,8 @@ import "Model.js" as Model
 // enabled and destroys it on disable and on every plugin reload; the bar
 // widget reaches it with `bar.shell.serviceFor("pym.mosaic")`. For now it
 // is read-only: it keeps the v1 tile list current from Hyprland and
-// tiles.json, and actions still go through the mosaic CLI.
+// tiles.json and the v1 web app list current from the desktop entries, and
+// actions still go through the mosaic CLI.
 Scope {
   id: root
 
@@ -16,6 +17,9 @@ Scope {
   // changes.
   property var list: ({ version: Model.LIST_VERSION, sessions: [] })
   property var records: []
+  // `mosaic webapps --json`, version 1, rebuilt whenever the installed
+  // applications change.
+  property var webapps: ({ version: Model.WEBAPPS_VERSION, webapps: [] })
 
   readonly property string storePath: {
     var state = Quickshell.env("XDG_STATE_HOME") || ""
@@ -44,7 +48,21 @@ Scope {
     if (JSON.stringify(next) !== JSON.stringify(list)) list = next
   }
 
-  Component.onCompleted: refresh()
+  function rebuildWebapps() {
+    var values = DesktopEntries.applications.values
+    var entries = []
+    for (var i = 0; i < values.length; i++) {
+      var entry = values[i]
+      entries.push({ id: entry.id, name: entry.name, icon: entry.icon, noDisplay: entry.noDisplay, command: entry.command })
+    }
+    var next = Model.buildWebapps(entries)
+    if (JSON.stringify(next) !== JSON.stringify(webapps)) webapps = next
+  }
+
+  Component.onCompleted: {
+    refresh()
+    rebuildWebapps()
+  }
 
   // Coalesces the burst of events one window change produces.
   Timer {
@@ -85,6 +103,19 @@ Scope {
     }
     onObjectAdded: rebuildTimer.restart()
     onObjectRemoved: rebuildTimer.restart()
+  }
+
+  // DesktopEntries scans the application directories asynchronously and
+  // reports every entry it adds, so wait for the burst to settle.
+  Timer {
+    id: webappsTimer
+    interval: 250
+    onTriggered: root.rebuildWebapps()
+  }
+
+  Connections {
+    target: DesktopEntries.applications
+    function onValuesChanged() { webappsTimer.restart() }
   }
 
   FileView {

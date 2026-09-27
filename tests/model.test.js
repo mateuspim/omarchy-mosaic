@@ -5,7 +5,7 @@ import vm from "node:vm"
 const source = fs.readFileSync(new URL("../Model.js", import.meta.url), "utf8")
   .replace(/^\.pragma library\s*/m, "")
 const model = {}
-vm.runInNewContext(source + "\nObject.assign(model, { hiddenEntries, showWebapp, nameList, visibleWebapps, hideWebapp, sessionOf, clientFromIpc, parseStore, tileState, buildList, shapeList, parseWebapps, findWebapp, resolveTarget, parseList, tileLabel, tileMeta, normalizeUrl, sessionName, summary, anyUncontained, errorLine });", { model })
+vm.runInNewContext(source + "\nObject.assign(model, { hiddenEntries, showWebapp, nameList, visibleWebapps, hideWebapp, sessionOf, clientFromIpc, parseStore, tileState, buildList, shapeList, webappUrl, webappFromEntry, buildWebapps, shapeWebapps, findWebapp, resolveTarget, parseList, tileLabel, tileMeta, normalizeUrl, sessionName, summary, anyUncontained, errorLine });", { model })
 
 // Values built inside the VM belong to another realm, so compare copies.
 const plain = value => JSON.parse(JSON.stringify(value))
@@ -47,11 +47,11 @@ assert.equal(model.errorLine("mosaic: Monitor \"X\" is not active\n", "failed"),
 assert.equal(model.errorLine("mosaic: bad\nRun `mosaic --help` for usage.\n", "failed"), "bad")
 assert.equal(model.errorLine("", "failed"), "failed")
 
-const webapps = model.parseWebapps(JSON.stringify({ version: 1, webapps: [
+const webapps = model.shapeWebapps({ version: 1, webapps: [
   { id: "Twitch", name: "Twitch", url: "https://twitch.tv", icon: "twitch" },
   { id: "chat", name: "Team Chat", url: "https://chat.example", icon: "/icons/chat.png" },
   { id: "broken", name: "No URL" }
-] }))
+] })
 assert.equal(webapps.error, "")
 assert.deepEqual(plain(webapps.apps.map(app => app.name)), ["Twitch", "Team Chat"])
 assert.equal(model.findWebapp(webapps.apps, " twitch ").url, "https://twitch.tv")
@@ -76,8 +76,41 @@ assert.equal(model.showWebapp("Twitch", hiddenRows[2]), "")
 assert.equal(model.hiddenEntries(webapps.apps, "").length, 0)
 // A hidden web app can still be added by typing its name.
 assert.equal(model.resolveTarget("twitch", webapps.apps), "https://twitch.tv")
-assert.equal(model.parseWebapps("error").apps.length, 0)
-assert.equal(model.parseWebapps('{"version":9,"webapps":[]}').error.includes("not supported"), true)
+assert.equal(model.shapeWebapps(null).apps.length, 0)
+assert.equal(model.shapeWebapps({ version: 9, webapps: [] }).error.includes("not supported"), true)
+
+// Ported from webapps::tests. DesktopEntries has already split Exec into
+// argv, removing quotes and escapes, and dropped Hidden and NoDisplay entries.
+const entry = (id, name, command, extra = {}) => ({ id, name, icon: "", noDisplay: false, command, ...extra })
+assert.deepEqual(plain(model.webappFromEntry(entry("Twitch", "Twitch", ["omarchy-launch-webapp", "https://twitch.tv", "--disable-gpu"], { icon: "twitch" }))),
+  { icon: "twitch", id: "Twitch", name: "Twitch", url: "https://twitch.tv" })
+assert.equal(model.webappUrl(["/usr/bin/omarchy-launch-webapp", "https://x.com/"]), "https://x.com/")
+assert.equal(model.webappUrl(["brave", "--profile-directory=Default", "--app=https://chat.example"]), "https://chat.example")
+assert.equal(model.webappUrl(["brave"]), "")
+assert.equal(model.webappUrl(["omarchy-launch-webapp", "file:///etc/passwd"]), "")
+assert.equal(model.webappUrl(["brave", "--app=javascript:alert(1)"]), "")
+assert.equal(model.webappUrl(["omarchy-launch-webapp"]), "")
+assert.equal(model.webappUrl(undefined), "")
+assert.equal(model.webappFromEntry(entry("brave", "Brave", ["brave"])), null)
+assert.equal(model.webappFromEntry(entry("quiet", "Quiet", ["omarchy-launch-webapp", "https://a"], { noDisplay: true })), null)
+assert.equal(model.webappFromEntry(entry("", "No id", ["omarchy-launch-webapp", "https://a"])), null)
+assert.equal(model.webappFromEntry(null), null)
+
+const installed = plain(model.buildWebapps([
+  entry("YouTube", "YouTube", ["omarchy-launch-webapp", "https://youtube.com/"], { icon: "youtube" }),
+  entry("brave-browser", "Brave", ["brave", "%U"]),
+  entry("Kick", "Kick", ["omarchy-launch-webapp", "https://kick.com"], { icon: "kick" }),
+  entry("chat", "team chat", ["brave", "--app=https://chat.example"])
+]))
+assert.deepEqual(installed, { version: 1, webapps: [
+  { icon: "kick", id: "Kick", name: "Kick", url: "https://kick.com" },
+  { icon: "", id: "chat", name: "team chat", url: "https://chat.example" },
+  { icon: "youtube", id: "YouTube", name: "YouTube", url: "https://youtube.com/" }
+] })
+assert.deepEqual(plain(model.buildWebapps([])), { version: 1, webapps: [] })
+// What the service builds is what the panel reads.
+assert.deepEqual(plain(model.shapeWebapps(model.buildWebapps([entry("Kick", "Kick", ["omarchy-launch-webapp", "https://kick.com"])])).apps),
+  [{ id: "Kick", name: "Kick", url: "https://kick.com", icon: "" }])
 
 // Ported from session::tests::groups_tiles_by_session_in_added_order.
 const client = (address, tags, extra = {}) => ({ address, title: "", workspace: 1, monitor: 0, tags, floating: false, fullscreen: 0, fullscreenClient: 2, ...extra })

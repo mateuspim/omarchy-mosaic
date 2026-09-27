@@ -6,6 +6,7 @@
 // The `mosaic list --json` format versions this widget understands.
 var SUPPORTED_VERSIONS = [1]
 var LIST_VERSION = 1
+var WEBAPPS_VERSION = 1
 var DEFAULT_SESSION = "default"
 // Hyprland tag on every tile; `mosaic-<session>` names its session.
 var TAG = "mosaic"
@@ -173,20 +174,59 @@ function shapeList(parsed) {
   return { sessions: sessions, tiles: tiles, error: "" }
 }
 
-// Parses `mosaic webapps --json` into { apps, error }. Older mosaic builds
-// without the command make this fail, which only hides the web app buttons.
-function parseWebapps(text) {
-  var parsed
-  try {
-    parsed = JSON.parse(String(text || ""))
-  } catch (error) {
-    return { apps: [], error: "Unexpected output from mosaic webapps" }
+// The URL a desktop entry's parsed Exec argv opens as a web app, or "" when
+// it is not one: the first http(s) word after `omarchy-launch-webapp`, else
+// a browser's first `--app=` value. Mirrors `webapps::web_url`.
+function webappUrl(command) {
+  var words = stringList(command)
+  var isWeb = function(url) { return url.indexOf("https://") === 0 || url.indexOf("http://") === 0 }
+  for (var i = 0; i < words.length; i++) {
+    if (words[i].split("/").pop() !== "omarchy-launch-webapp") continue
+    for (var j = i + 1; j < words.length; j++) {
+      if (isWeb(words[j])) return words[j]
+    }
+    return ""
   }
+  for (var k = 0; k < words.length; k++) {
+    if (words[k].indexOf("--app=") === 0) return isWeb(words[k].slice(6)) ? words[k].slice(6) : ""
+  }
+  return ""
+}
+
+// A web app from a desktop entry ({ id, name, icon, noDisplay, command }, as
+// Quickshell's DesktopEntries gives them), or null when it is not one.
+function webappFromEntry(entry) {
+  if (!entry || entry.noDisplay) return null
+  var id = String(entry.id || "")
+  var name = String(entry.name || "")
+  var url = webappUrl(entry.command)
+  if (id === "" || name === "" || url === "") return null
+  return { icon: String(entry.icon || ""), id: id, name: name, url: url }
+}
+
+// The v1 `mosaic webapps --json` object from desktop entries, sorted by name
+// without case. DesktopEntries already lets a user entry hide a system entry
+// with the same id and drops Hidden and NoDisplay entries.
+function buildWebapps(entries) {
+  var apps = []
+  var source = entries || []
+  for (var i = 0; i < source.length; i++) {
+    var app = webappFromEntry(source[i])
+    if (app) apps.push(app)
+  }
+  apps.sort(function(a, b) {
+    return compareText(a.name.toLowerCase(), b.name.toLowerCase()) || compareText(a.id, b.id)
+  })
+  return { version: WEBAPPS_VERSION, webapps: apps }
+}
+
+// Shapes a v1 web app object into { apps, error }.
+function shapeWebapps(parsed) {
   if (!parsed || SUPPORTED_VERSIONS.indexOf(parsed.version) === -1) {
     return { apps: [], error: "This mosaic version is not supported; update mosaic and the widget together" }
   }
   var apps = []
-  var source = parsed.webapps instanceof Array ? parsed.webapps : []
+  var source = Array.isArray(parsed.webapps) ? parsed.webapps : []
   for (var i = 0; i < source.length; i++) {
     if (!source[i].url || !source[i].name) continue
     apps.push({

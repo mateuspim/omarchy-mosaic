@@ -7,10 +7,10 @@ import qs.Commons
 import qs.Ui
 import "Model.js" as Model
 
-// Bar widget for omarchy-mosaic. The tile list comes from the plugin's
-// service (MosaicService.qml), and every change still goes through the
-// mosaic CLI until the engine can do it, so this widget holds no session
-// state of its own.
+// Bar widget for omarchy-mosaic. The tile list and the web apps come from
+// the plugin's service (MosaicService.qml), and every change still goes
+// through the mosaic CLI until the engine can do it, so this widget holds no
+// session state of its own.
 Panel {
   id: root
   moduleName: "pym.mosaic"
@@ -24,7 +24,7 @@ Panel {
   readonly property var sessions: listing.sessions
   readonly property var tiles: listing.tiles
   readonly property string listError: listing.error
-  property var webapps: []
+  readonly property var webapps: service ? Model.shapeWebapps(service.webapps).apps : []
   // The web apps that get a button; hidden ones can still be typed.
   readonly property var shownWebapps: Model.visibleWebapps(webapps, setting("hiddenWebapps", ""))
   readonly property var hiddenRows: Model.hiddenEntries(webapps, setting("hiddenWebapps", ""))
@@ -65,7 +65,7 @@ Panel {
       cursor = 0
       cursorActive = false
       refresh()
-      refreshWebapps()
+      refreshVersion()
     }
   }
 
@@ -79,11 +79,8 @@ Panel {
     if (service) service.refresh()
   }
 
-  // Web apps change rarely, so they are read when the panel opens.
-  function refreshWebapps() {
-    if (webappsProcess.running) return
-    webappsProcess.command = [command, "webapps", "--json"]
-    webappsProcess.running = true
+  function refreshVersion() {
+    if (versionProcess.running) return
     versionProcess.command = [command, "--version"]
     versionProcess.running = true
   }
@@ -209,15 +206,6 @@ Panel {
   }
 
   Process {
-    id: webappsProcess
-    running: false
-    stdout: StdioCollector { id: webappsStdout; waitForEnd: true }
-    onExited: function(exitCode) {
-      root.webapps = exitCode === 0 ? Model.parseWebapps(webappsStdout.text).apps : []
-    }
-  }
-
-  Process {
     id: versionProcess
     running: false
     stdout: StdioCollector { id: versionStdout; waitForEnd: true }
@@ -288,7 +276,7 @@ Panel {
         if (t === "a" || t === "A") root.startAdding()
         else if (t === "d" && root.cursorActive) root.removeTile(root.selectedTile)
         else if (t === "D" && root.cursorActive && root.selectedTile) root.closeSession(root.selectedTile.session)
-        else if (t === "r" || t === "R") { root.refresh(); root.refreshWebapps() }
+        else if (t === "r" || t === "R") root.refresh()
         else if (root.view !== "tiles") return
         else if (t === "c" || t === "C") root.run(["contain"], "Containing fullscreen")
         else if (t >= "1" && t <= "9") root.addWebapp(root.shownWebapps[Number(t) - 1])

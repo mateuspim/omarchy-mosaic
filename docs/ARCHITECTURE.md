@@ -92,6 +92,16 @@ bring back web apps the user removed. `add` accepts a web app's name or id
 (case-insensitive) in place of a URL, and resolves every target before
 opening any tile.
 
+The service builds this list from Quickshell's `DesktopEntries`, which
+already applies the rules above: it reads `$XDG_DATA_HOME` and
+`$XDG_DATA_DIRS` (not the Omarchy templates), lets a user entry hide a
+system entry with the same id, including a `Hidden` one, and leaves out
+`NoDisplay` entries. Ids are desktop file ids, so they match the Rust CLI's
+file names. One difference: entries in subdirectories of `applications`
+also count, with the id `dir-name` that the specification gives them.
+`DesktopEntries` scans asynchronously and reports each entry it adds, so the
+service rebuilds the list after `valuesChanged` settles.
+
 ## Browser selection
 
 The default browser is resolved the way Omarchy's `omarchy-launch-webapp`

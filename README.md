@@ -44,11 +44,11 @@ Click the icon, or middle-click it to refresh.
 | 1–9 | Add that web app to the session |
 | A | Type a URL or web app name to add (Enter adds, Esc returns to the list) |
 | C | Turn fullscreen containment back on |
-| R | Refresh tiles and web apps |
+| R | Refresh the tiles |
 | Esc | Close the panel |
 
-The web app buttons come from `mosaic webapps --json`, read each time the
-panel opens. Right-click a button to hide that web app, or list names in the
+The web app buttons are the installed web apps, and they update as web apps
+are installed or removed. Right-click a button to hide that web app, or list names in the
 widget's **Hidden web apps** setting (for example `Tailscale, WhatsApp`).
 The panel's **Hidden web apps** tab lists them; select one there to bring its
 button back. Typing a web app's name in the
@@ -59,11 +59,9 @@ tiles, and otherwise go to the focused monitor.
 
 ## Compatibility
 
-The service builds the version 1 `mosaic list --json` format, and the widget
-accepts `mosaic webapps --json` version 1 and shows an "update" notice for any
-other version. It uses the `add`, `remove`, `focus`, `close`, and `contain`
-subcommands. Without `mosaic webapps` (older builds), the web
-app buttons are hidden and everything else works.
+The service builds the version 1 `mosaic list --json` and `mosaic webapps
+--json` formats itself. Until the engine can change tiles, the widget runs the
+mosaic CLI's `add`, `remove`, `focus`, `close`, and `contain` subcommands.
 
 ## Development
 

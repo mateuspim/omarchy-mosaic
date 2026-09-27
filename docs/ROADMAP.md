@@ -8,12 +8,20 @@
   `close`, `contain`, `webapps`, `monitors`.
 - This bar widget: lists sessions, adds web apps or URLs, focuses and removes
   tiles, closes sessions, and re-contains, all through the CLI.
+- The plugin's own read-only engine (`MosaicService.qml`) for the tile list
+  and the web apps.
+- Hiding web apps from the panel, and a Hidden web apps tab to bring them
+  back.
 
 ## 1. Parity: the plugin does everything the CLI did
 
 Follow `docs/HANDOFF.md` ("Suggested order" and "Parity checklist"): the
 read-only engine, web apps, simple actions, `add`, then IPC and the `mosaic`
 wrapper. The widget works before and after every step.
+
+Right after `add` is ported: **swap a tile's web app** from the panel, for
+example turning a YouTube tile into Kick in the same slot (requested by the
+user; see "Next feature: swap a tile" in `docs/HANDOFF.md`).
 
 ## 2. Retire the CLI and publish
 
