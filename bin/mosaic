@@ -1,0 +1,149 @@
+#!/bin/bash
+# The `mosaic` command, kept for scripts and habits from the Rust CLI. It
+# parses the same arguments and forwards them to the pym.mosaic plugin in the
+# running Omarchy shell (`omarchy-shell pym.mosaic …`). Actions run in the
+# shell, so this waits for them and prints the result, like the CLI did.
+
+set -uo pipefail
+
+usage() {
+  cat >&2 <<'EOF'
+Usage: mosaic [add] [--session NAME] [--monitor NAME] [--browser CMD] URL|WEBAPP ...
+       mosaic list [--json]
+       mosaic remove TILE [TILE ...]
+       mosaic focus TILE
+       mosaic close [--session NAME]
+       mosaic contain [--session NAME]
+       mosaic webapps [--json]
+       mosaic monitors
+       mosaic --version
+
+  add       Open URLs as tiled browser app windows, with video fullscreen kept
+            inside each tile. New tiles join the session's workspace, or the
+            monitor's current workspace. The session defaults to "default".
+            A web app's name, such as Twitch, stands for its URL.
+  list      Show sessions and their tiles
+  remove    Close tiles by their number in `mosaic list` or window address
+  focus     Focus a tile, switching to its workspace
+  close     Close a session, or every mosaic tile
+  contain   Turn tile-contained fullscreen back on for tiled windows
+  webapps   List installed web apps, such as Omarchy's, and their URLs
+  monitors  List active monitors
+
+The browser defaults to the desktop's default browser, which must be
+Chromium-based. Mosaic runs in the Omarchy shell as the pym.mosaic plugin.
+EOF
+}
+
+fail() {
+  echo "mosaic: $1" >&2
+  [[ ${2:-} == usage ]] && echo "Run \`mosaic --help\` for usage." >&2
+  exit 1
+}
+
+# Calls a pym.mosaic IPC function and prints its answer. omarchy-shell exits
+# non-zero, with its own message, when the shell can't be reached.
+call() {
+  local output
+  if ! output=$(omarchy-shell pym.mosaic "$@" 2>&1); then
+    output=${output%.}
+    fail "Cannot reach the Omarchy shell (${output:-no answer}). Is the pym.mosaic plugin enabled?"
+  fi
+  printf '%s' "$output"
+}
+
+# Runs an action and waits for it to finish, as the CLI did.
+run() {
+  local answer job state
+  answer=$(call "$@") || exit 1
+  case $answer in
+    "started "*) job=${answer#started } ;;
+    "error: "*) fail "${answer#error: }" ;;
+    *) fail "Unexpected answer from the shell: $answer" ;;
+  esac
+  # add waits up to 15 s per window; allow for nine of them.
+  for ((i = 0; i < 1500; i++)); do
+    state=$(call result "$job") || exit 1
+    case ${state%%$'\n'*} in
+      running) sleep 0.1 ;;
+      done)
+        [[ $state == *$'\n'* && -n ${state#*$'\n'} ]] && echo "${state#*$'\n'}"
+        return 0
+        ;;
+      error) fail "${state#*$'\n'}" ;;
+      *) fail "Lost track of the action (job $job)" ;;
+    esac
+  done
+  fail "Timed out waiting for the shell"
+}
+
+command=add
+case ${1:-} in
+  add | list | remove | focus | close | contain | webapps | monitors)
+    command=$1
+    shift
+    ;;
+esac
+
+session="" monitor="" browser="" json=false given=()
+targets=()
+while (($#)); do
+  arg=$1
+  shift
+  case $arg in
+    -h | --help) usage; exit 0 ;;
+    -V | --version) call version; echo; exit 0 ;;
+    --session | --monitor | --browser)
+      (($#)) || fail "$arg needs a value"
+      value=$1
+      shift
+      given+=("${arg#--}")
+      case $arg in
+        --session) session=$value ;;
+        --monitor) monitor=$value ;;
+        --browser) browser=$value ;;
+      esac
+      ;;
+    --json) json=true; given+=(json) ;;
+    -*) fail "Unknown option: $arg" usage ;;
+    *) targets+=("$arg") ;;
+  esac
+done
+
+case $command in
+  add) allowed=" session monitor browser " ;;
+  list | webapps) allowed=" json " ;;
+  close | contain) allowed=" session " ;;
+  *) allowed=" " ;;
+esac
+for name in "${given[@]}"; do
+  [[ $allowed == *" $name "* ]] || fail "--$name does not apply to this command"
+done
+if [[ -n $session && ! $session =~ ^[a-z0-9_-]{1,32}$ ]]; then
+  fail "Invalid session name \"$session\": use up to 32 lowercase letters, digits, - or _"
+fi
+
+count=${#targets[@]}
+case $command in
+  add) ((count >= 1 && count <= 9)) || fail "Pass 1 to 9 URLs or web apps" usage ;;
+  remove) ((count >= 1)) || fail "Pass the tiles to remove" usage ;;
+  focus) ((count == 1)) || fail "Pass one tile to focus" usage ;;
+  *) ((count == 0)) || fail "Unexpected argument: ${targets[0]}" usage ;;
+esac
+
+# Targets travel as one argument, one per line; none can contain a newline.
+for target in "${targets[@]}"; do
+  [[ $target != *$'\n'* ]] || fail "Targets can't contain line breaks"
+done
+lines=$(printf '%s\n' "${targets[@]}")
+
+case $command in
+  add) run add "$lines" "$session" "$monitor" "$browser" ;;
+  remove) run remove "$lines" ;;
+  focus) run focus "${targets[0]}" ;;
+  close) run close "$session" ;;
+  contain) run contain "$session" ;;
+  list) if $json; then call list; else call listText; fi; echo ;;
+  webapps) if $json; then call webapps; else call webappsText; fi; echo ;;
+  monitors) call monitors; echo ;;
+esac

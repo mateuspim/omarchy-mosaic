@@ -62,6 +62,14 @@ Scope {
   // Fullscreen state dispatches waiting to run after tiles moved.
   property var restoreQueue: []
 
+  // Actions are numbered so IPC callers can ask how one ended: `job` is the
+  // running or last action's number, and `results` maps recent numbers to
+  // { error, message }.
+  property int job: 0
+  property var results: ({})
+  // Enabled monitors (Model.parseMonitors), refreshed with the list.
+  property var monitors: []
+
   // Emitted when an action ends. `error` is "" on success, and `message`
   // then says what was done, like the CLI's output.
   signal actionFinished(string label, string error, string message)
@@ -190,6 +198,7 @@ Scope {
   }
 
   function begin(label) {
+    job++
     busy = true
     busyLabel = label
     pendingQueue = []
@@ -376,6 +385,11 @@ Scope {
     pendingQueue = []
     afterQueue = null
     refresh()
+    var kept = {}
+    for (var n = job - 19; n < job; n++) if (results[n]) kept[n] = results[n]
+    kept[job] = { error: error, message: error ? "" : pendingMessage }
+    results = kept
+    settleTimer.restart()
     actionFinished(label, error, error ? "" : pendingMessage)
   }
 
@@ -488,10 +502,59 @@ Scope {
     rebuildWebapps()
   }
 
-  // `omarchy-shell pym.mosaic <function>`. Each returns what it did, or why
-  // it could not.
+  // Starts an IPC action: "started N", where N is the job number that
+  // `result` reports on, or why it did not start.
+  function started(error) {
+    return error ? "error: " + error : "started " + job
+  }
+
+  // `omarchy-shell pym.mosaic <function> [args]`, and the `bin/mosaic`
+  // wrapper, which mirrors the CLI on top of it. Every argument must be
+  // passed; "" means not given. Lists of targets are one per line. Actions
+  // run in the background, since IPC calls must answer at once.
   IpcHandler {
     target: "pym.mosaic"
+
+    // `mosaic list --json`, version 1.
+    function list(): string { return JSON.stringify(root.list) }
+    // `mosaic list`.
+    function listText(): string { return Model.listText(root.list) }
+    // `mosaic webapps --json`, version 1.
+    function webapps(): string { return JSON.stringify(root.webapps) }
+    // `mosaic webapps`.
+    function webappsText(): string { return Model.webappsText(root.webapps) }
+    // `mosaic monitors`.
+    function monitors(): string { return Model.monitorsText(root.monitors) }
+    // `mosaic --version`.
+    function version(): string { return root.versionText }
+
+    // `mosaic add [--session S] [--monitor M] [--browser B] TARGET...`.
+    function add(targets: string, session: string, monitor: string, browser: string): string {
+      return root.started(root.add(Model.splitLines(targets), { session: session, monitor: monitor, browser: browser || root.browser }))
+    }
+    // Opens TARGET in TILE's place (a list number or address).
+    function replace(tile: string, target: string, browser: string): string {
+      return root.started(root.replace(tile, target, { browser: browser || root.browser }))
+    }
+    // `mosaic remove TILE...`.
+    function remove(tiles: string): string { return root.started(root.remove(Model.splitLines(tiles))) }
+    // `mosaic focus TILE`.
+    function focus(tile: string): string { return root.started(root.focus(tile)) }
+    // `mosaic close [--session S]`.
+    function close(session: string): string { return root.started(root.close(session)) }
+    // `mosaic contain [--session S]`.
+    function contain(session: string): string { return root.started(root.contain(session)) }
+
+    // How action JOB went: "running", "done" or "error" on the first line,
+    // then the CLI's message or the error; "unknown" for an old number.
+    function result(job: int): string {
+      // An action counts as running until the list has caught up with it,
+      // so `mosaic add` followed by `mosaic list` shows the new tiles.
+      if (job === root.job && (root.busy || settleTimer.running)) return "running"
+      var outcome = root.results[job]
+      if (!outcome) return "unknown"
+      return outcome.error ? "error\n" + outcome.error : "done\n" + outcome.message
+    }
 
     // Opens the swap card over the focused tile, so the swap key changes
     // the tile you are looking at.
@@ -517,6 +580,7 @@ Scope {
       Hyprland.refreshToplevels()
       Hyprland.refreshMonitors()
       store.reload()
+      if (!monitorsQuery.running) monitorsQuery.running = true
     }
   }
 
@@ -655,6 +719,13 @@ Scope {
     }
   }
 
+  // The list refreshes 150 ms after an action ends and rebuilds when
+  // Hyprland's answer lands; this covers both.
+  Timer {
+    id: settleTimer
+    interval: 500
+  }
+
   // How long a launched browser has to open its app window.
   Timer {
     id: windowTimeout
@@ -674,6 +745,28 @@ Scope {
   Connections {
     target: DesktopEntries.applications
     function onValuesChanged() { webappsTimer.restart() }
+  }
+
+  Process {
+    id: monitorsQuery
+    command: ["hyprctl", "-j", "monitors"]
+    stdout: StdioCollector { id: monitorsOut; waitForEnd: true }
+    onExited: function(exitCode) {
+      var parsed = exitCode === 0 ? Model.parseMonitors(monitorsOut.text) : null
+      if (parsed) root.monitors = parsed
+    }
+  }
+
+  // "mosaic 0.1.0", from the manifest.
+  readonly property string versionText: {
+    var manifest = Model.parseManifest(manifestFile.text())
+    return manifest ? "mosaic " + manifest.version : "mosaic"
+  }
+
+  FileView {
+    id: manifestFile
+    path: Qt.resolvedUrl("manifest.json").toString().replace(/^file:\/\//, "")
+    printErrors: false
   }
 
   FileView {

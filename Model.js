@@ -833,3 +833,50 @@ function tileRect(clientsText, monitorsText, address) {
   }
   return null
 }
+
+// `mosaic list` without --json, from a v1 list. Mirrors `list` in the CLI.
+function listText(list) {
+  var sessions = list && Array.isArray(list.sessions) ? list.sessions : []
+  if (sessions.length === 0) return "No mosaic tiles are open."
+  var lines = []
+  for (var i = 0; i < sessions.length; i++) {
+    lines.push(sessions[i].name)
+    for (var j = 0; j < sessions[i].tiles.length; j++) {
+      var tile = sessions[i].tiles[j]
+      var index = String(tile.index)
+      while (index.length < 2) index = " " + index
+      var state = tile.state === "contained" ? "" : "  (" + tile.state + ")"
+      lines.push("  " + index + "  " + tile.monitor + ":" + tile.workspace + "  " + (tile.url || tile.title) + state)
+    }
+  }
+  return lines.join("\n")
+}
+
+// `mosaic webapps` without --json, from a v1 web app list.
+function webappsText(webapps) {
+  var apps = webapps && Array.isArray(webapps.webapps) ? webapps.webapps : []
+  if (apps.length === 0) return "No web apps are installed."
+  var width = 0
+  for (var i = 0; i < apps.length; i++) width = Math.max(width, apps[i].name.length)
+  return apps.map(function(app) {
+    var name = app.name
+    while (name.length < width) name += " "
+    return name + "  " + app.url
+  }).join("\n")
+}
+
+// `mosaic monitors`, from parseMonitors output.
+function monitorsText(monitors) {
+  return monitors.map(function(monitor) {
+    var area = monitor.workArea
+    return (monitor.focused ? "*" : " ") + " " + monitor.name + ": " + monitor.size[0] + "x" + monitor.size[1]
+      + " logical, work area " + area.width + "x" + area.height + " at " + area.x + "," + area.y
+  }).join("\n")
+}
+
+// Targets passed over IPC as one string, one per line; lines are trimmed and
+// empty ones dropped. A line can hold a web app name with spaces.
+function splitLines(text) {
+  return String(text || "").split("\n").map(function(line) { return line.trim() })
+    .filter(function(line) { return line !== "" })
+}

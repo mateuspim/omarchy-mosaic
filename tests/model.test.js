@@ -5,7 +5,7 @@ import vm from "node:vm"
 const source = fs.readFileSync(new URL("../Model.js", import.meta.url), "utf8")
   .replace(/^\.pragma library\s*/m, "")
 const model = {}
-vm.runInNewContext(source + "\nObject.assign(model, { hiddenEntries, showWebapp, nameList, visibleWebapps, hideWebapp, sessionOf, clientFromIpc, parseStore, tileState, buildList, shapeList, parseClients, validAddress, dispatchExpression, listTiles, findTile, planFocus, planRemove, planClose, planContain, restoreAfterMove, monitorFromIpc, parseMonitors, resolveAddTargets, chooseWorkspace, desktopId, isChromiumFamily, isAppWindow, parseOpenWindow, tileDispatches, pruneRecords, serializeStore, planReplace, replaceRecord, parseCursorPos, cursorMoveExpression, parseKeySpec, bindConflict, tileRect, swapBindLua, unbindLua, webappUrl, webappFromEntry, buildWebapps, shapeWebapps, findWebapp, resolveTarget, parseList, tileLabel, tileMeta, normalizeUrl, sessionName, summary, anyUncontained, parseManifest });", { model })
+vm.runInNewContext(source + "\nObject.assign(model, { hiddenEntries, showWebapp, nameList, visibleWebapps, hideWebapp, sessionOf, clientFromIpc, parseStore, tileState, buildList, shapeList, parseClients, validAddress, dispatchExpression, listTiles, findTile, planFocus, planRemove, planClose, planContain, restoreAfterMove, monitorFromIpc, parseMonitors, resolveAddTargets, chooseWorkspace, desktopId, isChromiumFamily, isAppWindow, parseOpenWindow, tileDispatches, pruneRecords, serializeStore, planReplace, replaceRecord, parseCursorPos, cursorMoveExpression, parseKeySpec, bindConflict, tileRect, listText, webappsText, monitorsText, splitLines, swapBindLua, unbindLua, webappUrl, webappFromEntry, buildWebapps, shapeWebapps, findWebapp, resolveTarget, parseList, tileLabel, tileMeta, normalizeUrl, sessionName, summary, anyUncontained, parseManifest });", { model })
 
 // Values built inside the VM belong to another realm, so compare copies.
 const plain = value => JSON.parse(JSON.stringify(value))
@@ -359,5 +359,24 @@ assert.deepEqual(plain(model.tileRect(clientsJson, monitorsJson, "0x1")), { moni
 assert.deepEqual(plain(model.tileRect(clientsJson, monitorsJson, "0x2")), { monitor: "DP-4", x: 12, y: 1173, width: 1056, height: 735 })
 assert.equal(model.tileRect(clientsJson, monitorsJson, "0x9"), null)
 assert.equal(model.tileRect("nope", monitorsJson, "0x1"), null)
+
+// Written the way the Rust CLI prints them.
+assert.equal(model.listText(live), [
+  "news",
+  "   1  DP-4:10  https://www.bbc.com/news",
+  "streams",
+  "   2  DP-5:1  https://www.twitch.tv/somechannel/",
+  "   3  DP-5:1  Kick  (uncontained)"
+].join("\n"))
+assert.equal(model.listText({ version: 1, sessions: [] }), "No mosaic tiles are open.")
+assert.equal(model.webappsText({ version: 1, webapps: [{ name: "Kick", url: "https://kick.com" }, { name: "YouTube", url: "https://youtube.com/" }] }),
+  "Kick     https://kick.com\nYouTube  https://youtube.com/")
+assert.equal(model.webappsText({ version: 1, webapps: [] }), "No web apps are installed.")
+assert.equal(model.monitorsText(screens), [
+  "  DP-4: 1920x1080 logical, work area 1920x1080 at 0,0",
+  "* DP-5: 2048x1152 logical, work area 2048x1126 at 1920,26"
+].join("\n"))
+assert.deepEqual(plain(model.splitLines(" twitch \n\nTeam Chat\n")), ["twitch", "Team Chat"])
+assert.deepEqual(plain(model.splitLines("")), [])
 
 console.log("model tests passed")
