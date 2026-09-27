@@ -5,7 +5,7 @@ import vm from "node:vm"
 const source = fs.readFileSync(new URL("../Model.js", import.meta.url), "utf8")
   .replace(/^\.pragma library\s*/m, "")
 const model = {}
-vm.runInNewContext(source + "\nObject.assign(model, { parseList, tileLabel, tileMeta, normalizeUrl, sessionName, summary, anyUncontained, errorLine });", { model })
+vm.runInNewContext(source + "\nObject.assign(model, { parseWebapps, findWebapp, resolveTarget, parseList, tileLabel, tileMeta, normalizeUrl, sessionName, summary, anyUncontained, errorLine });", { model })
 
 // Values built inside the VM belong to another realm, so compare copies.
 const plain = value => JSON.parse(JSON.stringify(value))
@@ -46,5 +46,20 @@ assert.equal(model.sessionName("a\"b"), "")
 assert.equal(model.errorLine("mosaic: Monitor \"X\" is not active\n", "failed"), "Monitor \"X\" is not active")
 assert.equal(model.errorLine("mosaic: bad\nRun `mosaic --help` for usage.\n", "failed"), "bad")
 assert.equal(model.errorLine("", "failed"), "failed")
+
+const webapps = model.parseWebapps(JSON.stringify({ version: 1, webapps: [
+  { id: "Twitch", name: "Twitch", url: "https://twitch.tv", icon: "twitch" },
+  { id: "chat", name: "Team Chat", url: "https://chat.example", icon: "/icons/chat.png" },
+  { id: "broken", name: "No URL" }
+] }))
+assert.equal(webapps.error, "")
+assert.deepEqual(plain(webapps.apps.map(app => app.name)), ["Twitch", "Team Chat"])
+assert.equal(model.findWebapp(webapps.apps, " twitch ").url, "https://twitch.tv")
+assert.equal(model.findWebapp(webapps.apps, "CHAT").name, "Team Chat")
+assert.equal(model.findWebapp(webapps.apps, "kick"), null)
+assert.equal(model.resolveTarget("team chat", webapps.apps), "https://chat.example")
+assert.equal(model.resolveTarget("kick.com", webapps.apps), "https://kick.com")
+assert.equal(model.parseWebapps("error").apps.length, 0)
+assert.equal(model.parseWebapps('{"version":9,"webapps":[]}').error.includes("not supported"), true)
 
 console.log("model tests passed")

@@ -1,8 +1,9 @@
 # Mosaic for Omarchy
 
 An Omarchy shell bar widget for [omarchy-mosaic](https://github.com/mateuspim/omarchy-mosaic).
-It lists your mosaic sessions and their tiles, and lets you add a URL as a
-tile, focus or remove a tile, close a session, and turn fullscreen
+It lists your mosaic sessions and their tiles, and lets you add one of your
+installed web apps (such as the ones Omarchy's web app installer creates) or
+any URL as a tile, focus or remove a tile, close a session, and turn fullscreen
 containment back on. The icon dims when no tiles are open.
 
 The widget holds no state of its own. It reads `mosaic list --json` and makes
@@ -37,20 +38,24 @@ Click the icon, or middle-click it to refresh.
 | Enter | Focus the selected tile |
 | X or D | Remove the selected tile |
 | Shift+D | Close the selected tile's session |
-| A | Type a URL to add (Enter adds, Esc returns to the list) |
+| 1–9 | Add that web app to the session |
+| A | Type a URL or web app name to add (Enter adds, Esc returns to the list) |
 | C | Turn fullscreen containment back on |
-| R | Refresh |
+| R | Refresh tiles and web apps |
 | Esc | Close the panel |
 
-A bare host such as `twitch.tv/name` gets `https://`. An empty session name
-means `default`. New tiles join the workspace where that session already has
+The web app buttons come from `mosaic webapps --json`, read each time the
+panel opens. Typing a web app's name in the address field also works. A bare
+host such as `twitch.tv/name` gets `https://`. Tiles go to the session in the
+session field, or else the selected tile's session, or else `default`. New tiles join the workspace where that session already has
 tiles, and otherwise go to the focused monitor.
 
 ## Compatibility
 
-The widget accepts `mosaic list --json` version 1 and shows an "update"
+The widget accepts `mosaic list --json` and `mosaic webapps --json` version 1 and shows an "update"
 notice for any other version. It uses the `add`, `remove`, `focus`, `close`,
-and `contain` subcommands.
+and `contain` subcommands. Without `mosaic webapps` (older builds), the web
+app buttons are hidden and everything else works.
 
 ## Development
 

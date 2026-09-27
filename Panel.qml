@@ -18,6 +18,7 @@ Panel {
 
   property var sessions: []
   property var tiles: []
+  property var webapps: []
   property string listError: ""
   property string status: ""
   property bool statusIsError: false
@@ -51,6 +52,7 @@ Panel {
       status = ""
       cursorActive = false
       refresh()
+      refreshWebapps()
     }
   }
 
@@ -62,6 +64,19 @@ Panel {
     listProcess.command = [command, "list", "--json"]
     listStarted = false
     listProcess.running = true
+  }
+
+  // Web apps change rarely, so they are read when the panel opens.
+  function refreshWebapps() {
+    if (webappsProcess.running) return
+    webappsProcess.command = [command, "webapps", "--json"]
+    webappsProcess.running = true
+  }
+
+  function iconSource(icon) {
+    if (!icon) return ""
+    if (icon.indexOf("/") === 0) return "file://" + icon
+    return Quickshell.iconPath(icon, true)
   }
 
   function applyList(text) {
@@ -96,20 +111,36 @@ Panel {
     statusIsError = isError
   }
 
-  function addTile() {
-    var url = Model.normalizeUrl(urlField.text)
-    var session = Model.sessionName(sessionField.text)
-    if (url === "") {
-      showStatus("Enter a web address, such as twitch.tv/name", true)
-      return
-    }
+  // The session typed in the field, else the selected tile's, else default.
+  function targetSessionText() {
+    if (sessionField.text.trim() !== "") return sessionField.text
+    return selectedTile ? selectedTile.session : ""
+  }
+
+  function addUrl(url, label) {
+    var session = Model.sessionName(targetSessionText())
     if (session === "") {
       showStatus("Session names use lowercase letters, digits, - and _", true)
+      return false
+    }
+    run(["add", "--session", session, url], "Adding " + label + " to " + session)
+    return true
+  }
+
+  function addTile() {
+    var url = Model.resolveTarget(urlField.text, webapps)
+    if (url === "") {
+      showStatus("Enter a web address or web app name, such as twitch.tv/name", true)
       return
     }
-    run(["add", "--session", session, url], "Adding " + url)
-    urlField.text = ""
-    keyCatcher.forceActiveFocus()
+    if (addUrl(url, urlField.text.trim())) {
+      urlField.text = ""
+      keyCatcher.forceActiveFocus()
+    }
+  }
+
+  function addWebapp(app) {
+    if (app) addUrl(app.url, app.name)
   }
 
   function startAdding() {
@@ -169,6 +200,15 @@ Panel {
   }
 
   Process {
+    id: webappsProcess
+    running: false
+    stdout: StdioCollector { id: webappsStdout; waitForEnd: true }
+    onExited: function(exitCode) {
+      root.webapps = exitCode === 0 ? Model.parseWebapps(webappsStdout.text).apps : []
+    }
+  }
+
+  Process {
     id: actionProcess
     running: false
     stdout: StdioCollector { id: actionStdout; waitForEnd: true }
@@ -223,7 +263,8 @@ Panel {
         else if (t === "d" && root.cursorActive) root.removeTile(root.selectedTile)
         else if (t === "D" && root.cursorActive && root.selectedTile) root.closeSession(root.selectedTile.session)
         else if (t === "c" || t === "C") root.run(["contain"], "Containing fullscreen")
-        else if (t === "r" || t === "R") root.refresh()
+        else if (t === "r" || t === "R") { root.refresh(); root.refreshWebapps() }
+        else if (t >= "1" && t <= "9") root.addWebapp(root.webapps[Number(t) - 1])
       }
 
       Flickable {
@@ -307,15 +348,30 @@ Panel {
             spacing: Style.space(6)
 
             PanelSectionHeader {
-              text: "ADD TILE  ·  A"
+              text: root.webapps.length > 0 ? "ADD TILE  ·  1–" + Math.min(9, root.webapps.length) + " WEB APP  ·  A ADDRESS" : "ADD TILE  ·  A"
               foreground: root.foreground
               fontFamily: root.fontFamily
+            }
+
+            Flow {
+              visible: root.webapps.length > 0
+              width: parent.width
+              spacing: Style.space(6)
+              Repeater {
+                model: root.webapps
+                WebappButton {
+                  required property var modelData
+                  required property int index
+                  app: modelData
+                  number: index + 1
+                }
+              }
             }
 
             TextField {
               id: urlField
               width: parent.width
-              placeholderText: "Web address, such as twitch.tv/name"
+              placeholderText: "Web address or web app name"
               foreground: root.foreground
               font.family: root.fontFamily
               onAccepted: root.addTile()
@@ -328,7 +384,7 @@ Panel {
               TextField {
                 id: sessionField
                 Layout.fillWidth: true
-                placeholderText: "Session (default)"
+                placeholderText: "Session (" + (root.selectedTile ? root.selectedTile.session : "default") + ")"
                 foreground: root.foreground
                 font.family: root.fontFamily
                 onAccepted: root.addTile()
@@ -389,6 +445,56 @@ Panel {
       font.family: root.fontFamily
       font.pixelSize: Style.font.caption
       wrapMode: Text.WordWrap
+    }
+  }
+
+  component WebappButton: CursorSurface {
+    id: webappButton
+    property var app: null
+    property int number: 0
+    bordered: true
+    hasCursor: webappMouse.containsMouse
+    foreground: root.foreground
+    implicitWidth: webappRow.implicitWidth + Style.space(16)
+    implicitHeight: webappRow.implicitHeight + Style.space(10)
+    Accessible.role: Accessible.Button
+    Accessible.name: app ? "Add " + app.name : ""
+
+    Row {
+      id: webappRow
+      anchors.centerIn: parent
+      spacing: Style.space(6)
+      Image {
+        id: webappIcon
+        width: Style.space(16)
+        height: Style.space(16)
+        anchors.verticalCenter: parent.verticalCenter
+        source: webappButton.app ? root.iconSource(webappButton.app.icon) : ""
+        sourceSize.width: 64
+        sourceSize.height: 64
+        fillMode: Image.PreserveAspectFit
+        visible: status === Image.Ready
+      }
+      Text {
+        anchors.verticalCenter: parent.verticalCenter
+        textFormat: Text.PlainText
+        text: (webappButton.number <= 9 ? webappButton.number + "  " : "") + (webappButton.app ? webappButton.app.name : "")
+        color: root.foreground
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.caption
+      }
+    }
+
+    MouseArea {
+      id: webappMouse
+      anchors.fill: parent
+      hoverEnabled: true
+      onClicked: root.addWebapp(webappButton.app)
+    }
+
+    PanelToolTip {
+      visible: webappMouse.containsMouse
+      text: webappButton.app ? webappButton.app.url : ""
     }
   }
 

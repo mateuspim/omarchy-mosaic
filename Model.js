@@ -47,6 +47,47 @@ function parseList(text) {
   return { sessions: sessions, tiles: tiles, error: "" }
 }
 
+// Parses `mosaic webapps --json` into { apps, error }. Older mosaic builds
+// without the command make this fail, which only hides the web app buttons.
+function parseWebapps(text) {
+  var parsed
+  try {
+    parsed = JSON.parse(String(text || ""))
+  } catch (error) {
+    return { apps: [], error: "Unexpected output from mosaic webapps" }
+  }
+  if (!parsed || SUPPORTED_VERSIONS.indexOf(parsed.version) === -1) {
+    return { apps: [], error: "This mosaic version is not supported; update mosaic and the widget together" }
+  }
+  var apps = []
+  var source = parsed.webapps instanceof Array ? parsed.webapps : []
+  for (var i = 0; i < source.length; i++) {
+    if (!source[i].url || !source[i].name) continue
+    apps.push({
+      id: String(source[i].id || source[i].name),
+      name: String(source[i].name),
+      url: String(source[i].url),
+      icon: String(source[i].icon || "")
+    })
+  }
+  return { apps: apps, error: "" }
+}
+
+function findWebapp(apps, text) {
+  var name = String(text || "").trim().toLowerCase()
+  if (name === "") return null
+  for (var i = 0; i < apps.length; i++) {
+    if (apps[i].name.toLowerCase() === name || apps[i].id.toLowerCase() === name) return apps[i]
+  }
+  return null
+}
+
+// What the URL field means: a web app's name, or a web address.
+function resolveTarget(text, apps) {
+  var app = findWebapp(apps, text)
+  return app ? app.url : normalizeUrl(text)
+}
+
 // Short label for a tile: host plus path for web URLs, else the page title.
 function tileLabel(tile) {
   var match = /^https?:\/\/(?:www\.)?([^\/?#]+)([^?#]*)/.exec(tile.url || "")
