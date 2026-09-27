@@ -1,0 +1,6 @@
+{"version":1,"sessions":[
+  {"name":"news","tiles":[{"index":1,"address":"0x1","url":"https://www.bbc.com/news","title":"BBC News","monitor":"DP-4","workspace":10,"state":"contained"}]},
+  {"name":"streams","tiles":[
+    {"index":2,"address":"0x2","url":"https://www.twitch.tv/somechannel/","title":"somechannel - Twitch","monitor":"DP-5","workspace":1,"state":"contained"},
+    {"index":3,"address":"0x3","url":null,"title":"Kick","monitor":"DP-5","workspace":1,"state":"uncontained"}]}
+]}

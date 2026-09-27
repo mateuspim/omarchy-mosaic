@@ -1,0 +1,7 @@
+{
+  "name": "omarchy-mosaic-plugin",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": { "test": "node tests/model.test.js" }
+}
