@@ -5,7 +5,7 @@ import vm from "node:vm"
 const source = fs.readFileSync(new URL("../Model.js", import.meta.url), "utf8")
   .replace(/^\.pragma library\s*/m, "")
 const model = {}
-vm.runInNewContext(source + "\nObject.assign(model, { hiddenEntries, showWebapp, nameList, visibleWebapps, hideWebapp, sessionOf, clientFromIpc, parseStore, tileState, buildList, shapeList, parseClients, validAddress, dispatchExpression, listTiles, findTile, planFocus, planRemove, planClose, planContain, restoreAfterMove, monitorFromIpc, parseMonitors, resolveAddTargets, chooseWorkspace, desktopId, isChromiumFamily, isAppWindow, parseOpenWindow, tileDispatches, pruneRecords, serializeStore, planReplace, replaceRecord, webappUrl, webappFromEntry, buildWebapps, shapeWebapps, findWebapp, resolveTarget, parseList, tileLabel, tileMeta, normalizeUrl, sessionName, summary, anyUncontained, parseManifest });", { model })
+vm.runInNewContext(source + "\nObject.assign(model, { hiddenEntries, showWebapp, nameList, visibleWebapps, hideWebapp, sessionOf, clientFromIpc, parseStore, tileState, buildList, shapeList, parseClients, validAddress, dispatchExpression, listTiles, findTile, planFocus, planRemove, planClose, planContain, restoreAfterMove, monitorFromIpc, parseMonitors, resolveAddTargets, chooseWorkspace, desktopId, isChromiumFamily, isAppWindow, parseOpenWindow, tileDispatches, pruneRecords, serializeStore, planReplace, replaceRecord, parseCursorPos, cursorMoveExpression, webappUrl, webappFromEntry, buildWebapps, shapeWebapps, findWebapp, resolveTarget, parseList, tileLabel, tileMeta, normalizeUrl, sessionName, summary, anyUncontained, parseManifest });", { model })
 
 // Values built inside the VM belong to another realm, so compare copies.
 const plain = value => JSON.parse(JSON.stringify(value))
@@ -323,5 +323,14 @@ assert.equal(model.tileDispatches("0x1b", "x", 1, { address: "0x1b", state: "con
 const rec = (address, url) => ({ address, session: "s", url })
 assert.deepEqual(plain(model.replaceRecord([rec("0x1", "a"), rec("0x2", "b"), rec("0x3", "c")], "0x2", rec("0x9", "z")).map(r => r.address)), ["0x1", "0x9", "0x3"])
 assert.deepEqual(plain(model.replaceRecord([rec("0x1", "a")], "0x7", rec("0x9", "z")).map(r => r.address)), ["0x1", "0x9"])
+
+assert.deepEqual(plain(model.parseCursorPos("2536, 791\n")), { x: 2536, y: 791 })
+assert.deepEqual(plain(model.parseCursorPos("-20, 5.6")), { x: -20, y: 6 })
+assert.equal(model.parseCursorPos("error"), null)
+assert.equal(model.parseCursorPos("1, 2) os.exit("), null)
+assert.equal(model.cursorMoveExpression({ x: 2536, y: 791 }), "hl.dsp.cursor.move({ x = 2536, y = 791 })")
+assert.equal(model.cursorMoveExpression(null), "")
+assert.equal(model.cursorMoveExpression({ x: "1) os.exit(", y: 2 }), "")
+assert.equal(model.cursorMoveExpression({ x: 1.5, y: 2 }), "")
 
 console.log("model tests passed")

@@ -725,3 +725,19 @@ function replaceRecord(records, oldAddress, record) {
   if (!placed) next.push(record)
   return next
 }
+
+// The cursor position `hyprctl cursorpos` printed ("X, Y"), or null.
+function parseCursorPos(text) {
+  var match = /^\s*(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)\s*$/.exec(String(text || ""))
+  return match ? { x: Math.round(Number(match[1])), y: Math.round(Number(match[2])) } : null
+}
+
+// The dispatch that puts the cursor back at `position`, or "". A new app
+// window takes focus as it maps (Chromium asks to be activated, and Omarchy
+// sets focus_on_activate), and Hyprland warps the cursor to it, so add and
+// replace move it back before anything else.
+function cursorMoveExpression(position) {
+  if (!position || typeof position.x !== "number" || typeof position.y !== "number"
+      || Math.floor(position.x) !== position.x || Math.floor(position.y) !== position.y) return ""
+  return "hl.dsp.cursor.move({ x = " + position.x + ", y = " + position.y + " })"
+}

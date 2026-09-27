@@ -36,6 +36,9 @@ Scope {
   property string pendingMessage: ""
   property bool stepStarted: false
   property var addState: null
+  // Where the cursor was while add or replace waited for the new window;
+  // see Model.cursorMoveExpression.
+  property var cursorBefore: null
   // The bar widget, which sets this when it finds the service; it resets to
   // null when the widget is destroyed. IPC calls that need the panel use it.
   property QtObject panel: null
@@ -283,6 +286,8 @@ Scope {
     }
     phase = "add-wait"
     addState.address = ""
+    cursorBefore = null
+    sampleCursor()
     Quickshell.execDetached(["uwsm-app", "--", addState.program, "--app=" + addState.urls[addState.next]])
     windowTimeout.restart()
   }
@@ -298,6 +303,10 @@ Scope {
     addState.address = opened.address
     var steps = Model.tileDispatches(opened.address, addState.session, addState.workspace, addState.old)
     if (steps.error) return finishAction(steps.error)
+    // Undo the cursor warp to the new window. Hyprland warps a moment after
+    // the window maps, so this runs last, once the tile is in place.
+    var cursorBack = Model.cursorMoveExpression(cursorBefore)
+    if (cursorBack !== "") steps.place = steps.place.concat([cursorBack])
     // Record the tile as soon as it is tagged, so a later failure still
     // leaves it listed with its URL.
     runQueue(steps.tags, function() {
@@ -317,6 +326,10 @@ Scope {
     afterQueue = then
     actionTimeout.restart()
     store.setText(Model.serializeStore(records))
+  }
+
+  function sampleCursor() {
+    if (!cursorProcess.running) cursorProcess.running = true
   }
 
   // Runs Hyprland dispatches in order, then `then()`.
@@ -476,6 +489,29 @@ Scope {
         Qt.callLater(root.restoreNext)
       }
     }
+  }
+
+  // Keeps `cursorBefore` current while a new window is awaited. A sample
+  // that lands after the window opened may already be the warped position,
+  // so only samples taken during add-wait count.
+  Process {
+    id: cursorProcess
+    running: false
+    command: ["hyprctl", "cursorpos"]
+    stdout: StdioCollector { id: cursorStdout; waitForEnd: true }
+    onExited: function(exitCode) {
+      if (exitCode === 0 && root.busy && root.phase === "add-wait") {
+        var position = Model.parseCursorPos(cursorStdout.text)
+        if (position) root.cursorBefore = position
+      }
+    }
+  }
+
+  Timer {
+    interval: 150
+    repeat: true
+    running: root.busy && root.phase === "add-wait"
+    onTriggered: root.sampleCursor()
   }
 
   // A dispatch that never answers must not hold the queue forever.
