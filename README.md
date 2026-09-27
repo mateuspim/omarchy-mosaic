@@ -59,6 +59,12 @@ app buttons are hidden and everything else works.
 
 ## Development
 
+To have the installed widget follow this checkout, run
+`git config core.hooksPath .githooks`. Every commit, pull, or rebase on
+`master` then runs `omarchy plugin update pym.mosaic --yes`, which also
+reloads the shell's plugins (log: `~/.local/state/mosaic/plugin-update.log`;
+`MOSAIC_NO_INSTALL=1` skips it).
+
 ```bash
 npm test                               # Model.js unit tests
 omarchy plugin validate .              # manifest check

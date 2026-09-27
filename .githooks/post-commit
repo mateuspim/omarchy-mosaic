@@ -1,0 +1,17 @@
+#!/bin/sh
+# Update the installed pym.mosaic plugin after master changes. `omarchy
+# plugin update` fast-forwards the checkout in ~/.config/omarchy/plugins from
+# this repository and reloads the shell's plugins. Logs to
+# ~/.local/state/mosaic/plugin-update.log. Set MOSAIC_NO_INSTALL=1 to skip
+# it. Enable with:
+#   git config core.hooksPath .githooks
+[ -n "$MOSAIC_NO_INSTALL" ] && exit 0
+[ "$(git rev-parse --abbrev-ref HEAD)" = master ] || exit 0
+[ -d "$HOME/.config/omarchy/plugins/pym.mosaic/.git" ] || exit 0
+log="${XDG_STATE_HOME:-$HOME/.local/state}/mosaic/plugin-update.log"
+mkdir -p "$(dirname "$log")"
+(
+  echo "== $(date -Iseconds) $(git log --oneline -1)"
+  omarchy plugin update pym.mosaic --yes || notify-send -u critical "Mosaic widget update failed" "See $log" 2>/dev/null
+) >> "$log" 2>&1 < /dev/null &
+exit 0
