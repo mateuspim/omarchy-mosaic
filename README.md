@@ -6,10 +6,12 @@ installed web apps (such as the ones Omarchy's web app installer creates) or
 any URL as a tile, focus or remove a tile, close a session, and turn fullscreen
 containment back on. The icon dims when no tiles are open.
 
-The widget holds no state of its own. It reads `mosaic list --json` and makes
-every change through the `mosaic` command, so the bar, the CLI, and ordinary
-Hyprland bindings always agree. It refreshes when Hyprland opens, closes,
-moves, floats, or fullscreens a window.
+The plugin is being ported from the `mosaic` CLI into the shell. Its service
+builds the tile list itself from Hyprland's window tags and
+`~/.local/state/mosaic/tiles.json`, the same sources the CLI reads, so the
+bar, the CLI, and ordinary Hyprland bindings always agree. It refreshes when
+Hyprland opens, closes, moves, floats, fullscreens, or retitles a window.
+Changes still go through the `mosaic` command until they are ported.
 
 ## Install
 
@@ -52,9 +54,10 @@ tiles, and otherwise go to the focused monitor.
 
 ## Compatibility
 
-The widget accepts `mosaic list --json` and `mosaic webapps --json` version 1 and shows an "update"
-notice for any other version. It uses the `add`, `remove`, `focus`, `close`,
-and `contain` subcommands. Without `mosaic webapps` (older builds), the web
+The service builds the version 1 `mosaic list --json` format, and the widget
+accepts `mosaic webapps --json` version 1 and shows an "update" notice for any
+other version. It uses the `add`, `remove`, `focus`, `close`, and `contain`
+subcommands. Without `mosaic webapps` (older builds), the web
 app buttons are hidden and everything else works.
 
 ## Development

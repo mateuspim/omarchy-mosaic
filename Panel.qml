@@ -2,31 +2,35 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import Quickshell
-import Quickshell.Hyprland
 import Quickshell.Io
 import qs.Commons
 import qs.Ui
 import "Model.js" as Model
 
-// Bar widget for omarchy-mosaic. All state comes from `mosaic list --json`,
-// and every change goes through the mosaic CLI, so this widget holds no
-// session state of its own.
+// Bar widget for omarchy-mosaic. The tile list comes from the plugin's
+// service (MosaicService.qml), and every change still goes through the
+// mosaic CLI until the engine can do it, so this widget holds no session
+// state of its own.
 Panel {
   id: root
   moduleName: "pym.mosaic"
   manageIpc: false
 
-  property var sessions: []
-  property var tiles: []
+  // The plugin's MosaicService. The shell rebuilds it on every plugin
+  // reload, and this typed property resets to null when it is destroyed.
+  property QtObject service: null
+  readonly property var listing: service ? Model.shapeList(service.list)
+    : { sessions: [], tiles: [], error: "The Mosaic service is not running. Reload the shell's plugins or restart the shell." }
+  readonly property var sessions: listing.sessions
+  readonly property var tiles: listing.tiles
+  readonly property string listError: listing.error
   property var webapps: []
   property string mosaicVersion: ""
-  property string listError: ""
   property string status: ""
   property bool statusIsError: false
   property string busyLabel: ""
   property int cursor: 0
   property bool cursorActive: false
-  property bool listStarted: false
   property bool actionStarted: false
   readonly property string missingCommand: "Cannot run " + command + ". Install mosaic or set its path in the widget settings."
 
@@ -44,10 +48,9 @@ Panel {
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
 
-  // Debounced, so the first list runs with the settings the host injects
-  // after creation.
-  Component.onCompleted: refreshTimer.restart()
-  onCommandChanged: refreshTimer.restart()
+  Component.onCompleted: findService()
+  onBarChanged: findService()
+  onTilesChanged: cursor = Math.max(0, Math.min(cursor, tiles.length - 1))
   onOpenedChanged: {
     if (opened) {
       status = ""
@@ -57,14 +60,14 @@ Panel {
     }
   }
 
+  function findService() {
+    if (service) return
+    var shell = bar ? bar.shell : null
+    service = shell && typeof shell.serviceFor === "function" ? shell.serviceFor(moduleName) : null
+  }
+
   function refresh() {
-    if (listProcess.running) {
-      refreshTimer.restart()
-      return
-    }
-    listProcess.command = [command, "list", "--json"]
-    listStarted = false
-    listProcess.running = true
+    if (service) service.refresh()
   }
 
   // Web apps change rarely, so they are read when the panel opens.
@@ -82,14 +85,6 @@ Panel {
     return Quickshell.iconPath(icon, true)
   }
 
-  function applyList(text) {
-    var list = Model.parseList(text)
-    sessions = list.sessions
-    tiles = list.tiles
-    listError = list.error
-    cursor = Math.max(0, Math.min(cursor, tiles.length - 1))
-  }
-
   // Runs one mosaic subcommand at a time. `label` describes it while it runs.
   function run(args, label) {
     if (actionProcess.running) {
@@ -101,12 +96,6 @@ Panel {
     actionProcess.command = [command].concat(args)
     actionStarted = false
     actionProcess.running = true
-  }
-
-  function showListError(text) {
-    sessions = []
-    tiles = []
-    listError = text
   }
 
   function showStatus(text, isError) {
@@ -171,35 +160,13 @@ Panel {
     cursor = Math.max(0, Math.min(tiles.length - 1, cursor + delta))
   }
 
+  // The shell may create the service after this widget, and rebuilds it on
+  // every plugin reload, so look again while it is missing.
   Timer {
-    id: refreshTimer
-    interval: 300
-    onTriggered: root.refresh()
-  }
-
-  // Refresh whenever windows come, go, or change state, so the bar count
-  // stays right even when tiles are closed with ordinary Hyprland bindings.
-  Connections {
-    target: Hyprland
-    function onRawEvent(event) {
-      var name = event.name
-      if (name === "openwindow" || name === "closewindow" || name === "movewindowv2"
-          || name === "changefloatingmode" || name === "fullscreen") refreshTimer.restart()
-    }
-  }
-
-  Process {
-    id: listProcess
-    running: false
-    stdout: StdioCollector { id: listStdout; waitForEnd: true }
-    stderr: StdioCollector { id: listStderr; waitForEnd: true }
-    onStarted: root.listStarted = true
-    // Quickshell never emits `exited` for a command that cannot start.
-    onRunningChanged: if (!running && !root.listStarted) root.showListError(root.missingCommand)
-    onExited: function(exitCode) {
-      if (exitCode === 0) root.applyList(listStdout.text)
-      else root.showListError(Model.errorLine(listStderr.text, "mosaic list failed"))
-    }
+    interval: 500
+    repeat: true
+    running: root.service === null
+    onTriggered: root.findService()
   }
 
   Process {
@@ -226,6 +193,7 @@ Panel {
     stdout: StdioCollector { id: actionStdout; waitForEnd: true }
     stderr: StdioCollector { id: actionStderr; waitForEnd: true }
     onStarted: root.actionStarted = true
+    // Quickshell never emits `exited` for a command that cannot start.
     onRunningChanged: if (!running && !root.actionStarted) {
       root.showStatus(root.missingCommand, true)
       root.busyLabel = ""

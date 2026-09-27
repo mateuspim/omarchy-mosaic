@@ -5,11 +5,130 @@
 
 // The `mosaic list --json` format versions this widget understands.
 var SUPPORTED_VERSIONS = [1]
+var LIST_VERSION = 1
 var DEFAULT_SESSION = "default"
+// Hyprland tag on every tile; `mosaic-<session>` names its session.
+var TAG = "mosaic"
 
-// Parses `mosaic list --json` into { sessions, tiles, error }. `tiles` is
-// every tile in listing order, each with its session name attached, which
-// is the order keyboard navigation walks.
+// The session a client belongs to, from its tags, or null when it is not a
+// tile. Mirrors `session::session_of` in the Rust CLI.
+function sessionOf(tags) {
+  var list = stringList(tags)
+  if (list.indexOf(TAG) === -1) return null
+  var prefix = TAG + "-"
+  for (var i = 0; i < list.length; i++) {
+    if (list[i].indexOf(prefix) === 0) return list[i].slice(prefix.length)
+  }
+  return DEFAULT_SESSION
+}
+
+// A plain array of strings from any array-like, such as a list that comes
+// from C++ or from another JavaScript realm, where `instanceof Array` fails.
+function stringList(value) {
+  var list = []
+  if (!value || typeof value === "string" || typeof value.length !== "number") return list
+  for (var i = 0; i < value.length; i++) list.push(String(value[i]))
+  return list
+}
+
+// A client from Hyprland's raw client JSON (`hyprctl -j clients`, or a
+// Quickshell toplevel's lastIpcObject), with the fields the list needs.
+function clientFromIpc(object) {
+  if (!object || typeof object.address !== "string" || object.address === "") return null
+  return {
+    address: object.address,
+    title: String(object.title || ""),
+    workspace: object.workspace && object.workspace.id !== undefined ? Number(object.workspace.id) : 0,
+    monitor: object.monitor !== undefined && object.monitor !== null ? Number(object.monitor) : -1,
+    tags: stringList(object.tags),
+    floating: object.floating === true,
+    fullscreen: Number(object.fullscreen || 0),
+    fullscreenClient: Number(object.fullscreenClient || 0)
+  }
+}
+
+// Records from tiles.json, `{ "tiles": [{ address, session, url }] }`. An
+// unreadable file is an empty store, because the tags stay authoritative.
+function parseStore(text) {
+  var parsed
+  try {
+    parsed = JSON.parse(String(text || ""))
+  } catch (error) {
+    return []
+  }
+  var source = parsed && parsed.tiles instanceof Array ? parsed.tiles : []
+  var records = []
+  for (var i = 0; i < source.length; i++) {
+    var tile = source[i]
+    if (!tile || typeof tile.address !== "string" || typeof tile.session !== "string"
+        || typeof tile.url !== "string") continue
+    records.push({ address: tile.address, session: tile.session, url: tile.url })
+  }
+  return records
+}
+
+function tileState(client) {
+  if (client.floating) return "floating"
+  if (client.fullscreen !== 0) return "fullscreen"
+  if (client.fullscreenClient === 2) return "contained"
+  return "uncontained"
+}
+
+function compareText(a, b) {
+  return a < b ? -1 : a > b ? 1 : 0
+}
+
+// The v1 `mosaic list --json` object from live clients, monitors
+// ([{ id, name }]) and store records. Sessions are sorted by name, tiles by
+// store order and then address, and `index` is 1-based across all sessions.
+// Mirrors `session::tiles` and `list` in the Rust CLI.
+function buildList(clients, monitors, records) {
+  var entries = []
+  for (var i = 0; i < clients.length; i++) {
+    var client = clients[i]
+    var session = client ? sessionOf(client.tags) : null
+    if (session === null) continue
+    var position = -1
+    for (var r = 0; r < records.length; r++) {
+      if (records[r].address === client.address) { position = r; break }
+    }
+    var monitor = "?"
+    for (var m = 0; m < monitors.length; m++) {
+      if (monitors[m].id === client.monitor) { monitor = String(monitors[m].name); break }
+    }
+    entries.push({
+      order: position === -1 ? Infinity : position,
+      session: session,
+      tile: {
+        index: 0,
+        address: client.address,
+        url: position === -1 ? null : records[position].url,
+        title: client.title,
+        monitor: monitor,
+        workspace: client.workspace,
+        state: tileState(client)
+      }
+    })
+  }
+  entries.sort(function(a, b) {
+    return compareText(a.session, b.session)
+      || (a.order === b.order ? 0 : a.order < b.order ? -1 : 1)
+      || compareText(a.tile.address, b.tile.address)
+  })
+  var sessions = []
+  for (var e = 0; e < entries.length; e++) {
+    entries[e].tile.index = e + 1
+    var last = sessions[sessions.length - 1]
+    if (!last || last.name !== entries[e].session) {
+      last = { name: entries[e].session, tiles: [] }
+      sessions.push(last)
+    }
+    last.tiles.push(entries[e].tile)
+  }
+  return { version: LIST_VERSION, sessions: sessions }
+}
+
+// Parses `mosaic list --json` into { sessions, tiles, error }; see shapeList.
 function parseList(text) {
   var parsed
   try {
@@ -17,6 +136,13 @@ function parseList(text) {
   } catch (error) {
     return { sessions: [], tiles: [], error: "Unexpected output from mosaic list" }
   }
+  return shapeList(parsed)
+}
+
+// Shapes a v1 list object into { sessions, tiles, error }. `tiles` is every
+// tile in listing order, each with its session name attached, which is the
+// order keyboard navigation walks.
+function shapeList(parsed) {
   if (!parsed || SUPPORTED_VERSIONS.indexOf(parsed.version) === -1) {
     return { sessions: [], tiles: [], error: "This mosaic version is not supported; update mosaic and the widget together" }
   }

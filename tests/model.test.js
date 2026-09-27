@@ -5,7 +5,7 @@ import vm from "node:vm"
 const source = fs.readFileSync(new URL("../Model.js", import.meta.url), "utf8")
   .replace(/^\.pragma library\s*/m, "")
 const model = {}
-vm.runInNewContext(source + "\nObject.assign(model, { parseWebapps, findWebapp, resolveTarget, parseList, tileLabel, tileMeta, normalizeUrl, sessionName, summary, anyUncontained, errorLine });", { model })
+vm.runInNewContext(source + "\nObject.assign(model, { sessionOf, clientFromIpc, parseStore, tileState, buildList, shapeList, parseWebapps, findWebapp, resolveTarget, parseList, tileLabel, tileMeta, normalizeUrl, sessionName, summary, anyUncontained, errorLine });", { model })
 
 // Values built inside the VM belong to another realm, so compare copies.
 const plain = value => JSON.parse(JSON.stringify(value))
@@ -61,5 +61,69 @@ assert.equal(model.resolveTarget("team chat", webapps.apps), "https://chat.examp
 assert.equal(model.resolveTarget("kick.com", webapps.apps), "https://kick.com")
 assert.equal(model.parseWebapps("error").apps.length, 0)
 assert.equal(model.parseWebapps('{"version":9,"webapps":[]}').error.includes("not supported"), true)
+
+// Ported from session::tests::groups_tiles_by_session_in_added_order.
+const client = (address, tags, extra = {}) => ({ address, title: "", workspace: 1, monitor: 0, tags, floating: false, fullscreen: 0, fullscreenClient: 2, ...extra })
+const clients = [
+  client("0xa", ["mosaic", "mosaic-news"]),
+  client("0xb", ["default-opacity*"]),
+  client("0xc", ["mosaic", "mosaic-streams"]),
+  client("0xd", ["mosaic", "mosaic-streams"]),
+  client("0xe", ["mosaic"])
+]
+const records = [
+  { address: "0xd", session: "streams", url: "https://d" },
+  { address: "0xc", session: "streams", url: "https://c" },
+  { address: "0xgone", session: "streams", url: "https://x" }
+]
+const built = plain(model.buildList(clients, [], records))
+assert.equal(built.version, 1)
+assert.deepEqual(built.sessions.flatMap(s => s.tiles.map(t => [t.index, s.name, t.address])),
+  [[1, "default", "0xe"], [2, "news", "0xa"], [3, "streams", "0xd"], [4, "streams", "0xc"]])
+assert.equal(built.sessions[2].tiles[0].url, "https://d")
+assert.equal(built.sessions[0].tiles[0].url, null)
+assert.equal(built.sessions[0].tiles[0].monitor, "?")
+
+// Tiles missing from the store sort after recorded ones, then by address.
+const unordered = plain(model.buildList([client("0x2", ["mosaic"]), client("0x9", ["mosaic"]), client("0x1", ["mosaic"])], [],
+  [{ address: "0x9", session: "default", url: "https://9" }]))
+assert.deepEqual(unordered.sessions[0].tiles.map(t => t.address), ["0x9", "0x1", "0x2"])
+
+// The built object is what `mosaic list --json` prints, so it shapes the same way.
+const monitors = [{ id: 0, name: "DP-5" }, { id: 1, name: "DP-4" }]
+const live = model.buildList([
+  client("0x3", ["mosaic", "mosaic-streams"], { monitor: 0, workspace: 1, title: "Kick", fullscreenClient: 0 }),
+  client("0x1", ["mosaic", "mosaic-news"], { monitor: 1, workspace: 10, title: "BBC News" }),
+  client("0x2", ["mosaic", "mosaic-streams"], { monitor: 0, workspace: 1, title: "somechannel - Twitch" })
+], monitors, [
+  { address: "0x1", session: "news", url: "https://www.bbc.com/news" },
+  { address: "0x2", session: "streams", url: "https://www.twitch.tv/somechannel/" }
+])
+assert.deepEqual(plain(live), JSON.parse(fixture))
+assert.deepEqual(plain(model.shapeList(live)), plain(list))
+assert.equal(model.shapeList(null).error.includes("not supported"), true)
+
+assert.equal(model.sessionOf(["mosaic", "mosaic-streams"]), "streams")
+assert.equal(model.sessionOf(["mosaic"]), "default")
+assert.equal(model.sessionOf(["mosaic-streams"]), null)
+assert.equal(model.sessionOf(undefined), null)
+
+assert.equal(model.tileState(client("0x1", [], { floating: true, fullscreen: 1 })), "floating")
+assert.equal(model.tileState(client("0x1", [], { fullscreen: 2 })), "fullscreen")
+assert.equal(model.tileState(client("0x1", [])), "contained")
+assert.equal(model.tileState(client("0x1", [], { fullscreenClient: 0 })), "uncontained")
+
+// Shaped like a real lastIpcObject from Hyprland 0.56.
+assert.deepEqual(plain(model.clientFromIpc({ address: "0x5f4cce94d400", class: "foot", title: "odin", workspace: { id: 1, name: "1" },
+  monitor: 0, tags: ["default-opacity*", "terminal*"], floating: false, fullscreen: 0, fullscreenClient: 0 })),
+  { address: "0x5f4cce94d400", title: "odin", workspace: 1, monitor: 0, tags: ["default-opacity*", "terminal*"], floating: false, fullscreen: 0, fullscreenClient: 0 })
+assert.equal(model.clientFromIpc({}), null)
+assert.equal(model.clientFromIpc(undefined), null)
+assert.deepEqual(plain(model.clientFromIpc({ address: "0x1" }).tags), [])
+
+assert.deepEqual(plain(model.parseStore('{"tiles":[{"address":"0x1","session":"s","url":"https://a"},{"address":"0x2"},null]}')),
+  [{ address: "0x1", session: "s", url: "https://a" }])
+assert.deepEqual(plain(model.parseStore("")), [])
+assert.deepEqual(plain(model.parseStore('{"tiles":5}')), [])
 
 console.log("model tests passed")

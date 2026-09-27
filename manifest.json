@@ -6,8 +6,9 @@
   "author": "Mateus Pym",
   "license": "MIT",
   "description": "List, add, focus, and remove omarchy-mosaic web app tiles from the Omarchy bar.",
-  "kinds": ["bar-widget"],
+  "kinds": ["service", "bar-widget"],
   "entryPoints": {
+    "service": "MosaicService.qml",
     "barWidget": "Panel.qml"
   },
   "barWidget": {

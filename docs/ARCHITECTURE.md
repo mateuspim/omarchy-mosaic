@@ -2,11 +2,12 @@
 
 ## Where things stand
 
-The plugin is a bar widget (`Panel.qml`, with pure logic in `Model.js`) that
-holds no state and shells out to the Rust `mosaic` CLI for everything. It is
-being turned into the whole product; `docs/HANDOFF.md` has the plan and the
-parity checklist. Until each action is ported, the widget keeps calling the
-CLI for it, and it must work before and after every step.
+The plugin is a service (`MosaicService.qml`) plus a bar widget
+(`Panel.qml`), with pure logic in `Model.js`. The service builds the tile list
+from Hyprland and `tiles.json`; every action still shells out to the Rust
+`mosaic` CLI. It is being turned into the whole product; `docs/HANDOFF.md` has
+the plan and the parity checklist. Until each action is ported, the widget
+keeps calling the CLI for it, and it must work before and after every step.
 
 ## Target shape
 
@@ -22,12 +23,24 @@ CLI for it, and it must work before and after every step.
 - **Hyprland is the source of truth.** Tags decide which windows are tiles.
   The store only adds URLs and order. Nothing watches for lost containment
   (see below); the engine only reacts to Hyprland events to refresh its model.
+- **How the widget reaches the service.** Through the host's own-service
+  facade: `bar.shell.serviceFor("pym.mosaic")`, held in a typed `QtObject`
+  property that resets to null when the service is destroyed, and looked up
+  again on a timer while it is missing. Not a `qmldir` singleton: a singleton
+  lives outside the host's lifecycle, so it survives plugin reloads and
+  disabling (an `IpcHandler` in it would stay registered). The service must
+  not set `keepLoaded`, so disabling or reloading the plugin tears it down.
+- **Refreshing.** `lastIpcObject` changes only on `Hyprland.refreshToplevels()`,
+  and adding or removing a tag emits no Hyprland event. The service refreshes
+  (debounced) on window events and on `tiles.json` changes, and rebuilds the
+  list when any toplevel's `lastIpcObject` changes. Anything that tags a
+  window must call `refresh()` afterwards.
 - **Command line.** `omarchy-shell pym.mosaic <command> …` reaches the
   `IpcHandler`. A small `bin/mosaic` wrapper keeps the `mosaic` command name.
 
 | The CLI did | The plugin uses |
 | --- | --- |
-| `hyprctl -j clients` and `monitors` | `Hyprland.toplevels` (`lastIpcObject` is the raw client JSON) and `Hyprland.monitors`, or `hyprctl -j` through a `Process` if fields are missing |
+| `hyprctl -j clients` and `monitors` | `Hyprland.toplevels` (`lastIpcObject` is the raw client JSON, refreshed only by `Hyprland.refreshToplevels()`) and `Hyprland.monitors` |
 | `hyprctl dispatch 'hl.dsp…'` | a `Process` running `hyprctl dispatch` where the `ok` reply matters, else `Hyprland.dispatch` |
 | polling for the new app window | `Hyprland.rawEvent` `openwindow>>ADDRESS,WORKSPACE,CLASS,TITLE`, with a `Timer` timeout |
 | default browser from `xdg-settings` | a `Process`, then `DesktopEntries.byId(id).command[0]` |
