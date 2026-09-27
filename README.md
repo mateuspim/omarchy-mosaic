@@ -36,8 +36,9 @@ Click the icon, or middle-click it to refresh.
 
 | Key | Action |
 | --- | --- |
-| ↑ ↓ or J K | Select a tile |
-| Enter | Focus the selected tile |
+| ↑ ↓ or J K | Select a tile (or a hidden web app) |
+| ← → or H L | Switch between the Tiles and Hidden web apps tabs |
+| Enter | Focus the selected tile, or show the selected hidden web app again |
 | X or D | Remove the selected tile |
 | Shift+D | Close the selected tile's session |
 | 1–9 | Add that web app to the session |
@@ -48,8 +49,9 @@ Click the icon, or middle-click it to refresh.
 
 The web app buttons come from `mosaic webapps --json`, read each time the
 panel opens. Right-click a button to hide that web app, or list names in the
-widget's **Hidden web apps** setting (for example `Tailscale, WhatsApp`);
-remove a name there to bring its button back. Typing a web app's name in the
+widget's **Hidden web apps** setting (for example `Tailscale, WhatsApp`).
+The panel's **Hidden web apps** tab lists them; select one there to bring its
+button back. Typing a web app's name in the
 address field works for hidden ones too. A bare
 host such as `twitch.tv/name` gets `https://`. Tiles go to the session in the
 session field, or else the selected tile's session, or else `default`. New tiles join the workspace where that session already has

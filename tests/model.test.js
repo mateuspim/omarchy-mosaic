@@ -5,7 +5,7 @@ import vm from "node:vm"
 const source = fs.readFileSync(new URL("../Model.js", import.meta.url), "utf8")
   .replace(/^\.pragma library\s*/m, "")
 const model = {}
-vm.runInNewContext(source + "\nObject.assign(model, { nameList, visibleWebapps, hideWebapp, sessionOf, clientFromIpc, parseStore, tileState, buildList, shapeList, parseWebapps, findWebapp, resolveTarget, parseList, tileLabel, tileMeta, normalizeUrl, sessionName, summary, anyUncontained, errorLine });", { model })
+vm.runInNewContext(source + "\nObject.assign(model, { hiddenEntries, showWebapp, nameList, visibleWebapps, hideWebapp, sessionOf, clientFromIpc, parseStore, tileState, buildList, shapeList, parseWebapps, findWebapp, resolveTarget, parseList, tileLabel, tileMeta, normalizeUrl, sessionName, summary, anyUncontained, errorLine });", { model })
 
 // Values built inside the VM belong to another realm, so compare copies.
 const plain = value => JSON.parse(JSON.stringify(value))
@@ -67,6 +67,13 @@ assert.equal(model.visibleWebapps(webapps.apps, "").length, 2)
 assert.equal(model.hideWebapp("", webapps.apps[0]), "Twitch")
 assert.equal(model.hideWebapp("Kick,", webapps.apps[1]), "Kick, Team Chat")
 assert.equal(model.hideWebapp("twitch", webapps.apps[0]), "twitch")
+const hiddenRows = model.hiddenEntries(webapps.apps, "kick, chat, Team Chat, twitch")
+assert.deepEqual(plain(hiddenRows.map(row => [row.key, row.label, row.app ? row.app.id : null])),
+  [["kick", "kick", null], ["chat", "Team Chat", "chat"], ["twitch", "Twitch", "Twitch"]])
+assert.equal(model.showWebapp("Kick, chat, Team Chat, Twitch", hiddenRows[1]), "Kick, Twitch")
+assert.equal(model.showWebapp("Kick, Twitch", hiddenRows[0]), "Twitch")
+assert.equal(model.showWebapp("Twitch", hiddenRows[2]), "")
+assert.equal(model.hiddenEntries(webapps.apps, "").length, 0)
 // A hidden web app can still be added by typing its name.
 assert.equal(model.resolveTarget("twitch", webapps.apps), "https://twitch.tv")
 assert.equal(model.parseWebapps("error").apps.length, 0)

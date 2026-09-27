@@ -237,6 +237,35 @@ function hideWebapp(hiddenText, app) {
   return text === "" ? app.name : text.replace(/,\s*$/, "") + ", " + app.name
 }
 
+// One row per name in the hiddenWebapps setting, in the order written, with
+// the web app it matches, or null when no installed web app has that name.
+function hiddenEntries(apps, hiddenText) {
+  var names = nameList(hiddenText)
+  var entries = []
+  var seen = []
+  for (var i = 0; i < names.length; i++) {
+    var app = null
+    for (var j = 0; j < apps.length; j++) {
+      if (isHidden(apps[j], [names[i]])) { app = apps[j]; break }
+    }
+    // A web app written by both name and id gets a single row.
+    if (app && seen.indexOf(app) !== -1) continue
+    if (app) seen.push(app)
+    entries.push({ key: names[i], label: app ? app.name : names[i], app: app })
+  }
+  return entries
+}
+
+// The hiddenWebapps setting without `entry`, and without any other name for
+// the same web app, keeping the rest as the user typed it.
+function showWebapp(hiddenText, entry) {
+  var drop = [entry.key]
+  if (entry.app) drop.push(entry.app.name.toLowerCase(), entry.app.id.toLowerCase())
+  return String(hiddenText || "").split(",").map(function(part) { return part.trim() })
+    .filter(function(part) { return part !== "" && drop.indexOf(part.toLowerCase()) === -1 })
+    .join(", ")
+}
+
 // What the URL field means: a web app's name, or a web address.
 function resolveTarget(text, apps) {
   var app = findWebapp(apps, text)

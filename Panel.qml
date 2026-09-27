@@ -27,6 +27,9 @@ Panel {
   property var webapps: []
   // The web apps that get a button; hidden ones can still be typed.
   readonly property var shownWebapps: Model.visibleWebapps(webapps, setting("hiddenWebapps", ""))
+  readonly property var hiddenRows: Model.hiddenEntries(webapps, setting("hiddenWebapps", ""))
+  // The panel's tab: "tiles", or "hidden" for the hidden web apps.
+  property string view: "tiles"
   property string mosaicVersion: ""
   property string status: ""
   property bool statusIsError: false
@@ -44,7 +47,9 @@ Panel {
     var value = String(setting("command", "mosaic")).trim() || "mosaic"
     return value.indexOf("~/") === 0 ? Quickshell.env("HOME") + value.slice(1) : value
   }
-  readonly property var selectedTile: cursor >= 0 && cursor < tiles.length ? tiles[cursor] : null
+  readonly property int cursorCount: view === "tiles" ? tiles.length : hiddenRows.length
+  readonly property var selectedTile: view === "tiles" && cursor >= 0 && cursor < tiles.length ? tiles[cursor] : null
+  readonly property var selectedHidden: view === "hidden" && cursor >= 0 && cursor < hiddenRows.length ? hiddenRows[cursor] : null
   readonly property bool editing: urlField.activeFocus || sessionField.activeFocus
 
   implicitWidth: button.implicitWidth
@@ -52,10 +57,12 @@ Panel {
 
   Component.onCompleted: findService()
   onBarChanged: findService()
-  onTilesChanged: cursor = Math.max(0, Math.min(cursor, tiles.length - 1))
+  onCursorCountChanged: cursor = Math.max(0, Math.min(cursor, cursorCount - 1))
   onOpenedChanged: {
     if (opened) {
       status = ""
+      view = "tiles"
+      cursor = 0
       cursorActive = false
       refresh()
       refreshWebapps()
@@ -137,20 +144,37 @@ Panel {
     if (app) addUrl(app.url, app.name)
   }
 
-  // Adds `app` to the hiddenWebapps setting, which the shell saves in
-  // shell.json.
-  function hideWebapp(app) {
+  // Saves the hiddenWebapps setting; the shell writes it to shell.json.
+  function saveHidden(text) {
     var shell = bar ? bar.shell : null
-    if (!app || !shell || typeof shell.updateEntryInline !== "function") {
-      showStatus("Cannot save settings here; hide web apps in the widget settings", true)
-      return
+    if (!shell || typeof shell.updateEntryInline !== "function") {
+      showStatus("Cannot save settings here; edit Hidden web apps in the widget settings", true)
+      return false
     }
-    settings = Object.assign({}, settings, { hiddenWebapps: Model.hideWebapp(setting("hiddenWebapps", ""), app) })
+    settings = Object.assign({}, settings, { hiddenWebapps: text })
     shell.updateEntryInline(moduleName, settings)
-    showStatus("Hid " + app.name + ". Type its name to add it, or edit Hidden web apps in the widget settings to bring it back.", false)
+    return true
+  }
+
+  function hideWebapp(app) {
+    if (app && saveHidden(Model.hideWebapp(setting("hiddenWebapps", ""), app)))
+      showStatus("Hid " + app.name + ". The Hidden tab (L) brings it back.", false)
+  }
+
+  function showHidden(entry) {
+    if (entry && saveHidden(Model.showWebapp(setting("hiddenWebapps", ""), entry)))
+      showStatus(entry.app ? entry.app.name + " is back on the Tiles tab." : "Removed " + entry.label + " from the hidden list.", false)
+  }
+
+  function setView(name) {
+    if (view === name) return
+    view = name
+    cursor = 0
+    cursorActive = false
   }
 
   function startAdding() {
+    setView("tiles")
     if (selectedTile && sessionField.text === "") sessionField.text = selectedTile.session
     urlField.forceActiveFocus()
   }
@@ -170,9 +194,9 @@ Panel {
   }
 
   function moveCursor(delta) {
-    if (tiles.length === 0) return
+    if (cursorCount === 0) return
     cursorActive = true
-    cursor = Math.max(0, Math.min(tiles.length - 1, cursor + delta))
+    cursor = Math.max(0, Math.min(cursorCount - 1, cursor + delta))
   }
 
   // The shell may create the service after this widget, and rebuilds it on
@@ -248,8 +272,15 @@ Panel {
       id: keyCatcher
       anchors.fill: parent
       blocked: root.editing
-      onMoveRequested: function(dx, dy) { root.moveCursor(dy) }
-      onActivateRequested: if (root.cursorActive) root.focusTile(root.selectedTile)
+      onMoveRequested: function(dx, dy) {
+        if (dx !== 0) root.setView(dx < 0 ? "tiles" : "hidden")
+        else root.moveCursor(dy)
+      }
+      onActivateRequested: {
+        if (!root.cursorActive) return
+        if (root.view === "hidden") root.showHidden(root.selectedHidden)
+        else root.focusTile(root.selectedTile)
+      }
       onDeleteRequested: if (root.cursorActive) root.removeTile(root.selectedTile)
       onCloseRequested: root.close()
       onTabRequested: function(direction) { root.switchPanel(direction) }
@@ -257,8 +288,9 @@ Panel {
         if (t === "a" || t === "A") root.startAdding()
         else if (t === "d" && root.cursorActive) root.removeTile(root.selectedTile)
         else if (t === "D" && root.cursorActive && root.selectedTile) root.closeSession(root.selectedTile.session)
-        else if (t === "c" || t === "C") root.run(["contain"], "Containing fullscreen")
         else if (t === "r" || t === "R") { root.refresh(); root.refreshWebapps() }
+        else if (root.view !== "tiles") return
+        else if (t === "c" || t === "C") root.run(["contain"], "Containing fullscreen")
         else if (t >= "1" && t <= "9") root.addWebapp(root.shownWebapps[Number(t) - 1])
       }
 
@@ -296,101 +328,162 @@ Panel {
             }
           }
 
-          Notice {
-            visible: root.listError !== ""
-            text: root.listError
-          }
-
-          Repeater {
-            model: root.sessions
-
-            Column {
-              id: sessionColumn
-              required property var modelData
-              width: column.width
-              spacing: Style.space(6)
-
-              RowLayout {
-                width: parent.width
-                PanelSectionHeader {
-                  text: sessionColumn.modelData.name.toUpperCase() + "  ·  " + sessionColumn.modelData.tiles.length
-                  foreground: root.foreground
-                  fontFamily: root.fontFamily
-                  Layout.fillWidth: true
-                }
-                PanelActionButton {
-                  iconText: "󰅙"
-                  tooltipText: "Close every tile in " + sessionColumn.modelData.name + " · Shift+D"
-                  foreground: root.foreground
-                  hoverColor: root.urgent
-                  onClicked: root.closeSession(sessionColumn.modelData.name)
-                }
-              }
-
-              Repeater {
-                model: sessionColumn.modelData.tiles
-                TileRow {
-                  required property var modelData
-                  width: sessionColumn.width
-                  tile: modelData
-                }
-              }
-            }
+          ButtonGroup {
+            focusable: false
+            foreground: root.foreground
+            fontFamily: root.fontFamily
+            fontSize: Style.font.caption
+            value: root.view
+            options: [
+              { value: "tiles", label: "Tiles", tooltip: "H or ←" },
+              { value: "hidden", label: "Hidden web apps" + (root.hiddenRows.length > 0 ? "  ·  " + root.hiddenRows.length : ""), tooltip: "L or →" }
+            ]
+            onChanged: function(value) { root.setView(value) }
           }
 
           Column {
+            visible: root.view === "tiles"
             width: parent.width
-            spacing: Style.space(6)
+            spacing: Style.space(12)
 
-            PanelSectionHeader {
-              text: root.shownWebapps.length > 0 ? "ADD TILE  ·  1–" + Math.min(9, root.shownWebapps.length) + " WEB APP  ·  A ADDRESS" : "ADD TILE  ·  A"
-              foreground: root.foreground
-              fontFamily: root.fontFamily
+            Notice {
+              visible: root.listError !== ""
+              text: root.listError
             }
 
-            Flow {
-              visible: root.shownWebapps.length > 0
-              width: parent.width
-              spacing: Style.space(6)
-              Repeater {
-                model: root.shownWebapps
-                WebappButton {
-                  required property var modelData
-                  required property int index
-                  app: modelData
-                  number: index + 1
+            Repeater {
+              model: root.sessions
+
+              Column {
+                id: sessionColumn
+                required property var modelData
+                width: column.width
+                spacing: Style.space(6)
+
+                RowLayout {
+                  width: parent.width
+                  PanelSectionHeader {
+                    text: sessionColumn.modelData.name.toUpperCase() + "  ·  " + sessionColumn.modelData.tiles.length
+                    foreground: root.foreground
+                    fontFamily: root.fontFamily
+                    Layout.fillWidth: true
+                  }
+                  PanelActionButton {
+                    iconText: "󰅙"
+                    tooltipText: "Close every tile in " + sessionColumn.modelData.name + " · Shift+D"
+                    foreground: root.foreground
+                    hoverColor: root.urgent
+                    onClicked: root.closeSession(sessionColumn.modelData.name)
+                  }
+                }
+
+                Repeater {
+                  model: sessionColumn.modelData.tiles
+                  TileRow {
+                    required property var modelData
+                    width: sessionColumn.width
+                    tile: modelData
+                  }
                 }
               }
             }
 
-            TextField {
-              id: urlField
-              width: parent.width
-              placeholderText: "Web address or web app name"
-              foreground: root.foreground
-              font.family: root.fontFamily
-              onAccepted: root.addTile()
-              Keys.onEscapePressed: keyCatcher.forceActiveFocus()
-            }
-
-            RowLayout {
+            Column {
               width: parent.width
               spacing: Style.space(6)
+
+              PanelSectionHeader {
+                text: root.shownWebapps.length > 0 ? "ADD TILE  ·  1–" + Math.min(9, root.shownWebapps.length) + " WEB APP  ·  A ADDRESS" : "ADD TILE  ·  A"
+                foreground: root.foreground
+                fontFamily: root.fontFamily
+              }
+
+              Flow {
+                visible: root.shownWebapps.length > 0
+                width: parent.width
+                spacing: Style.space(6)
+                Repeater {
+                  model: root.shownWebapps
+                  WebappButton {
+                    required property var modelData
+                    required property int index
+                    app: modelData
+                    number: index + 1
+                  }
+                }
+              }
+
               TextField {
-                id: sessionField
-                Layout.fillWidth: true
-                placeholderText: "Session (" + (root.selectedTile ? root.selectedTile.session : "default") + ")"
+                id: urlField
+                width: parent.width
+                placeholderText: "Web address or web app name"
                 foreground: root.foreground
                 font.family: root.fontFamily
                 onAccepted: root.addTile()
                 Keys.onEscapePressed: keyCatcher.forceActiveFocus()
               }
-              Button {
-                text: "Add"
-                iconText: "󰐕"
-                foreground: root.foreground
-                enabled: root.busyLabel === ""
-                onClicked: root.addTile()
+
+              RowLayout {
+                width: parent.width
+                spacing: Style.space(6)
+                TextField {
+                  id: sessionField
+                  Layout.fillWidth: true
+                  placeholderText: "Session (" + (root.selectedTile ? root.selectedTile.session : "default") + ")"
+                  foreground: root.foreground
+                  font.family: root.fontFamily
+                  onAccepted: root.addTile()
+                  Keys.onEscapePressed: keyCatcher.forceActiveFocus()
+                }
+                Button {
+                  text: "Add"
+                  iconText: "󰐕"
+                  foreground: root.foreground
+                  enabled: root.busyLabel === ""
+                  onClicked: root.addTile()
+                }
+              }
+            }
+
+            Button {
+              visible: Model.anyUncontained(root.tiles)
+              width: parent.width
+              text: "Contain fullscreen in every tile  C"
+              iconText: "󰊓"
+              foreground: root.foreground
+              onClicked: root.run(["contain"], "Containing fullscreen")
+            }
+          }
+
+          Column {
+            visible: root.view === "hidden"
+            width: parent.width
+            spacing: Style.space(6)
+
+            PanelSectionHeader {
+              text: "HIDDEN WEB APPS  ·  " + root.hiddenRows.length
+              foreground: root.foreground
+              fontFamily: root.fontFamily
+            }
+
+            Text {
+              visible: root.hiddenRows.length === 0
+              width: parent.width
+              text: "No web apps are hidden. Right-click a web app button on the Tiles tab to hide it."
+              color: root.dim
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+              wrapMode: Text.WordWrap
+            }
+
+            Repeater {
+              model: root.hiddenRows
+              HiddenRow {
+                required property var modelData
+                required property int index
+                width: parent.width
+                entry: modelData
+                position: index
               }
             }
           }
@@ -401,18 +494,11 @@ Panel {
             warning: root.statusIsError
           }
 
-          Button {
-            visible: Model.anyUncontained(root.tiles)
-            width: parent.width
-            text: "Contain fullscreen in every tile  C"
-            iconText: "󰊓"
-            foreground: root.foreground
-            onClicked: root.run(["contain"], "Containing fullscreen")
-          }
-
           Text {
             width: parent.width
-            text: "↑↓ select  ·  Enter focus  ·  X remove  ·  ⇧D close session  ·  R refresh"
+            text: root.view === "hidden"
+              ? "↑↓ select  ·  Enter show again  ·  H/L tabs  ·  R refresh"
+              : "↑↓ select  ·  Enter focus  ·  X remove  ·  ⇧D close session  ·  H/L tabs  ·  R refresh"
             color: root.dim
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
@@ -505,6 +591,72 @@ Panel {
     PanelToolTip {
       visible: webappMouse.containsMouse
       text: webappButton.app ? webappButton.app.url + "  ·  right-click to hide" : ""
+    }
+  }
+
+  component HiddenRow: CursorSurface {
+    id: hiddenRow
+    property var entry: null
+    property int position: 0
+    hasCursor: root.cursorActive && root.view === "hidden" && root.cursor === position
+    foreground: root.foreground
+    implicitHeight: hiddenContent.implicitHeight + Style.spacing.rowPaddingX
+
+    MouseArea {
+      anchors.fill: parent
+      hoverEnabled: true
+      onContainsMouseChanged: if (containsMouse) { root.cursorActive = true; root.cursor = hiddenRow.position }
+      onClicked: root.showHidden(hiddenRow.entry)
+    }
+
+    RowLayout {
+      anchors.left: parent.left
+      anchors.right: parent.right
+      anchors.verticalCenter: parent.verticalCenter
+      anchors.leftMargin: Style.space(10)
+      anchors.rightMargin: Style.space(6)
+      spacing: Style.space(8)
+
+      Image {
+        Layout.preferredWidth: Style.space(16)
+        Layout.preferredHeight: Style.space(16)
+        source: hiddenRow.entry && hiddenRow.entry.app ? root.iconSource(hiddenRow.entry.app.icon) : ""
+        sourceSize.width: 64
+        sourceSize.height: 64
+        fillMode: Image.PreserveAspectFit
+        visible: status === Image.Ready
+      }
+
+      ColumnLayout {
+        id: hiddenContent
+        Layout.fillWidth: true
+        spacing: Style.space(1)
+        Text {
+          Layout.fillWidth: true
+          textFormat: Text.PlainText
+          text: hiddenRow.entry ? hiddenRow.entry.label : ""
+          color: root.foreground
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.body
+          elide: Text.ElideRight
+        }
+        Text {
+          Layout.fillWidth: true
+          textFormat: Text.PlainText
+          text: !hiddenRow.entry ? "" : hiddenRow.entry.app ? hiddenRow.entry.app.url : "No installed web app has this name"
+          color: root.dim
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
+          elide: Text.ElideRight
+        }
+      }
+
+      PanelActionButton {
+        iconText: hiddenRow.entry && hiddenRow.entry.app ? "󰈈" : "󰅖"
+        tooltipText: hiddenRow.entry && hiddenRow.entry.app ? "Show this web app again · Enter" : "Remove from the hidden list · Enter"
+        foreground: root.foreground
+        onClicked: root.showHidden(hiddenRow.entry)
+      }
     }
   }
 
