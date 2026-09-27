@@ -13,9 +13,9 @@ to verify. Read `docs/PROJECT.md`, `docs/ARCHITECTURE.md`, and
 
 ## Decisions (settled with the user, 2026-09-27)
 
-- This repository becomes the official project, renamed `omarchy-mosaic`
-  when it is published. The Rust repository becomes `omarchy-mosaic-cli` and
-  is archived once the plugin reaches parity.
+- This repository is the official project, `omarchy-mosaic`, published at
+  `https://github.com/mateuspim/omarchy-mosaic`. The Rust repository is
+  `omarchy-mosaic-cli`, archived now that the plugin has parity.
 - The plugin id stays `pym.mosaic`.
 - The command line is `omarchy-shell pym.mosaic …`, plus a small `bin/mosaic`
   wrapper that keeps the `mosaic` command name.

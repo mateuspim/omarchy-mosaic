@@ -26,10 +26,11 @@ panel or from a card over the tile opened by a changeable key.
 - ~~Remove `~/.local/bin/mosaic` and the Rust repository's hooks. Rename that
   repository to `omarchy-mosaic-cli`, point its README here, and archive it.~~
   Done 2026-09-27; `mosaic` is now this repository's `bin/mosaic`.
-- Rename this repository to `omarchy-mosaic` (the plugin id stays
-  `pym.mosaic`), and update the development symlink.
-- Publish on GitHub with an `omarchy plugin add` install line, a
-  `CHANGELOG.md`, and a version bump.
+- ~~Rename this repository to `omarchy-mosaic` (the plugin id stays
+  `pym.mosaic`), and update the development symlink.~~ Done.
+- ~~Publish on GitHub with an `omarchy plugin add` install line, a
+  `CHANGELOG.md`, and a version bump.~~ Done: 1.0.0 at
+  `https://github.com/mateuspim/omarchy-mosaic`.
 
 ## 3. Beyond parity
 
