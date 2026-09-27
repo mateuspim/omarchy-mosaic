@@ -400,14 +400,16 @@ function validAddress(address) {
   return /^0x[0-9a-fA-F]+$/.test(String(address || ""))
 }
 
-// The Lua dispatch that focuses ("focus"), closes ("close"), or contains
-// fullscreen in ("contain") a window, or "" for an invalid address.
+// The Lua dispatch that focuses ("focus"), closes ("close"), contains
+// fullscreen in ("contain"), or releases fullscreen containment of
+// ("release") a window, or "" for an invalid address.
 function dispatchExpression(action, address) {
   if (!validAddress(address)) return ""
   var window = 'window = "address:' + address + '"'
   if (action === "focus") return "hl.dsp.focus({ " + window + " })"
   if (action === "close") return "hl.dsp.window.close({ " + window + " })"
   if (action === "contain") return "hl.dsp.window.fullscreen_state({ internal = 0, client = 2, " + window + " })"
+  if (action === "release") return "hl.dsp.window.fullscreen_state({ internal = 0, client = 0, " + window + " })"
   return ""
 }
 
@@ -492,4 +494,22 @@ function planContain(list, session) {
     return (!session || tile.session === session) && tile.state === "uncontained"
   })
   return plan("contain", chosen, "Contained fullscreen in " + chosen.length + " tile(s).")
+}
+
+// The fullscreen state to re-apply after Hyprland's `movewindowv2` event
+// (`ADDRESS,WORKSPACEID,WORKSPACENAME`, the address without `0x`), or "".
+// A move leaves Hyprland's record of the client fullscreen state stale in
+// either direction without telling the browser, so the tile gets the state
+// it had before the move: contained or released. When the record happens to
+// be right, the dispatch changes nothing; when it is wrong, the change makes
+// Hyprland tell the browser, and both agree again. Floating and truly
+// fullscreen tiles are left alone.
+function restoreAfterMove(list, eventData) {
+  var hex = String(eventData || "").split(",")[0]
+  var address = hex.indexOf("0x") === 0 ? hex : "0x" + hex
+  var tile = findTile(listTiles(list), address)
+  if (!tile || tile.address !== address) return ""
+  if (tile.state === "contained") return dispatchExpression("contain", address)
+  if (tile.state === "uncontained") return dispatchExpression("release", address)
+  return ""
 }

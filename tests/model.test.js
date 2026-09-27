@@ -5,7 +5,7 @@ import vm from "node:vm"
 const source = fs.readFileSync(new URL("../Model.js", import.meta.url), "utf8")
   .replace(/^\.pragma library\s*/m, "")
 const model = {}
-vm.runInNewContext(source + "\nObject.assign(model, { hiddenEntries, showWebapp, nameList, visibleWebapps, hideWebapp, sessionOf, clientFromIpc, parseStore, tileState, buildList, shapeList, parseClients, validAddress, dispatchExpression, listTiles, findTile, planFocus, planRemove, planClose, planContain, webappUrl, webappFromEntry, buildWebapps, shapeWebapps, findWebapp, resolveTarget, parseList, tileLabel, tileMeta, normalizeUrl, sessionName, summary, anyUncontained, errorLine });", { model })
+vm.runInNewContext(source + "\nObject.assign(model, { hiddenEntries, showWebapp, nameList, visibleWebapps, hideWebapp, sessionOf, clientFromIpc, parseStore, tileState, buildList, shapeList, parseClients, validAddress, dispatchExpression, listTiles, findTile, planFocus, planRemove, planClose, planContain, restoreAfterMove, webappUrl, webappFromEntry, buildWebapps, shapeWebapps, findWebapp, resolveTarget, parseList, tileLabel, tileMeta, normalizeUrl, sessionName, summary, anyUncontained, errorLine });", { model })
 
 // Values built inside the VM belong to another realm, so compare copies.
 const plain = value => JSON.parse(JSON.stringify(value))
@@ -222,5 +222,15 @@ assert.equal(model.planContain(live, "news").expressions.length, 0)
 const forged = { version: 1, sessions: [{ name: "x", tiles: [{ index: 1, address: '0x1" }) os.exit() --', state: "uncontained" }] }] }
 assert.equal(model.planClose(forged, "").error.startsWith("Unexpected Hyprland window address"), true)
 assert.equal(model.planContain(forged, "").error.startsWith("Unexpected Hyprland window address"), true)
+
+// `live`: 0x1 and 0x2 contained, 0x3 uncontained.
+assert.equal(model.restoreAfterMove(live, "1,10,10"), 'hl.dsp.window.fullscreen_state({ internal = 0, client = 2, window = "address:0x1" })')
+assert.equal(model.restoreAfterMove(live, "0x2,4,4"), 'hl.dsp.window.fullscreen_state({ internal = 0, client = 2, window = "address:0x2" })')
+assert.equal(model.restoreAfterMove(live, "3,4,4"), 'hl.dsp.window.fullscreen_state({ internal = 0, client = 0, window = "address:0x3" })')
+assert.equal(model.restoreAfterMove(live, "ff,4,4"), "")
+assert.equal(model.restoreAfterMove(live, ""), "")
+assert.equal(model.restoreAfterMove(model.buildList([client("0x7", ["mosaic"], { floating: true })], [], []), "7,1,1"), "")
+assert.equal(model.restoreAfterMove(model.buildList([client("0x8", ["mosaic"], { fullscreen: 2 })], [], []), "8,1,1"), "")
+assert.equal(model.dispatchExpression("release", "0x1a"), 'hl.dsp.window.fullscreen_state({ internal = 0, client = 0, window = "address:0x1a" })')
 
 console.log("model tests passed")

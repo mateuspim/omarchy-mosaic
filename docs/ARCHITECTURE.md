@@ -168,6 +168,47 @@ triggering fullscreen through the DevTools protocol with `userGesture: true`.
 | Super+Ctrl+F, or `fullscreen_state` `0/0` | `0/0` | none |
 | Swap with another tile | `0/2` | — |
 
+### Hyprland's record goes stale after a workspace move, 2026-09-27
+
+Tested with Chromium (`/usr/bin/chromium`, a throwaway profile, the test
+page on hidden workspaces 42–44). Brave Origin opens a startup page for a
+fresh profile, so it can't be probed this way. `display-mode: fullscreen`
+reads what the browser believes without requesting fullscreen.
+
+| Tile | Hyprland record | Browser believes fullscreen | Video fullscreen |
+| --- | --- | --- | --- |
+| Contained on its workspace | `0/2` | yes | fills the tile |
+| After `hyprctl reload` | `0/2` | yes | fills the tile |
+| Contained, then `window.move` to another workspace | **`0/0`** | **yes** | fills the tile |
+| Released (`0/2`, then `0/0` directly) | `0/0` | no | covers the monitor (`2/2`) |
+| Released, then moved to another workspace | sometimes **`0/2`** | **no** | — |
+
+- A move leaves Hyprland's `fullscreenClient` stale in either direction and
+  tells the browser nothing, so `clients` can't tell a moved tile from a
+  released one. Which value comes out after a move isn't understood; it
+  seemed to depend on the tile's history on the target workspace.
+- The user's YouTube tile on workspace 10 showed the first case: `0/0` in
+  Hyprland, yet its video fullscreen stayed in the tile, and no fullscreen
+  event or state change reached Hyprland.
+- A `fullscreen_state` dispatch that matches the stale record is a no-op,
+  and one that differs makes Hyprland tell the browser. Re-applying the
+  state a tile already has changes nothing about the window or the page.
+- A Super+F round trip on a hidden workspace left the browser mid-resize and
+  a fullscreen request hanging, probably because hidden windows get no frame
+  callbacks. Test Super+F only on a visible workspace.
+
+**What the service does about it:** on every `movewindowv2` for a tile, it
+re-applies the state the tile had before the move, from its own list:
+`0/2` for a contained tile, `0/0` for an uncontained one
+(`Model.restoreAfterMove`). Floating and truly fullscreen tiles are left
+alone. Checked live on the same setup: contained tiles moved across three
+workspaces stayed `0/2` with the browser fullscreen, and a released tile
+moved across three stayed `0/0` with the browser not fullscreen, so the
+panel's labels were right every time. Tiles that were already stale before
+this change need one `contain` (`C`). Known limit: Super+Ctrl+F emits no
+event, so if a tile is released and then moved before anything refreshes
+the service's list, the move contains it again.
+
 Hyprland restores the earlier state after a float or fullscreen round trip.
 Containment is lost only when the state is set directly, which emits no
 event, so a watcher would add nothing. `contain` re-applies `0/2` on request,

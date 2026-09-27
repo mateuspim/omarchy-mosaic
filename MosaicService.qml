@@ -28,6 +28,8 @@ Scope {
   property var pendingExpressions: []
   property string pendingMessage: ""
   property bool stepStarted: false
+  // Fullscreen state dispatches waiting to run after tiles moved.
+  property var restoreQueue: []
 
   // Emitted when an action ends. `error` is "" on success, and `message`
   // then says what was done, like the CLI's output.
@@ -145,6 +147,23 @@ Scope {
     actionFinished(label, error, error ? "" : pendingMessage)
   }
 
+  // Queues re-applying a moved tile's fullscreen state, since a move leaves
+  // Hyprland's record of it stale (see Model.restoreAfterMove).
+  function restoreMoved(eventData) {
+    var expression = Model.restoreAfterMove(list, eventData)
+    if (expression === "") return
+    restoreQueue = restoreQueue.concat([expression])
+    restoreNext()
+  }
+
+  function restoreNext() {
+    if (restoreProcess.running) return
+    if (restoreQueue.length === 0) return refresh()
+    restoreProcess.command = ["hyprctl", "dispatch", restoreQueue[0]]
+    restoreQueue = restoreQueue.slice(1)
+    restoreProcess.running = true
+  }
+
   function rebuildWebapps() {
     var values = DesktopEntries.applications.values
     var entries = []
@@ -182,6 +201,8 @@ Scope {
     target: Hyprland
     function onRawEvent(event) {
       var name = event.name
+      // Checked against the list from before the move, so this runs first.
+      if (name === "movewindowv2") root.restoreMoved(event.data)
       if (name === "openwindow" || name === "closewindow" || name === "movewindowv2"
           || name === "changefloatingmode" || name === "fullscreen" || name === "windowtitlev2"
           || name === "moveworkspacev2" || name === "monitoraddedv2" || name === "monitorremovedv2")
@@ -211,6 +232,29 @@ Scope {
     // Quickshell never emits `exited` for a command that cannot start.
     onRunningChanged: if (!running && !root.stepStarted && root.busy) root.finishAction("Cannot run hyprctl")
     onExited: function(exitCode) { root.stepFinished(exitCode, stepStdout.text, stepStderr.text) }
+  }
+
+  // Fire-and-forget: a tile that is gone by now just fails its dispatch.
+  // The queue moves on whenever the process stops, whether it exited, was
+  // killed by the timeout, or never started.
+  Process {
+    id: restoreProcess
+    running: false
+    onRunningChanged: {
+      if (running) {
+        restoreTimeout.restart()
+      } else {
+        restoreTimeout.stop()
+        Qt.callLater(root.restoreNext)
+      }
+    }
+  }
+
+  // A dispatch that never answers must not hold the queue forever.
+  Timer {
+    id: restoreTimeout
+    interval: 5000
+    onTriggered: restoreProcess.running = false
   }
 
   // Every step of an action must answer within this time.
