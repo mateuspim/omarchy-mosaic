@@ -40,16 +40,22 @@ Scope {
   // see Model.cursorMoveExpression.
   property var cursorBefore: null
   // The bar widget, which sets this when it finds the service; it resets to
-  // null when the widget is destroyed. IPC calls that need the panel use it.
+  // null when the widget is destroyed. The swap key is only bound while the
+  // widget exists, since its settings choose the key.
   property QtObject panel: null
   // The swap key: what the widget's setting asks for, what is bound now,
   // and why the last attempt to bind it failed. The service binds it at
   // runtime with `hyprctl eval`, so it follows the setting, and binds it
   // again after a config reload, which drops runtime binds.
   property string swapKey: ""
+  // The widget's Browser and Hidden web apps settings, for the swap card.
+  property string browser: ""
+  property string hiddenWebapps: ""
   property string boundSwapKey: ""
   property string swapKeyError: ""
   property var keyThen: null
+  // The card the swap key opens over a tile.
+  readonly property alias swapCard: swapCard
 
   onSwapKeyChanged: keySync.restart()
   onPanelChanged: keySync.restart()
@@ -463,12 +469,18 @@ Scope {
     if (boundSwapKey !== "") Quickshell.execDetached(["hyprctl", "eval", Model.unbindLua(boundSwapKey)])
   }
 
-  // The address of the focused window when it is a tile, or "".
+  // The focused window's tile from the list, with its session, or null.
   function focusedTile() {
     var toplevel = Hyprland.activeToplevel
     var address = toplevel && toplevel.lastIpcObject ? String(toplevel.lastIpcObject.address || "") : ""
     if (address === "" && toplevel) address = "0x" + toplevel.address
-    return Model.findTile(Model.listTiles(list), address) ? address : ""
+    for (var s = 0; s < list.sessions.length; s++) {
+      for (var t = 0; t < list.sessions[s].tiles.length; t++) {
+        var tile = list.sessions[s].tiles[t]
+        if (tile.address === address) return Object.assign({ session: list.sessions[s].name }, tile)
+      }
+    }
+    return null
   }
 
   Component.onCompleted: {
@@ -481,15 +493,20 @@ Scope {
   IpcHandler {
     target: "pym.mosaic"
 
-    // Opens the panel in swap mode for the focused tile, so a key bound to
-    // `omarchy-shell pym.mosaic swap` changes the tile you are looking at.
+    // Opens the swap card over the focused tile, so the swap key changes
+    // the tile you are looking at.
     function swap(): string {
-      var address = root.focusedTile()
-      if (address === "") return "The focused window is not a mosaic tile"
-      if (!root.panel) return "Add the Mosaic widget to the bar to swap tiles"
-      root.panel.startSwapFor(address)
-      return "Pick what replaces this tile in the Mosaic panel"
+      var tile = root.focusedTile()
+      if (!tile) return "The focused window is not a mosaic tile"
+      if (root.busy) return "Still busy: " + root.busyLabel
+      swapCard.openFor(tile)
+      return "Pick what replaces this tile on the card over it"
     }
+  }
+
+  SwapCard {
+    id: swapCard
+    service: root
   }
 
   // Coalesces the burst of events one window change produces.

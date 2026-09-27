@@ -545,6 +545,8 @@ function monitorFromIpc(object) {
     name: object.name,
     focused: object.focused === true,
     activeWorkspace: object.activeWorkspace.id,
+    // Position in Hyprland's global layout, in logical pixels.
+    origin: [Math.trunc(Number(object.x) || 0), Math.trunc(Number(object.y) || 0)],
     size: [width, height],
     workArea: {
       x: Math.trunc(Number(object.x) || 0) + reserved[0],
@@ -801,4 +803,33 @@ function swapBindLua(spec) {
 
 function unbindLua(spec) {
   return 'hl.unbind("' + spec + '")'
+}
+
+// Where the window at `address` sits on its monitor, from `hyprctl -j
+// clients` and `hyprctl -j monitors` output: { monitor (name), x, y, width,
+// height } in the monitor's logical pixels, or null.
+function tileRect(clientsText, monitorsText, address) {
+  var clients
+  try {
+    clients = JSON.parse(String(clientsText || ""))
+  } catch (error) {
+    return null
+  }
+  var monitors = parseMonitors(monitorsText)
+  if (!Array.isArray(clients) || !monitors) return null
+  for (var i = 0; i < clients.length; i++) {
+    var client = clients[i]
+    if (!client || client.address !== address || !Array.isArray(client.at) || !Array.isArray(client.size)) continue
+    for (var m = 0; m < monitors.length; m++) {
+      if (monitors[m].id !== client.monitor) continue
+      return {
+        monitor: monitors[m].name,
+        x: client.at[0] - monitors[m].origin[0],
+        y: client.at[1] - monitors[m].origin[1],
+        width: client.size[0],
+        height: client.size[1]
+      }
+    }
+  }
+  return null
 }

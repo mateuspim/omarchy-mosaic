@@ -53,11 +53,15 @@ session field, or else the selected tile's session, or else `default`. New tiles
 tiles, and otherwise go to the focused monitor.
 
 To swap the tile you're looking at without opening the bar first, press
-**Super+Shift+S** on it: the panel opens in swap mode for the focused tile.
+**Super+Shift+S** on it. A card opens over the tile with your web apps
+(1–9) and the tile's address, ready to edit (A, then Enter), so you can
+switch to another site or just another channel; Esc or a click on the tile
+closes it. Errors arrive as a notification.
 Change the key in the widget's **Swap key** setting (written like
 `SUPER + SHIFT + S`), or clear it to have none; a key another binding
 already uses is refused, and the panel says why. The key runs
-`omarchy-shell pym.mosaic swap`, which you can also call yourself. The
+`omarchy-shell pym.mosaic swap`, which you can also call yourself; the
+panel's own swap mode (S) works as before. The
 replacement keeps the old tile's session, workspace, slot, and place in the
 list.
 

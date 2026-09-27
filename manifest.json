@@ -35,7 +35,7 @@
         "type": "string",
         "label": "Swap key",
         "defaultValue": "SUPER + SHIFT + S",
-        "description": "Key that opens the panel in swap mode for the focused tile, written like SUPER + SHIFT + S. Leave empty for no key. A key another binding already uses is refused."
+        "description": "Key that opens a swap card over the focused tile, to pick another web app or edit its address, written like SUPER + SHIFT + S. Leave empty for no key. A key another binding already uses is refused."
       },
       {
         "key": "hiddenWebapps",

@@ -205,16 +205,6 @@ Panel {
     status = ""
   }
 
-  // Opens the panel in swap mode for the tile at `address`; the service's
-  // `swap` IPC call uses this.
-  function startSwapFor(address) {
-    open()
-    for (var i = 0; i < tiles.length; i++) {
-      if (tiles[i].address === address) return startSwap(tiles[i])
-    }
-    showStatus("That tile is gone; press R to refresh", true)
-  }
-
   function focusTile(tile) {
     if (!tile) return
     runService(function(engine) { return engine.focus(tile.address, "Focusing " + Model.tileLabel(tile)) })
@@ -248,6 +238,21 @@ Panel {
     target: root.service
     property: "swapKey"
     value: root.swapKey
+    when: root.service !== null
+  }
+
+  // The swap card, which the service draws, uses these settings too.
+  Binding {
+    target: root.service
+    property: "browser"
+    value: root.browser
+    when: root.service !== null
+  }
+
+  Binding {
+    target: root.service
+    property: "hiddenWebapps"
+    value: String(root.setting("hiddenWebapps", ""))
     when: root.service !== null
   }
 

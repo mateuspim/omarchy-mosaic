@@ -5,7 +5,7 @@ import vm from "node:vm"
 const source = fs.readFileSync(new URL("../Model.js", import.meta.url), "utf8")
   .replace(/^\.pragma library\s*/m, "")
 const model = {}
-vm.runInNewContext(source + "\nObject.assign(model, { hiddenEntries, showWebapp, nameList, visibleWebapps, hideWebapp, sessionOf, clientFromIpc, parseStore, tileState, buildList, shapeList, parseClients, validAddress, dispatchExpression, listTiles, findTile, planFocus, planRemove, planClose, planContain, restoreAfterMove, monitorFromIpc, parseMonitors, resolveAddTargets, chooseWorkspace, desktopId, isChromiumFamily, isAppWindow, parseOpenWindow, tileDispatches, pruneRecords, serializeStore, planReplace, replaceRecord, parseCursorPos, cursorMoveExpression, parseKeySpec, bindConflict, swapBindLua, unbindLua, webappUrl, webappFromEntry, buildWebapps, shapeWebapps, findWebapp, resolveTarget, parseList, tileLabel, tileMeta, normalizeUrl, sessionName, summary, anyUncontained, parseManifest });", { model })
+vm.runInNewContext(source + "\nObject.assign(model, { hiddenEntries, showWebapp, nameList, visibleWebapps, hideWebapp, sessionOf, clientFromIpc, parseStore, tileState, buildList, shapeList, parseClients, validAddress, dispatchExpression, listTiles, findTile, planFocus, planRemove, planClose, planContain, restoreAfterMove, monitorFromIpc, parseMonitors, resolveAddTargets, chooseWorkspace, desktopId, isChromiumFamily, isAppWindow, parseOpenWindow, tileDispatches, pruneRecords, serializeStore, planReplace, replaceRecord, parseCursorPos, cursorMoveExpression, parseKeySpec, bindConflict, tileRect, swapBindLua, unbindLua, webappUrl, webappFromEntry, buildWebapps, shapeWebapps, findWebapp, resolveTarget, parseList, tileLabel, tileMeta, normalizeUrl, sessionName, summary, anyUncontained, parseManifest });", { model })
 
 // Values built inside the VM belong to another realm, so compare copies.
 const plain = value => JSON.parse(JSON.stringify(value))
@@ -237,7 +237,7 @@ assert.equal(model.dispatchExpression("release", "0x1a"), 'hl.dsp.window.fullscr
 // Ported from platform::tests::rotated_scaled_monitor_uses_logical_portrait_size.
 assert.deepEqual(plain(model.monitorFromIpc({ id: 0, name: "DP-1", activeWorkspace: { id: 3 }, x: 0, y: 0, width: 2560, height: 1440,
   scale: 1.25, transform: 1, reserved: [0, 26, 0, 0] })),
-  { id: 0, name: "DP-1", focused: false, activeWorkspace: 3, size: [1152, 2048], workArea: { x: 0, y: 26, width: 1152, height: 2022 } })
+  { id: 0, name: "DP-1", focused: false, activeWorkspace: 3, origin: [0, 0], size: [1152, 2048], workArea: { x: 0, y: 26, width: 1152, height: 2022 } })
 const monitorsJson = JSON.stringify([
   { id: 1, name: "DP-4", focused: false, activeWorkspace: { id: 10 }, x: 0, y: 0, width: 1920, height: 1080, scale: 1, transform: 0, reserved: [0, 0, 0, 0] },
   { id: 0, name: "DP-5", focused: true, activeWorkspace: { id: 1 }, x: 1920, y: 0, width: 2560, height: 1440, scale: 1.25, transform: 0, reserved: [0, 26, 0, 0] },
@@ -352,5 +352,12 @@ assert.equal(model.bindConflict("oops", model.parseKeySpec("SUPER + ALT + S")), 
 assert.equal(model.swapBindLua("SUPER + SHIFT + S"),
   'hl.bind("SUPER + SHIFT + S", hl.dsp.exec_cmd("omarchy-shell pym.mosaic swap"), { description = "Mosaic: swap the focused tile\'s web app" })')
 assert.equal(model.unbindLua("SUPER + SHIFT + S"), 'hl.unbind("SUPER + SHIFT + S")')
+
+// monitorsJson: DP-4 (id 1) at 0,0 and DP-5 (id 0) at 1920,0.
+const clientsJson = JSON.stringify([{ address: "0x1", monitor: 0, at: [1932, 38], size: [1005, 544] }, { address: "0x2", monitor: 1, at: [12, 1173], size: [1056, 735] }])
+assert.deepEqual(plain(model.tileRect(clientsJson, monitorsJson, "0x1")), { monitor: "DP-5", x: 12, y: 38, width: 1005, height: 544 })
+assert.deepEqual(plain(model.tileRect(clientsJson, monitorsJson, "0x2")), { monitor: "DP-4", x: 12, y: 1173, width: 1056, height: 735 })
+assert.equal(model.tileRect(clientsJson, monitorsJson, "0x9"), null)
+assert.equal(model.tileRect("nope", monitorsJson, "0x1"), null)
 
 console.log("model tests passed")
