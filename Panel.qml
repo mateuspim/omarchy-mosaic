@@ -19,6 +19,7 @@ Panel {
   property var sessions: []
   property var tiles: []
   property var webapps: []
+  property string mosaicVersion: ""
   property string listError: ""
   property string status: ""
   property bool statusIsError: false
@@ -71,6 +72,8 @@ Panel {
     if (webappsProcess.running) return
     webappsProcess.command = [command, "webapps", "--json"]
     webappsProcess.running = true
+    versionProcess.command = [command, "--version"]
+    versionProcess.running = true
   }
 
   function iconSource(icon) {
@@ -205,6 +208,15 @@ Panel {
     stdout: StdioCollector { id: webappsStdout; waitForEnd: true }
     onExited: function(exitCode) {
       root.webapps = exitCode === 0 ? Model.parseWebapps(webappsStdout.text).apps : []
+    }
+  }
+
+  Process {
+    id: versionProcess
+    running: false
+    stdout: StdioCollector { id: versionStdout; waitForEnd: true }
+    onExited: function(exitCode) {
+      root.mosaicVersion = exitCode === 0 ? String(versionStdout.text).trim() : ""
     }
   }
 
@@ -423,6 +435,17 @@ Panel {
             font.pixelSize: Style.font.caption
             horizontalAlignment: Text.AlignHCenter
             wrapMode: Text.WordWrap
+          }
+
+          Text {
+            visible: root.mosaicVersion !== ""
+            width: parent.width
+            textFormat: Text.PlainText
+            text: root.mosaicVersion
+            color: root.dim
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+            horizontalAlignment: Text.AlignHCenter
           }
         }
       }
