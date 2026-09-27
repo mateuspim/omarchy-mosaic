@@ -375,3 +375,121 @@ function errorLine(stderr, fallback) {
   }
   return fallback
 }
+
+// Clients from `hyprctl -j clients`, or null when the text is not that list.
+function parseClients(text) {
+  var parsed
+  try {
+    parsed = JSON.parse(String(text || ""))
+  } catch (error) {
+    return null
+  }
+  if (!Array.isArray(parsed)) return null
+  var clients = []
+  for (var i = 0; i < parsed.length; i++) {
+    var client = clientFromIpc(parsed[i])
+    if (client) clients.push(client)
+  }
+  return clients
+}
+
+// Whether `address` is the hex form Hyprland reports. Addresses are
+// interpolated into Lua dispatch expressions, so nothing else is accepted.
+// Mirrors `platform::selector`.
+function validAddress(address) {
+  return /^0x[0-9a-fA-F]+$/.test(String(address || ""))
+}
+
+// The Lua dispatch that focuses ("focus"), closes ("close"), or contains
+// fullscreen in ("contain") a window, or "" for an invalid address.
+function dispatchExpression(action, address) {
+  if (!validAddress(address)) return ""
+  var window = 'window = "address:' + address + '"'
+  if (action === "focus") return "hl.dsp.focus({ " + window + " })"
+  if (action === "close") return "hl.dsp.window.close({ " + window + " })"
+  if (action === "contain") return "hl.dsp.window.fullscreen_state({ internal = 0, client = 2, " + window + " })"
+  return ""
+}
+
+// Every tile of a v1 list, in listing order, with its session name.
+function listTiles(list) {
+  var tiles = []
+  var sessions = list && Array.isArray(list.sessions) ? list.sessions : []
+  for (var i = 0; i < sessions.length; i++) {
+    var sessionTiles = Array.isArray(sessions[i].tiles) ? sessions[i].tiles : []
+    for (var j = 0; j < sessionTiles.length; j++) {
+      tiles.push({ session: sessions[i].name, index: sessionTiles[j].index, address: sessionTiles[j].address,
+        state: sessionTiles[j].state })
+    }
+  }
+  return tiles
+}
+
+// The tile a target names: its number in the list, or its window address.
+function findTile(tiles, target) {
+  var text = String(target === undefined || target === null ? "" : target).trim()
+  var index = /^\+?\d+$/.test(text) ? Number(text) : -1
+  for (var i = 0; i < tiles.length; i++) {
+    if (tiles[i].index === index || tiles[i].address === text) return tiles[i]
+  }
+  return null
+}
+
+// Checks an optional session filter; "" or null means every session.
+function sessionFilterError(session) {
+  if (session === undefined || session === null || session === "") return ""
+  return sessionName(session) === String(session) ? ""
+    : "Invalid session name " + JSON.stringify(String(session)) + ": use up to 32 lowercase letters, digits, - or _"
+}
+
+// A plan for the engine: the Lua dispatches to run in order and the message
+// to report once they all succeed, or an error, in which case nothing runs.
+function plan(action, tiles, message) {
+  var expressions = []
+  for (var i = 0; i < tiles.length; i++) {
+    var expression = dispatchExpression(action, tiles[i].address)
+    if (expression === "") return { error: "Unexpected Hyprland window address " + JSON.stringify(String(tiles[i].address)) }
+    expressions.push(expression)
+  }
+  return { error: "", expressions: expressions, message: message }
+}
+
+// `mosaic focus TILE`.
+function planFocus(list, target) {
+  var tile = findTile(listTiles(list), target)
+  if (!tile) return { error: "No mosaic tile " + JSON.stringify(String(target)) + "; see `mosaic list`" }
+  return plan("focus", [tile], "")
+}
+
+// `mosaic remove TILE...`: every target is resolved before any tile closes.
+function planRemove(list, targets) {
+  var all = listTiles(list)
+  var chosen = []
+  var names = stringList(targets)
+  if (names.length === 0) return { error: "Name at least one tile to remove" }
+  for (var i = 0; i < names.length; i++) {
+    var tile = findTile(all, names[i])
+    if (!tile) return { error: "No mosaic tile " + JSON.stringify(names[i]) + "; see `mosaic list`" }
+    if (chosen.indexOf(tile) === -1) chosen.push(tile)
+  }
+  return plan("close", chosen, "Removed " + chosen.length + " tile(s).")
+}
+
+// `mosaic close [--session NAME]`: a session's tiles, or every tile.
+function planClose(list, session) {
+  var error = sessionFilterError(session)
+  if (error) return { error: error }
+  var chosen = listTiles(list).filter(function(tile) { return !session || tile.session === session })
+  return plan("close", chosen, "Closed " + chosen.length + " tile(s).")
+}
+
+// `mosaic contain [--session NAME]`: only uncontained tiles, so floating
+// tiles and ones the user made truly fullscreen are left alone.
+function planContain(list, session) {
+  var error = sessionFilterError(session)
+  if (error) return { error: error }
+  var chosen = listTiles(list).filter(function(tile) {
+    return (!session || tile.session === session) && tile.state === "uncontained"
+  })
+  return plan("contain", chosen, "Contained fullscreen in " + chosen.length + " tile(s).")
+}

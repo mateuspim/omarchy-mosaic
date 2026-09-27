@@ -60,8 +60,9 @@ tiles, and otherwise go to the focused monitor.
 ## Compatibility
 
 The service builds the version 1 `mosaic list --json` and `mosaic webapps
---json` formats itself. Until the engine can change tiles, the widget runs the
-mosaic CLI's `add`, `remove`, `focus`, `close`, and `contain` subcommands.
+--json` formats itself, and it focuses, removes, closes, and contains tiles
+through Hyprland. Until the engine can open tiles, the widget runs the
+mosaic CLI's `add` subcommand.
 
 ## Development
 

@@ -8,9 +8,9 @@ import qs.Ui
 import "Model.js" as Model
 
 // Bar widget for omarchy-mosaic. The tile list and the web apps come from
-// the plugin's service (MosaicService.qml), and every change still goes
-// through the mosaic CLI until the engine can do it, so this widget holds no
-// session state of its own.
+// the plugin's service (MosaicService.qml), which also focuses, removes,
+// closes, and contains tiles. Adding still goes through the mosaic CLI until
+// the engine can do it, so this widget holds no session state of its own.
 Panel {
   id: root
   moduleName: "pym.mosaic"
@@ -33,7 +33,10 @@ Panel {
   property string mosaicVersion: ""
   property string status: ""
   property bool statusIsError: false
+  // The running CLI command's description.
   property string busyLabel: ""
+  // What is running right now, in the CLI or in the service.
+  readonly property string activity: busyLabel !== "" ? busyLabel : service && service.busy ? service.busyLabel : ""
   property int cursor: 0
   property bool cursorActive: false
   property bool actionStarted: false
@@ -93,8 +96,8 @@ Panel {
 
   // Runs one mosaic subcommand at a time. `label` describes it while it runs.
   function run(args, label) {
-    if (actionProcess.running) {
-      showStatus("Still busy: " + busyLabel, true)
+    if (activity !== "") {
+      showStatus("Still busy: " + activity, true)
       return
     }
     busyLabel = label
@@ -102,6 +105,26 @@ Panel {
     actionProcess.command = [command].concat(args)
     actionStarted = false
     actionProcess.running = true
+  }
+
+  // Runs a service action, such as `service.focus`, and shows why it could
+  // not start. The service reports how it ended with actionFinished.
+  function runService(start) {
+    if (!service) {
+      showStatus(listing.error, true)
+      return
+    }
+    if (busyLabel !== "") {
+      showStatus("Still busy: " + busyLabel, true)
+      return
+    }
+    status = ""
+    var error = start(service)
+    if (error) showStatus(error, true)
+  }
+
+  function contain() {
+    runService(function(engine) { return engine.contain("") })
   }
 
   function showStatus(text, isError) {
@@ -178,16 +201,16 @@ Panel {
 
   function focusTile(tile) {
     if (!tile) return
-    run(["focus", tile.address], "Focusing " + Model.tileLabel(tile))
+    runService(function(engine) { return engine.focus(tile.address, "Focusing " + Model.tileLabel(tile)) })
   }
 
   function removeTile(tile) {
     if (!tile) return
-    run(["remove", tile.address], "Removing " + Model.tileLabel(tile))
+    runService(function(engine) { return engine.remove([tile.address], "Removing " + Model.tileLabel(tile)) })
   }
 
   function closeSession(name) {
-    run(["close", "--session", name], "Closing " + name)
+    runService(function(engine) { return engine.close(name) })
   }
 
   function moveCursor(delta) {
@@ -211,6 +234,13 @@ Panel {
     stdout: StdioCollector { id: versionStdout; waitForEnd: true }
     onExited: function(exitCode) {
       root.mosaicVersion = exitCode === 0 ? String(versionStdout.text).trim() : ""
+    }
+  }
+
+  Connections {
+    target: root.service
+    function onActionFinished(label, error, message) {
+      if (error) root.showStatus(error, true)
     }
   }
 
@@ -278,7 +308,7 @@ Panel {
         else if (t === "D" && root.cursorActive && root.selectedTile) root.closeSession(root.selectedTile.session)
         else if (t === "r" || t === "R") root.refresh()
         else if (root.view !== "tiles") return
-        else if (t === "c" || t === "C") root.run(["contain"], "Containing fullscreen")
+        else if (t === "c" || t === "C") root.contain()
         else if (t >= "1" && t <= "9") root.addWebapp(root.shownWebapps[Number(t) - 1])
       }
 
@@ -302,7 +332,7 @@ Panel {
             width: parent.width
             title: "Mosaic"
             meta: root.listError !== "" ? "Unavailable" : Model.summary(root.sessions, root.tiles)
-            detail: root.busyLabel !== "" ? root.busyLabel + "…" : ""
+            detail: root.activity !== "" ? root.activity + "…" : ""
             foreground: root.foreground
             fontFamily: root.fontFamily
             iconOpacity: root.tiles.length > 0 ? 1.0 : 0.5
@@ -427,7 +457,7 @@ Panel {
                   text: "Add"
                   iconText: "󰐕"
                   foreground: root.foreground
-                  enabled: root.busyLabel === ""
+                  enabled: root.activity === ""
                   onClicked: root.addTile()
                 }
               }
@@ -439,7 +469,7 @@ Panel {
               text: "Contain fullscreen in every tile  C"
               iconText: "󰊓"
               foreground: root.foreground
-              onClicked: root.run(["contain"], "Containing fullscreen")
+              onClicked: root.contain()
             }
           }
 

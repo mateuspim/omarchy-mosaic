@@ -8,8 +8,8 @@
   `close`, `contain`, `webapps`, `monitors`.
 - This bar widget: lists sessions, adds web apps or URLs, focuses and removes
   tiles, closes sessions, and re-contains, all through the CLI.
-- The plugin's own read-only engine (`MosaicService.qml`) for the tile list
-  and the web apps.
+- The plugin's own engine (`MosaicService.qml`) for the tile list, the web
+  apps, and focusing, removing, closing, and containing tiles.
 - Hiding web apps from the panel, and a Hidden web apps tab to bring them
   back.
 

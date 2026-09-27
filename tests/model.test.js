@@ -5,7 +5,7 @@ import vm from "node:vm"
 const source = fs.readFileSync(new URL("../Model.js", import.meta.url), "utf8")
   .replace(/^\.pragma library\s*/m, "")
 const model = {}
-vm.runInNewContext(source + "\nObject.assign(model, { hiddenEntries, showWebapp, nameList, visibleWebapps, hideWebapp, sessionOf, clientFromIpc, parseStore, tileState, buildList, shapeList, webappUrl, webappFromEntry, buildWebapps, shapeWebapps, findWebapp, resolveTarget, parseList, tileLabel, tileMeta, normalizeUrl, sessionName, summary, anyUncontained, errorLine });", { model })
+vm.runInNewContext(source + "\nObject.assign(model, { hiddenEntries, showWebapp, nameList, visibleWebapps, hideWebapp, sessionOf, clientFromIpc, parseStore, tileState, buildList, shapeList, parseClients, validAddress, dispatchExpression, listTiles, findTile, planFocus, planRemove, planClose, planContain, webappUrl, webappFromEntry, buildWebapps, shapeWebapps, findWebapp, resolveTarget, parseList, tileLabel, tileMeta, normalizeUrl, sessionName, summary, anyUncontained, errorLine });", { model })
 
 // Values built inside the VM belong to another realm, so compare copies.
 const plain = value => JSON.parse(JSON.stringify(value))
@@ -175,5 +175,52 @@ assert.deepEqual(plain(model.parseStore('{"tiles":[{"address":"0x1","session":"s
   [{ address: "0x1", session: "s", url: "https://a" }])
 assert.deepEqual(plain(model.parseStore("")), [])
 assert.deepEqual(plain(model.parseStore('{"tiles":5}')), [])
+
+// Ported from platform::tests::rejects_non_hex_addresses.
+assert.equal(model.validAddress("0x5f4ccce343a0"), true)
+assert.equal(model.validAddress('0x5f" }) os.exit() --'), false)
+assert.equal(model.validAddress(""), false)
+assert.equal(model.validAddress("0x"), false)
+assert.equal(model.validAddress("5f4c"), false)
+assert.equal(model.dispatchExpression("focus", "0x1a"), 'hl.dsp.focus({ window = "address:0x1a" })')
+assert.equal(model.dispatchExpression("close", "0x1a"), 'hl.dsp.window.close({ window = "address:0x1a" })')
+assert.equal(model.dispatchExpression("contain", "0x1a"), 'hl.dsp.window.fullscreen_state({ internal = 0, client = 2, window = "address:0x1a" })')
+assert.equal(model.dispatchExpression("close", '0x1" })'), "")
+assert.equal(model.dispatchExpression("explode", "0x1a"), "")
+
+assert.deepEqual(plain(model.parseClients('[{"address":"0xa","tags":["mosaic"]},{"title":"no address"}]').map(c => c.address)), ["0xa"])
+assert.equal(model.parseClients("hyprctl: oops"), null)
+assert.equal(model.parseClients('{"address":"0xa"}'), null)
+
+// `live` above: 1 news 0x1 (contained), 2 streams 0x2 (contained), 3 streams 0x3 (uncontained).
+assert.deepEqual(plain(model.listTiles(live).map(t => [t.index, t.session, t.address, t.state])),
+  [[1, "news", "0x1", "contained"], [2, "streams", "0x2", "contained"], [3, "streams", "0x3", "uncontained"]])
+assert.equal(model.findTile(model.listTiles(live), "2").address, "0x2")
+assert.equal(model.findTile(model.listTiles(live), 3).address, "0x3")
+assert.equal(model.findTile(model.listTiles(live), "0x1").index, 1)
+assert.equal(model.findTile(model.listTiles(live), "4"), null)
+assert.equal(model.findTile(model.listTiles(live), "1.0"), null)
+
+assert.deepEqual(plain(model.planFocus(live, "0x2")), { error: "", expressions: ['hl.dsp.focus({ window = "address:0x2" })'], message: "" })
+assert.equal(model.planFocus(live, "9").error, 'No mosaic tile "9"; see `mosaic list`')
+const removal = plain(model.planRemove(live, ["3", "0x1", "1"]))
+assert.equal(removal.error, "")
+assert.deepEqual(removal.expressions, ['hl.dsp.window.close({ window = "address:0x3" })', 'hl.dsp.window.close({ window = "address:0x1" })'])
+assert.equal(removal.message, "Removed 2 tile(s).")
+// A typo anywhere closes nothing.
+assert.deepEqual(plain(model.planRemove(live, ["1", "7"])), { error: 'No mosaic tile "7"; see `mosaic list`' })
+assert.equal(model.planRemove(live, []).error, "Name at least one tile to remove")
+assert.equal(model.planClose(live, "streams").expressions.length, 2)
+assert.equal(model.planClose(live, "").message, "Closed 3 tile(s).")
+assert.equal(model.planClose(live, "nothing").message, "Closed 0 tile(s).")
+assert.equal(model.planClose(live, "Streams").error.startsWith('Invalid session name "Streams"'), true)
+assert.deepEqual(plain(model.planContain(live, null)), { error: "",
+  expressions: ['hl.dsp.window.fullscreen_state({ internal = 0, client = 2, window = "address:0x3" })'],
+  message: "Contained fullscreen in 1 tile(s)." })
+assert.equal(model.planContain(live, "news").expressions.length, 0)
+// An address that is not hex never reaches a dispatch.
+const forged = { version: 1, sessions: [{ name: "x", tiles: [{ index: 1, address: '0x1" }) os.exit() --', state: "uncontained" }] }] }
+assert.equal(model.planClose(forged, "").error.startsWith("Unexpected Hyprland window address"), true)
+assert.equal(model.planContain(forged, "").error.startsWith("Unexpected Hyprland window address"), true)
 
 console.log("model tests passed")

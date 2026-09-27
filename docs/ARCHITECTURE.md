@@ -4,8 +4,9 @@
 
 The plugin is a service (`MosaicService.qml`) plus a bar widget
 (`Panel.qml`), with pure logic in `Model.js`. The service builds the tile list
-from Hyprland and `tiles.json`; every action still shells out to the Rust
-`mosaic` CLI. It is being turned into the whole product; `docs/HANDOFF.md` has
+from Hyprland and `tiles.json` and the web app list from `DesktopEntries`,
+and it focuses, removes, closes, and contains tiles through `hyprctl`. Only
+`add` still shells out to the Rust `mosaic` CLI. It is being turned into the whole product; `docs/HANDOFF.md` has
 the plan and the parity checklist. Until each action is ported, the widget
 keeps calling the CLI for it, and it must work before and after every step.
 
