@@ -208,6 +208,35 @@ function findWebapp(apps, text) {
   return null
 }
 
+// The hiddenWebapps setting: web app names or ids separated by commas,
+// compared without case.
+function nameList(text) {
+  var names = []
+  var parts = String(text || "").split(",")
+  for (var i = 0; i < parts.length; i++) {
+    var name = parts[i].trim().toLowerCase()
+    if (name !== "" && names.indexOf(name) === -1) names.push(name)
+  }
+  return names
+}
+
+function isHidden(app, hidden) {
+  return hidden.indexOf(app.name.toLowerCase()) !== -1 || hidden.indexOf(app.id.toLowerCase()) !== -1
+}
+
+// The web apps that get a button: every one not named in `hiddenText`.
+function visibleWebapps(apps, hiddenText) {
+  var hidden = nameList(hiddenText)
+  return apps.filter(function(app) { return !isHidden(app, hidden) })
+}
+
+// The hiddenWebapps setting with `app` added, keeping what the user typed.
+function hideWebapp(hiddenText, app) {
+  var text = String(hiddenText || "").trim()
+  if (!app || isHidden(app, nameList(text))) return text
+  return text === "" ? app.name : text.replace(/,\s*$/, "") + ", " + app.name
+}
+
 // What the URL field means: a web app's name, or a web address.
 function resolveTarget(text, apps) {
   var app = findWebapp(apps, text)

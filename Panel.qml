@@ -25,6 +25,8 @@ Panel {
   readonly property var tiles: listing.tiles
   readonly property string listError: listing.error
   property var webapps: []
+  // The web apps that get a button; hidden ones can still be typed.
+  readonly property var shownWebapps: Model.visibleWebapps(webapps, setting("hiddenWebapps", ""))
   property string mosaicVersion: ""
   property string status: ""
   property bool statusIsError: false
@@ -133,6 +135,19 @@ Panel {
 
   function addWebapp(app) {
     if (app) addUrl(app.url, app.name)
+  }
+
+  // Adds `app` to the hiddenWebapps setting, which the shell saves in
+  // shell.json.
+  function hideWebapp(app) {
+    var shell = bar ? bar.shell : null
+    if (!app || !shell || typeof shell.updateEntryInline !== "function") {
+      showStatus("Cannot save settings here; hide web apps in the widget settings", true)
+      return
+    }
+    settings = Object.assign({}, settings, { hiddenWebapps: Model.hideWebapp(setting("hiddenWebapps", ""), app) })
+    shell.updateEntryInline(moduleName, settings)
+    showStatus("Hid " + app.name + ". Type its name to add it, or edit Hidden web apps in the widget settings to bring it back.", false)
   }
 
   function startAdding() {
@@ -244,7 +259,7 @@ Panel {
         else if (t === "D" && root.cursorActive && root.selectedTile) root.closeSession(root.selectedTile.session)
         else if (t === "c" || t === "C") root.run(["contain"], "Containing fullscreen")
         else if (t === "r" || t === "R") { root.refresh(); root.refreshWebapps() }
-        else if (t >= "1" && t <= "9") root.addWebapp(root.webapps[Number(t) - 1])
+        else if (t >= "1" && t <= "9") root.addWebapp(root.shownWebapps[Number(t) - 1])
       }
 
       Flickable {
@@ -328,17 +343,17 @@ Panel {
             spacing: Style.space(6)
 
             PanelSectionHeader {
-              text: root.webapps.length > 0 ? "ADD TILE  ·  1–" + Math.min(9, root.webapps.length) + " WEB APP  ·  A ADDRESS" : "ADD TILE  ·  A"
+              text: root.shownWebapps.length > 0 ? "ADD TILE  ·  1–" + Math.min(9, root.shownWebapps.length) + " WEB APP  ·  A ADDRESS" : "ADD TILE  ·  A"
               foreground: root.foreground
               fontFamily: root.fontFamily
             }
 
             Flow {
-              visible: root.webapps.length > 0
+              visible: root.shownWebapps.length > 0
               width: parent.width
               spacing: Style.space(6)
               Repeater {
-                model: root.webapps
+                model: root.shownWebapps
                 WebappButton {
                   required property var modelData
                   required property int index
@@ -480,12 +495,16 @@ Panel {
       id: webappMouse
       anchors.fill: parent
       hoverEnabled: true
-      onClicked: root.addWebapp(webappButton.app)
+      acceptedButtons: Qt.LeftButton | Qt.RightButton
+      onClicked: function(mouse) {
+        if (mouse.button === Qt.RightButton) root.hideWebapp(webappButton.app)
+        else root.addWebapp(webappButton.app)
+      }
     }
 
     PanelToolTip {
       visible: webappMouse.containsMouse
-      text: webappButton.app ? webappButton.app.url : ""
+      text: webappButton.app ? webappButton.app.url + "  ·  right-click to hide" : ""
     }
   }
 

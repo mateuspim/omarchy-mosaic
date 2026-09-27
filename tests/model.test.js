@@ -5,7 +5,7 @@ import vm from "node:vm"
 const source = fs.readFileSync(new URL("../Model.js", import.meta.url), "utf8")
   .replace(/^\.pragma library\s*/m, "")
 const model = {}
-vm.runInNewContext(source + "\nObject.assign(model, { sessionOf, clientFromIpc, parseStore, tileState, buildList, shapeList, parseWebapps, findWebapp, resolveTarget, parseList, tileLabel, tileMeta, normalizeUrl, sessionName, summary, anyUncontained, errorLine });", { model })
+vm.runInNewContext(source + "\nObject.assign(model, { nameList, visibleWebapps, hideWebapp, sessionOf, clientFromIpc, parseStore, tileState, buildList, shapeList, parseWebapps, findWebapp, resolveTarget, parseList, tileLabel, tileMeta, normalizeUrl, sessionName, summary, anyUncontained, errorLine });", { model })
 
 // Values built inside the VM belong to another realm, so compare copies.
 const plain = value => JSON.parse(JSON.stringify(value))
@@ -59,6 +59,16 @@ assert.equal(model.findWebapp(webapps.apps, "CHAT").name, "Team Chat")
 assert.equal(model.findWebapp(webapps.apps, "kick"), null)
 assert.equal(model.resolveTarget("team chat", webapps.apps), "https://chat.example")
 assert.equal(model.resolveTarget("kick.com", webapps.apps), "https://kick.com")
+assert.deepEqual(plain(model.nameList(" Twitch, team chat,,TWITCH ")), ["twitch", "team chat"])
+assert.deepEqual(plain(model.nameList("")), [])
+assert.deepEqual(plain(model.visibleWebapps(webapps.apps, "twitch").map(app => app.name)), ["Team Chat"])
+assert.deepEqual(plain(model.visibleWebapps(webapps.apps, "CHAT").map(app => app.name)), ["Twitch"])
+assert.equal(model.visibleWebapps(webapps.apps, "").length, 2)
+assert.equal(model.hideWebapp("", webapps.apps[0]), "Twitch")
+assert.equal(model.hideWebapp("Kick,", webapps.apps[1]), "Kick, Team Chat")
+assert.equal(model.hideWebapp("twitch", webapps.apps[0]), "twitch")
+// A hidden web app can still be added by typing its name.
+assert.equal(model.resolveTarget("twitch", webapps.apps), "https://twitch.tv")
 assert.equal(model.parseWebapps("error").apps.length, 0)
 assert.equal(model.parseWebapps('{"version":9,"webapps":[]}').error.includes("not supported"), true)
 

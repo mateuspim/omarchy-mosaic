@@ -47,7 +47,10 @@ Click the icon, or middle-click it to refresh.
 | Esc | Close the panel |
 
 The web app buttons come from `mosaic webapps --json`, read each time the
-panel opens. Typing a web app's name in the address field also works. A bare
+panel opens. Right-click a button to hide that web app, or list names in the
+widget's **Hidden web apps** setting (for example `Tailscale, WhatsApp`);
+remove a name there to bring its button back. Typing a web app's name in the
+address field works for hidden ones too. A bare
 host such as `twitch.tv/name` gets `https://`. Tiles go to the session in the
 session field, or else the selected tile's session, or else `default`. New tiles join the workspace where that session already has
 tiles, and otherwise go to the focused monitor.

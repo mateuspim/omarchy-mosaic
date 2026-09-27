@@ -18,7 +18,8 @@
     "allowMultiple": false,
     "defaultSection": "right",
     "defaults": {
-      "command": "mosaic"
+      "command": "mosaic",
+      "hiddenWebapps": ""
     },
     "schema": [
       {
@@ -27,6 +28,13 @@
         "label": "mosaic command",
         "defaultValue": "mosaic",
         "description": "Name or full path of the mosaic binary, for example ~/.local/bin/mosaic when it is not on the shell's PATH."
+      },
+      {
+        "key": "hiddenWebapps",
+        "type": "string",
+        "label": "Hidden web apps",
+        "defaultValue": "",
+        "description": "Web app names or ids to leave out of the panel's buttons, separated by commas, for example: Tailscale, WhatsApp. Right-clicking a button adds it here. Hidden web apps can still be added by typing their name."
       }
     ]
   }
