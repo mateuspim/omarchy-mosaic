@@ -42,6 +42,17 @@ Scope {
   // The bar widget, which sets this when it finds the service; it resets to
   // null when the widget is destroyed. IPC calls that need the panel use it.
   property QtObject panel: null
+  // The swap key: what the widget's setting asks for, what is bound now,
+  // and why the last attempt to bind it failed. The service binds it at
+  // runtime with `hyprctl eval`, so it follows the setting, and binds it
+  // again after a config reload, which drops runtime binds.
+  property string swapKey: ""
+  property string boundSwapKey: ""
+  property string swapKeyError: ""
+  property var keyThen: null
+
+  onSwapKeyChanged: keySync.restart()
+  onPanelChanged: keySync.restart()
   // Fullscreen state dispatches waiting to run after tiles moved.
   property var restoreQueue: []
 
@@ -392,6 +403,66 @@ Scope {
     if (JSON.stringify(next) !== JSON.stringify(webapps)) webapps = next
   }
 
+  // Makes the bound swap key match the setting. Without the widget, there
+  // is no panel to swap in, so no key is bound.
+  function syncSwapKey() {
+    if (keyProcess.running) return keySync.restart()
+    var parsed = panel ? Model.parseKeySpec(swapKey) : Model.parseKeySpec("")
+    if (boundSwapKey !== "" && (!parsed || boundSwapKey !== parsed.spec)) {
+      var old = boundSwapKey
+      boundSwapKey = ""
+      return runKeyStep(["hyprctl", "eval", Model.unbindLua(old)], function() { root.syncSwapKey() })
+    }
+    if (!parsed) {
+      swapKeyError = JSON.stringify(swapKey) + " is not a key. Write it like SUPER + SHIFT + S."
+      return
+    }
+    swapKeyError = ""
+    if (parsed.spec === "" || boundSwapKey === parsed.spec) return
+    runKeyStep(["hyprctl", "-j", "binds"], function(output) {
+      var taken = Model.bindConflict(output, parsed)
+      if (taken !== "") {
+        root.swapKeyError = parsed.spec + " is already bound to " + taken + ". Pick another swap key in the widget settings."
+        return
+      }
+      // A bind this service left behind, say before a shell restart, is
+      // reused instead of doubled.
+      if (root.ownBindOn(output, parsed)) {
+        root.boundSwapKey = parsed.spec
+        return
+      }
+      root.runKeyStep(["hyprctl", "eval", Model.swapBindLua(parsed.spec)], function(reply) {
+        if (reply.trim() === "ok") root.boundSwapKey = parsed.spec
+        else root.swapKeyError = "Cannot bind " + parsed.spec + ": " + reply.trim().replace(/^error:\s*/, "")
+      })
+    })
+  }
+
+  // Whether `hyprctl -j binds` output already has the service's bind on the
+  // parsed key.
+  function ownBindOn(bindsText, parsed) {
+    try {
+      var binds = JSON.parse(bindsText)
+      return binds.some(function(bind) {
+        return bind.description === Model.SWAP_BIND_DESCRIPTION && bind.submap === "" && bind.modmask === parsed.modmask
+          && String(bind.key).toLowerCase() === parsed.key.toLowerCase()
+      })
+    } catch (error) {
+      return false
+    }
+  }
+
+  function runKeyStep(command, then) {
+    keyThen = then
+    keyProcess.command = command
+    keyTimeout.restart()
+    keyProcess.running = true
+  }
+
+  Component.onDestruction: {
+    if (boundSwapKey !== "") Quickshell.execDetached(["hyprctl", "eval", Model.unbindLua(boundSwapKey)])
+  }
+
   // The address of the focused window when it is a tile, or "".
   function focusedTile() {
     var toplevel = Hyprland.activeToplevel
@@ -445,6 +516,11 @@ Scope {
       // Checked against the list from before the move, so this runs first.
       if (name === "movewindowv2") root.restoreMoved(event.data)
       if (name === "openwindow") root.windowOpened(event.data)
+      // A config reload drops runtime binds, the swap key among them.
+      if (name === "configreloaded") {
+        root.boundSwapKey = ""
+        keySync.restart()
+      }
       if (name === "openwindow" || name === "closewindow" || name === "movewindowv2"
           || name === "changefloatingmode" || name === "fullscreen" || name === "windowtitlev2"
           || name === "moveworkspacev2" || name === "monitoraddedv2" || name === "monitorremovedv2")
@@ -512,6 +588,36 @@ Scope {
     repeat: true
     running: root.busy && root.phase === "add-wait"
     onTriggered: root.sampleCursor()
+  }
+
+  // Coalesces setting changes; it also lets a previous service's unbind,
+  // sent as it was destroyed on a plugin reload, land first.
+  Timer {
+    id: keySync
+    interval: 500
+    onTriggered: root.syncSwapKey()
+  }
+
+  Process {
+    id: keyProcess
+    running: false
+    stdout: StdioCollector { id: keyStdout; waitForEnd: true }
+    onExited: function(exitCode) {
+      keyTimeout.stop()
+      var then = root.keyThen
+      root.keyThen = null
+      if (then) then(String(keyStdout.text))
+    }
+  }
+
+  Timer {
+    id: keyTimeout
+    interval: 5000
+    onTriggered: {
+      root.keyThen = null
+      keyProcess.running = false
+      root.swapKeyError = "Hyprland did not answer while binding the swap key"
+    }
   }
 
   // A dispatch that never answers must not hold the queue forever.

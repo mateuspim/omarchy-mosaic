@@ -741,3 +741,64 @@ function cursorMoveExpression(position) {
       || Math.floor(position.x) !== position.x || Math.floor(position.y) !== position.y) return ""
   return "hl.dsp.cursor.move({ x = " + position.x + ", y = " + position.y + " })"
 }
+
+// The swap key's default, and the description its Hyprland bind carries,
+// which is how the service recognises its own bind.
+var DEFAULT_SWAP_KEY = "SUPER + SHIFT + S"
+var SWAP_BIND_DESCRIPTION = "Mosaic: swap the focused tile's web app"
+// Hyprland's modifier names and mask bits.
+var KEY_MODIFIERS = { SHIFT: 1, CAPS: 2, CTRL: 4, CONTROL: 4, ALT: 8, MOD2: 16, MOD3: 32, SUPER: 64, WIN: 64, LOGO: 64, MOD4: 64, MOD5: 128 }
+
+// A key setting such as "super + shift + s": { spec, modmask, key } with
+// the spec written the way Hyprland's config writes it
+// ("SUPER + SHIFT + S"); { spec: "" } for an empty setting, which means no
+// key; or null when it isn't a key. The spec is interpolated into Lua, so
+// only modifier names and a plain key name (or `code:N`) pass.
+function parseKeySpec(text) {
+  var value = String(text || "").trim()
+  if (value === "") return { spec: "", modmask: 0, key: "" }
+  var parts = value.split("+").map(function(part) { return part.trim() })
+  var key = parts.pop()
+  if (!/^(code:\d{1,3}|[A-Za-z0-9_]{1,32})$/.test(key)) return null
+  var modmask = 0
+  var names = []
+  for (var i = 0; i < parts.length; i++) {
+    var name = parts[i].toUpperCase()
+    if (!KEY_MODIFIERS.hasOwnProperty(name)) return null
+    modmask |= KEY_MODIFIERS[name]
+    names.push(name)
+  }
+  if (key.length === 1) key = key.toUpperCase()
+  return { spec: names.concat([key]).join(" + "), modmask: modmask, key: key }
+}
+
+// The description of another bind on the same key in `hyprctl -j binds`
+// output, or "" when the key is free (or only bound by the service itself).
+function bindConflict(bindsText, parsed) {
+  var binds
+  try {
+    binds = JSON.parse(String(bindsText || ""))
+  } catch (error) {
+    return ""
+  }
+  if (!Array.isArray(binds) || !parsed || parsed.spec === "") return ""
+  for (var i = 0; i < binds.length; i++) {
+    var bind = binds[i]
+    if (!bind || bind.submap !== "" || bind.modmask !== parsed.modmask) continue
+    if (String(bind.key).toLowerCase() !== parsed.key.toLowerCase()) continue
+    if (bind.description === SWAP_BIND_DESCRIPTION) continue
+    return String(bind.description || bind.dispatcher || "another binding")
+  }
+  return ""
+}
+
+// Lua for `hyprctl eval` that binds or unbinds the swap key. The command is
+// a constant; only a spec that parseKeySpec produced goes in.
+function swapBindLua(spec) {
+  return 'hl.bind("' + spec + '", hl.dsp.exec_cmd("omarchy-shell pym.mosaic swap"), { description = "'
+    + SWAP_BIND_DESCRIPTION + '" })'
+}
+
+function unbindLua(spec) {
+  return 'hl.unbind("' + spec + '")'
+}

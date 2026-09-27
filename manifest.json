@@ -19,6 +19,7 @@
     "defaultSection": "right",
     "defaults": {
       "browser": "",
+      "swapKey": "SUPER + SHIFT + S",
       "hiddenWebapps": ""
     },
     "schema": [
@@ -28,6 +29,13 @@
         "label": "Browser",
         "defaultValue": "",
         "description": "A Chromium-family browser command to open tiles with, such as brave or ~/bin/my-browser. Leave empty to use the default browser, which must be Chromium-based."
+      },
+      {
+        "key": "swapKey",
+        "type": "string",
+        "label": "Swap key",
+        "defaultValue": "SUPER + SHIFT + S",
+        "description": "Key that opens the panel in swap mode for the focused tile, written like SUPER + SHIFT + S. Leave empty for no key. A key another binding already uses is refused."
       },
       {
         "key": "hiddenWebapps",

@@ -5,7 +5,7 @@ import vm from "node:vm"
 const source = fs.readFileSync(new URL("../Model.js", import.meta.url), "utf8")
   .replace(/^\.pragma library\s*/m, "")
 const model = {}
-vm.runInNewContext(source + "\nObject.assign(model, { hiddenEntries, showWebapp, nameList, visibleWebapps, hideWebapp, sessionOf, clientFromIpc, parseStore, tileState, buildList, shapeList, parseClients, validAddress, dispatchExpression, listTiles, findTile, planFocus, planRemove, planClose, planContain, restoreAfterMove, monitorFromIpc, parseMonitors, resolveAddTargets, chooseWorkspace, desktopId, isChromiumFamily, isAppWindow, parseOpenWindow, tileDispatches, pruneRecords, serializeStore, planReplace, replaceRecord, parseCursorPos, cursorMoveExpression, webappUrl, webappFromEntry, buildWebapps, shapeWebapps, findWebapp, resolveTarget, parseList, tileLabel, tileMeta, normalizeUrl, sessionName, summary, anyUncontained, parseManifest });", { model })
+vm.runInNewContext(source + "\nObject.assign(model, { hiddenEntries, showWebapp, nameList, visibleWebapps, hideWebapp, sessionOf, clientFromIpc, parseStore, tileState, buildList, shapeList, parseClients, validAddress, dispatchExpression, listTiles, findTile, planFocus, planRemove, planClose, planContain, restoreAfterMove, monitorFromIpc, parseMonitors, resolveAddTargets, chooseWorkspace, desktopId, isChromiumFamily, isAppWindow, parseOpenWindow, tileDispatches, pruneRecords, serializeStore, planReplace, replaceRecord, parseCursorPos, cursorMoveExpression, parseKeySpec, bindConflict, swapBindLua, unbindLua, webappUrl, webappFromEntry, buildWebapps, shapeWebapps, findWebapp, resolveTarget, parseList, tileLabel, tileMeta, normalizeUrl, sessionName, summary, anyUncontained, parseManifest });", { model })
 
 // Values built inside the VM belong to another realm, so compare copies.
 const plain = value => JSON.parse(JSON.stringify(value))
@@ -332,5 +332,25 @@ assert.equal(model.cursorMoveExpression({ x: 2536, y: 791 }), "hl.dsp.cursor.mov
 assert.equal(model.cursorMoveExpression(null), "")
 assert.equal(model.cursorMoveExpression({ x: "1) os.exit(", y: 2 }), "")
 assert.equal(model.cursorMoveExpression({ x: 1.5, y: 2 }), "")
+
+assert.deepEqual(plain(model.parseKeySpec(" super + shift + s ")), { spec: "SUPER + SHIFT + S", modmask: 65, key: "S" })
+assert.deepEqual(plain(model.parseKeySpec("SUPER+ALT+F12")), { spec: "SUPER + ALT + F12", modmask: 72, key: "F12" })
+assert.deepEqual(plain(model.parseKeySpec("CTRL + code:39")), { spec: "CTRL + code:39", modmask: 4, key: "code:39" })
+assert.deepEqual(plain(model.parseKeySpec("")), { spec: "", modmask: 0, key: "" })
+assert.equal(model.parseKeySpec("HYPER + S"), null)
+assert.equal(model.parseKeySpec('SUPER + S") os.exit("'), null)
+assert.equal(model.parseKeySpec("SUPER + "), null)
+const binds = JSON.stringify([
+  { modmask: 72, key: "S", submap: "", description: "Move window to scratchpad" },
+  { modmask: 65, key: "s", submap: "", description: "Mosaic: swap the focused tile's web app" },
+  { modmask: 64, key: "M", submap: "resize", description: "In a submap" }
+])
+assert.equal(model.bindConflict(binds, model.parseKeySpec("SUPER + ALT + S")), "Move window to scratchpad")
+assert.equal(model.bindConflict(binds, model.parseKeySpec("SUPER + SHIFT + S")), "")
+assert.equal(model.bindConflict(binds, model.parseKeySpec("SUPER + M")), "")
+assert.equal(model.bindConflict("oops", model.parseKeySpec("SUPER + ALT + S")), "")
+assert.equal(model.swapBindLua("SUPER + SHIFT + S"),
+  'hl.bind("SUPER + SHIFT + S", hl.dsp.exec_cmd("omarchy-shell pym.mosaic swap"), { description = "Mosaic: swap the focused tile\'s web app" })')
+assert.equal(model.unbindLua("SUPER + SHIFT + S"), 'hl.unbind("SUPER + SHIFT + S")')
 
 console.log("model tests passed")

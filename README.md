@@ -52,10 +52,14 @@ host such as `twitch.tv/name` gets `https://`. Tiles go to the session in the
 session field, or else the selected tile's session, or else `default`. New tiles join the workspace where that session already has
 tiles, and otherwise go to the focused monitor.
 
-To swap the tile you're looking at without opening the bar first, bind a key
-to `omarchy-shell pym.mosaic swap`. It opens the panel in swap mode for the
-focused tile. The replacement keeps the old tile's session, workspace, slot,
-and place in the list.
+To swap the tile you're looking at without opening the bar first, press
+**Super+Shift+S** on it: the panel opens in swap mode for the focused tile.
+Change the key in the widget's **Swap key** setting (written like
+`SUPER + SHIFT + S`), or clear it to have none; a key another binding
+already uses is refused, and the panel says why. The key runs
+`omarchy-shell pym.mosaic swap`, which you can also call yourself. The
+replacement keeps the old tile's session, workspace, slot, and place in the
+list.
 
 ## Compatibility
 

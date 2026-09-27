@@ -54,6 +54,8 @@ Panel {
     var value = String(setting("browser", "")).trim()
     return value.indexOf("~/") === 0 ? Quickshell.env("HOME") + value.slice(1) : value
   }
+  // The swapKey setting, which the service binds in Hyprland.
+  readonly property string swapKey: String(setting("swapKey", Model.DEFAULT_SWAP_KEY))
   readonly property int cursorCount: view === "tiles" ? tiles.length : hiddenRows.length
   readonly property var selectedTile: view === "tiles" && cursor >= 0 && cursor < tiles.length ? tiles[cursor] : null
   readonly property var selectedHidden: view === "hidden" && cursor >= 0 && cursor < hiddenRows.length ? hiddenRows[cursor] : null
@@ -242,6 +244,13 @@ Panel {
     onTriggered: root.findService()
   }
 
+  Binding {
+    target: root.service
+    property: "swapKey"
+    value: root.swapKey
+    when: root.service !== null
+  }
+
   FileView {
     id: manifestFile
     path: Qt.resolvedUrl("manifest.json").toString().replace(/^file:\/\//, "")
@@ -367,7 +376,14 @@ Panel {
             }
 
             Notice {
+              visible: root.service !== null && root.service.swapKeyError !== ""
+              text: root.service ? root.service.swapKeyError : ""
+              warning: true
+            }
+
+            Notice {
               visible: root.swapTile !== null
+              warning: false
               text: root.swapTile ? "Replacing " + root.swapTile.label + ". Pick a web app, or press A and type an address. Esc cancels." : ""
             }
 
@@ -739,6 +755,7 @@ Panel {
       PanelActionButton {
         iconText: "󰓡"
         tooltipText: "Swap this tile's web app · S"
+          + (root.service && root.service.boundSwapKey !== "" ? " here, " + root.service.boundSwapKey + " on the tile" : "")
         foreground: root.foreground
         onClicked: {
           if (row.swapping) root.swapTile = null
