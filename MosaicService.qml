@@ -8,8 +8,9 @@ import "Model.js" as Model
 // enabled and destroys it on disable and on every plugin reload; the bar
 // widget reaches it with `bar.shell.serviceFor("pym.mosaic")`. It keeps the
 // v1 tile list current from Hyprland and tiles.json and the v1 web app list
-// current from the desktop entries, and it adds, focuses, removes, closes,
-// and contains tiles.
+// current from the desktop entries, and it adds, replaces, focuses,
+// removes, closes, and contains tiles. It also owns the plugin's IPC target,
+// `pym.mosaic`, so `omarchy-shell pym.mosaic …` works without the widget.
 Scope {
   id: root
 
@@ -35,6 +36,9 @@ Scope {
   property string pendingMessage: ""
   property bool stepStarted: false
   property var addState: null
+  // The bar widget, which sets this when it finds the service; it resets to
+  // null when the widget is destroyed. IPC calls that need the panel use it.
+  property QtObject panel: null
   // Fullscreen state dispatches waiting to run after tiles moved.
   property var restoreQueue: []
 
@@ -122,6 +126,36 @@ Scope {
     return ""
   }
 
+  // `mosaic replace TILE TARGET`: opens TARGET (a URL or web app) in the
+  // tile's place. The new window joins the old tile's session and
+  // workspace, takes its store position, and is swapped into its slot
+  // before the old window closes, so the layout doesn't shift. `options`
+  // may hold `browser`, as for add.
+  function replace(tile, target, options, label) {
+    if (busy) return "Still busy: " + busyLabel
+    var resolved = Model.resolveAddTargets([target], Model.shapeWebapps(webapps).apps)
+    if (resolved.error) return resolved.error
+    var given = options || {}
+    addState = {
+      replacing: String(tile),
+      old: null,
+      session: "",
+      monitor: "",
+      browser: given.browser ? String(given.browser) : "",
+      urls: resolved.urls,
+      next: 0,
+      clients: [],
+      seen: [],
+      workspace: 0,
+      program: "",
+      address: ""
+    }
+    begin(label || "Replacing tile " + tile + " with " + target)
+    phase = "add-clients"
+    runStep(["hyprctl", "-j", "clients"])
+    return ""
+  }
+
   // Starts an action and returns "", or an error when another one is still
   // running. The action reads fresh clients, because containment can change
   // without any Hyprland event, lets `planner(list)` choose the dispatches,
@@ -183,6 +217,15 @@ Scope {
       if (current === null) return finishAction("Unexpected hyprctl clients output")
       addState.clients = current
       addState.seen = current.map(function(client) { return client.address })
+      if (addState.replacing !== undefined) {
+        records = Model.pruneRecords(records, current)
+        var planned = Model.planReplace(Model.buildList(current, knownMonitors(), records), addState.replacing)
+        if (planned.error) return finishAction(planned.error)
+        addState.old = planned.tile
+        addState.session = planned.tile.session
+        addState.workspace = planned.tile.workspace
+        return chooseBrowser()
+      }
       phase = "add-monitors"
       return runStep(["hyprctl", "-j", "monitors"])
     }
@@ -194,15 +237,17 @@ Scope {
         addState.session, addState.monitor)
       if (chosen.error) return finishAction(chosen.error)
       addState.workspace = chosen.workspace
-      if (addState.browser !== "") {
-        addState.program = addState.browser
-        return launchNext()
-      }
-      return queryBrowser("add-browser")
+      return chooseBrowser()
     }
     // A dispatch.
     if (text.trim() !== "ok") return finishAction("Hyprland rejected " + stepProcess.command[2] + ": " + text.trim())
     runQueue(pendingQueue, afterQueue)
+  }
+
+  function chooseBrowser() {
+    if (addState.browser === "") return queryBrowser("add-browser")
+    addState.program = addState.browser
+    launchNext()
   }
 
   // Asks for the desktop's default browser. BROWSER is cleared, because
@@ -230,8 +275,10 @@ Scope {
   // and the argv list means a URL can never reach a shell.
   function launchNext() {
     if (addState.next >= addState.urls.length) {
-      pendingMessage = "Session " + addState.session + ": " + addState.urls.length + " tile(s) added on workspace "
-        + addState.workspace + " with " + addState.program + "."
+      pendingMessage = addState.old
+        ? "Replaced tile " + addState.old.index + " with " + addState.urls[0] + "."
+        : "Session " + addState.session + ": " + addState.urls.length + " tile(s) added on workspace "
+          + addState.workspace + " with " + addState.program + "."
       return finishAction("")
     }
     phase = "add-wait"
@@ -249,7 +296,7 @@ Scope {
     windowTimeout.stop()
     addState.seen.push(opened.address)
     addState.address = opened.address
-    var steps = Model.tileDispatches(opened.address, addState.session, addState.workspace)
+    var steps = Model.tileDispatches(opened.address, addState.session, addState.workspace, addState.old)
     if (steps.error) return finishAction(steps.error)
     // Record the tile as soon as it is tagged, so a later failure still
     // leaves it listed with its URL.
@@ -265,7 +312,8 @@ Scope {
 
   function saveRecord(then) {
     phase = "add-save"
-    records = records.concat([{ address: addState.address, session: addState.session, url: addState.urls[addState.next] }])
+    var record = { address: addState.address, session: addState.session, url: addState.urls[addState.next] }
+    records = addState.old ? Model.replaceRecord(records, addState.old.address, record) : records.concat([record])
     afterQueue = then
     actionTimeout.restart()
     store.setText(Model.serializeStore(records))
@@ -304,6 +352,8 @@ Scope {
   // Queues re-applying a moved tile's fullscreen state, since a move leaves
   // Hyprland's record of it stale (see Model.restoreAfterMove).
   function restoreMoved(eventData) {
+    // The window add or replace is placing gets its containment from them.
+    if (busy && addState && addState.address !== "" && String(eventData).split(",")[0] === addState.address.slice(2)) return
     var expression = Model.restoreAfterMove(list, eventData)
     if (expression === "") return
     restoreQueue = restoreQueue.concat([expression])
@@ -329,9 +379,33 @@ Scope {
     if (JSON.stringify(next) !== JSON.stringify(webapps)) webapps = next
   }
 
+  // The address of the focused window when it is a tile, or "".
+  function focusedTile() {
+    var toplevel = Hyprland.activeToplevel
+    var address = toplevel && toplevel.lastIpcObject ? String(toplevel.lastIpcObject.address || "") : ""
+    if (address === "" && toplevel) address = "0x" + toplevel.address
+    return Model.findTile(Model.listTiles(list), address) ? address : ""
+  }
+
   Component.onCompleted: {
     refresh()
     rebuildWebapps()
+  }
+
+  // `omarchy-shell pym.mosaic <function>`. Each returns what it did, or why
+  // it could not.
+  IpcHandler {
+    target: "pym.mosaic"
+
+    // Opens the panel in swap mode for the focused tile, so a key bound to
+    // `omarchy-shell pym.mosaic swap` changes the tile you are looking at.
+    function swap(): string {
+      var address = root.focusedTile()
+      if (address === "") return "The focused window is not a mosaic tile"
+      if (!root.panel) return "Add the Mosaic widget to the bar to swap tiles"
+      root.panel.startSwapFor(address)
+      return "Pick what replaces this tile in the Mosaic panel"
+    }
   }
 
   // Coalesces the burst of events one window change produces.

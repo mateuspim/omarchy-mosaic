@@ -421,7 +421,7 @@ function listTiles(list) {
     var sessionTiles = Array.isArray(sessions[i].tiles) ? sessions[i].tiles : []
     for (var j = 0; j < sessionTiles.length; j++) {
       tiles.push({ session: sessions[i].name, index: sessionTiles[j].index, address: sessionTiles[j].address,
-        state: sessionTiles[j].state })
+        state: sessionTiles[j].state, workspace: sessionTiles[j].workspace, url: sessionTiles[j].url })
     }
   }
   return tiles
@@ -651,13 +651,24 @@ function parseOpenWindow(data) {
 // The dispatches that make a new window a tile of `session` on `workspace`:
 // tags first, then (once the store has the record) placement and
 // containment last, because switching between floating and tiled resets it.
-// Mirrors `platform::tag`, `tile_on`, and `contain_fullscreen`. Returns
-// { tags, place } or { error }.
-function tileDispatches(address, session, workspace) {
+// Mirrors `platform::tag`, `tile_on`, and `contain_fullscreen`. With
+// `replacing` (a tile from listTiles), the new window also takes that
+// tile's slot, when it is tiled, and the old window closes before the new
+// one is contained. Returns { tags, place } or { error }.
+function tileDispatches(address, session, workspace, replacing) {
   if (!validAddress(address)) return { error: "Unexpected Hyprland window address " + JSON.stringify(String(address)) }
   if (sessionName(session) !== session) return { error: "Invalid session name " + JSON.stringify(String(session)) }
   if (typeof workspace !== "number" || Math.floor(workspace) !== workspace) return { error: "Unexpected workspace " + JSON.stringify(workspace) }
   var window = 'window = "address:' + address + '"'
+  var replaced = []
+  if (replacing) {
+    if (!validAddress(replacing.address) || replacing.address === address)
+      return { error: "Unexpected Hyprland window address " + JSON.stringify(String(replacing.address)) }
+    // Swapping puts the new window in the old one's slot, and its size.
+    if (replacing.state !== "floating")
+      replaced.push("hl.dsp.window.swap({ " + window + ', target = "address:' + replacing.address + '" })')
+    replaced.push(dispatchExpression("close", replacing.address))
+  }
   return {
     tags: [
       "hl.dsp.window.tag({ " + window + ', tag = "+' + TAG + '" })',
@@ -666,9 +677,8 @@ function tileDispatches(address, session, workspace) {
     place: [
       "hl.dsp.window.move({ " + window + ', workspace = "' + workspace + '", follow = false })',
       "hl.dsp.window.float({ " + window + ', action = "disable" })',
-      "hl.dsp.window.set_prop({ " + window + ', prop = "opaque", value = "1" })',
-      dispatchExpression("contain", address)
-    ]
+      "hl.dsp.window.set_prop({ " + window + ', prop = "opaque", value = "1" })'
+    ].concat(replaced, [dispatchExpression("contain", address)])
   }
 }
 
@@ -687,4 +697,31 @@ function serializeStore(records) {
   return JSON.stringify({ tiles: records.map(function(record) {
     return { address: record.address, session: record.session, url: record.url }
   }) }, null, 2)
+}
+
+// The tile `mosaic replace TILE TARGET` swaps out: its number in the list or
+// its address. Returns { tile } (from listTiles) or { error }.
+function planReplace(list, target) {
+  var tile = findTile(listTiles(list), target)
+  if (!tile) return { error: "No mosaic tile " + JSON.stringify(String(target)) + "; see `mosaic list`" }
+  if (tile.state === "fullscreen") return { error: "Leave fullscreen on that tile before replacing it" }
+  return { tile: tile }
+}
+
+// Store records with `record` in place of the one for `oldAddress`, so the
+// new tile keeps the old one's position in the list; appended when the old
+// tile had no record.
+function replaceRecord(records, oldAddress, record) {
+  var next = []
+  var placed = false
+  for (var i = 0; i < records.length; i++) {
+    if (records[i].address === oldAddress && !placed) {
+      next.push(record)
+      placed = true
+    } else if (records[i].address !== oldAddress) {
+      next.push(records[i])
+    }
+  }
+  if (!placed) next.push(record)
+  return next
 }

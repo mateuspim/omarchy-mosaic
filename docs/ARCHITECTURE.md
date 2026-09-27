@@ -5,7 +5,7 @@
 The plugin is a service (`MosaicService.qml`) plus a bar widget
 (`Panel.qml`), with pure logic in `Model.js`. The service builds the tile list
 from Hyprland and `tiles.json` and the web app list from `DesktopEntries`,
-and it adds, focuses, removes, closes, and contains tiles through `hyprctl`,
+and it adds, replaces, focuses, removes, closes, and contains tiles through `hyprctl`,
 without the Rust `mosaic` CLI. `docs/HANDOFF.md` has the plan and the parity
 checklist; the IPC and the `mosaic` wrapper are what parity still lacks.
 

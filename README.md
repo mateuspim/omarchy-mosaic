@@ -33,6 +33,7 @@ Click the icon, or middle-click it to refresh.
 | ↑ ↓ or J K | Select a tile (or a hidden web app) |
 | ← → or H L | Switch between the Tiles and Hidden web apps tabs |
 | Enter | Focus the selected tile, or show the selected hidden web app again |
+| S | Swap the selected tile's web app: pick a web app (1–9) or type an address (A), and it replaces the tile in place. Esc cancels |
 | X or D | Remove the selected tile |
 | Shift+D | Close the selected tile's session |
 | 1–9 | Add that web app to the session |
@@ -50,6 +51,11 @@ address field works for hidden ones too. A bare
 host such as `twitch.tv/name` gets `https://`. Tiles go to the session in the
 session field, or else the selected tile's session, or else `default`. New tiles join the workspace where that session already has
 tiles, and otherwise go to the focused monitor.
+
+To swap the tile you're looking at without opening the bar first, bind a key
+to `omarchy-shell pym.mosaic swap`. It opens the panel in swap mode for the
+focused tile. The replacement keeps the old tile's session, workspace, slot,
+and place in the list.
 
 ## Compatibility
 

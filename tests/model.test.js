@@ -5,7 +5,7 @@ import vm from "node:vm"
 const source = fs.readFileSync(new URL("../Model.js", import.meta.url), "utf8")
   .replace(/^\.pragma library\s*/m, "")
 const model = {}
-vm.runInNewContext(source + "\nObject.assign(model, { hiddenEntries, showWebapp, nameList, visibleWebapps, hideWebapp, sessionOf, clientFromIpc, parseStore, tileState, buildList, shapeList, parseClients, validAddress, dispatchExpression, listTiles, findTile, planFocus, planRemove, planClose, planContain, restoreAfterMove, monitorFromIpc, parseMonitors, resolveAddTargets, chooseWorkspace, desktopId, isChromiumFamily, isAppWindow, parseOpenWindow, tileDispatches, pruneRecords, serializeStore, webappUrl, webappFromEntry, buildWebapps, shapeWebapps, findWebapp, resolveTarget, parseList, tileLabel, tileMeta, normalizeUrl, sessionName, summary, anyUncontained, parseManifest });", { model })
+vm.runInNewContext(source + "\nObject.assign(model, { hiddenEntries, showWebapp, nameList, visibleWebapps, hideWebapp, sessionOf, clientFromIpc, parseStore, tileState, buildList, shapeList, parseClients, validAddress, dispatchExpression, listTiles, findTile, planFocus, planRemove, planClose, planContain, restoreAfterMove, monitorFromIpc, parseMonitors, resolveAddTargets, chooseWorkspace, desktopId, isChromiumFamily, isAppWindow, parseOpenWindow, tileDispatches, pruneRecords, serializeStore, planReplace, replaceRecord, webappUrl, webappFromEntry, buildWebapps, shapeWebapps, findWebapp, resolveTarget, parseList, tileLabel, tileMeta, normalizeUrl, sessionName, summary, anyUncontained, parseManifest });", { model })
 
 // Values built inside the VM belong to another realm, so compare copies.
 const plain = value => JSON.parse(JSON.stringify(value))
@@ -299,5 +299,29 @@ assert.deepEqual(plain(model.pruneRecords([record("0xa"), record("0xb"), record(
 assert.equal(model.serializeStore([{ address: "0x5f4ccef35180", session: "default", url: "https://youtube.com/" }]),
   '{\n  "tiles": [\n    {\n      "address": "0x5f4ccef35180",\n      "session": "default",\n      "url": "https://youtube.com/"\n    }\n  ]\n}')
 assert.equal(model.serializeStore([]), '{\n  "tiles": []\n}')
+
+// Replacing: `live` has 0x1 (news, workspace 10), 0x2 and 0x3 (streams, workspace 1).
+const old = model.planReplace(live, "2").tile
+assert.deepEqual(plain(old), { session: "streams", index: 2, address: "0x2", state: "contained", workspace: 1, url: "https://www.twitch.tv/somechannel/" })
+assert.equal(model.planReplace(live, "0x3").tile.index, 3)
+assert.equal(model.planReplace(live, "9").error, 'No mosaic tile "9"; see `mosaic list`')
+assert.equal(model.planReplace(model.buildList([client("0x8", ["mosaic"], { fullscreen: 1 })], [], []), "0x8").error,
+  "Leave fullscreen on that tile before replacing it")
+assert.deepEqual(plain(model.tileDispatches("0x1b", "streams", 1, old).place), [
+  'hl.dsp.window.move({ window = "address:0x1b", workspace = "1", follow = false })',
+  'hl.dsp.window.float({ window = "address:0x1b", action = "disable" })',
+  'hl.dsp.window.set_prop({ window = "address:0x1b", prop = "opaque", value = "1" })',
+  'hl.dsp.window.swap({ window = "address:0x1b", target = "address:0x2" })',
+  'hl.dsp.window.close({ window = "address:0x2" })',
+  'hl.dsp.window.fullscreen_state({ internal = 0, client = 2, window = "address:0x1b" })'])
+// A floating tile has no slot to swap into.
+assert.deepEqual(plain(model.tileDispatches("0x1b", "x", 1, { address: "0x2", state: "floating" }).place.slice(3)), [
+  'hl.dsp.window.close({ window = "address:0x2" })',
+  'hl.dsp.window.fullscreen_state({ internal = 0, client = 2, window = "address:0x1b" })'])
+assert.equal(model.tileDispatches("0x1b", "x", 1, { address: '0x2" })', state: "contained" }).error.startsWith("Unexpected Hyprland window address"), true)
+assert.equal(model.tileDispatches("0x1b", "x", 1, { address: "0x1b", state: "contained" }).error.startsWith("Unexpected Hyprland window address"), true)
+const rec = (address, url) => ({ address, session: "s", url })
+assert.deepEqual(plain(model.replaceRecord([rec("0x1", "a"), rec("0x2", "b"), rec("0x3", "c")], "0x2", rec("0x9", "z")).map(r => r.address)), ["0x1", "0x9", "0x3"])
+assert.deepEqual(plain(model.replaceRecord([rec("0x1", "a")], "0x7", rec("0x9", "z")).map(r => r.address)), ["0x1", "0x9"])
 
 console.log("model tests passed")

@@ -29,6 +29,9 @@ Panel {
   readonly property var hiddenRows: Model.hiddenEntries(webapps, setting("hiddenWebapps", ""))
   // The panel's tab: "tiles", or "hidden" for the hidden web apps.
   property string view: "tiles"
+  // Swap mode: the tile ({ address, label }) that the next web app or
+  // address replaces, or null.
+  property var swapTile: null
   property string status: ""
   property bool statusIsError: false
   // What the service is doing right now.
@@ -65,6 +68,7 @@ Panel {
   onOpenedChanged: {
     if (opened) {
       status = ""
+      swapTile = null
       view = "tiles"
       cursor = 0
       cursorActive = false
@@ -76,6 +80,7 @@ Panel {
     if (service) return
     var shell = bar ? bar.shell : null
     service = shell && typeof shell.serviceFor === "function" ? shell.serviceFor(moduleName) : null
+    if (service) service.panel = root
   }
 
   function refresh() {
@@ -116,6 +121,14 @@ Panel {
   }
 
   function addUrl(url, label) {
+    if (swapTile) {
+      var old = swapTile
+      swapTile = null
+      runService(function(engine) {
+        return engine.replace(old.address, url, { browser: root.browser }, "Replacing " + old.label + " with " + label)
+      })
+      return true
+    }
     var session = Model.sessionName(targetSessionText())
     if (session === "") {
       showStatus("Session names use lowercase letters, digits, - and _", true)
@@ -167,6 +180,7 @@ Panel {
 
   function setView(name) {
     if (view === name) return
+    if (name !== "tiles") swapTile = null
     view = name
     cursor = 0
     cursorActive = false
@@ -176,6 +190,27 @@ Panel {
     setView("tiles")
     if (selectedTile && sessionField.text === "") sessionField.text = selectedTile.session
     urlField.forceActiveFocus()
+  }
+
+  // Enters swap mode for `tile`: the web app buttons, 1–9, and the address
+  // field then replace it instead of adding a tile.
+  function startSwap(tile) {
+    if (!tile) return
+    setView("tiles")
+    cursorActive = true
+    cursor = tile.position
+    swapTile = { address: tile.address, label: Model.tileLabel(tile) }
+    status = ""
+  }
+
+  // Opens the panel in swap mode for the tile at `address`; the service's
+  // `swap` IPC call uses this.
+  function startSwapFor(address) {
+    open()
+    for (var i = 0; i < tiles.length; i++) {
+      if (tiles[i].address === address) return startSwap(tiles[i])
+    }
+    showStatus("That tile is gone; press R to refresh", true)
   }
 
   function focusTile(tile) {
@@ -258,7 +293,10 @@ Panel {
         else root.focusTile(root.selectedTile)
       }
       onDeleteRequested: if (root.cursorActive) root.removeTile(root.selectedTile)
-      onCloseRequested: root.close()
+      onCloseRequested: {
+        if (root.swapTile) root.swapTile = null
+        else root.close()
+      }
       onTabRequested: function(direction) { root.switchPanel(direction) }
       onTextKey: function(t) {
         if (t === "a" || t === "A") root.startAdding()
@@ -267,6 +305,7 @@ Panel {
         else if (t === "r" || t === "R") root.refresh()
         else if (root.view !== "tiles") return
         else if (t === "c" || t === "C") root.contain()
+        else if ((t === "s" || t === "S") && root.cursorActive) root.startSwap(root.selectedTile)
         else if (t >= "1" && t <= "9") root.addWebapp(root.shownWebapps[Number(t) - 1])
       }
 
@@ -327,6 +366,11 @@ Panel {
               text: root.listError
             }
 
+            Notice {
+              visible: root.swapTile !== null
+              text: root.swapTile ? "Replacing " + root.swapTile.label + ". Pick a web app, or press A and type an address. Esc cancels." : ""
+            }
+
             Repeater {
               model: root.sessions
 
@@ -369,7 +413,8 @@ Panel {
               spacing: Style.space(6)
 
               PanelSectionHeader {
-                text: root.shownWebapps.length > 0 ? "ADD TILE  ·  1–" + Math.min(9, root.shownWebapps.length) + " WEB APP  ·  A ADDRESS" : "ADD TILE  ·  A"
+                text: (root.swapTile ? "REPLACE WITH" : "ADD TILE")
+                  + (root.shownWebapps.length > 0 ? "  ·  1–" + Math.min(9, root.shownWebapps.length) + " WEB APP  ·  A ADDRESS" : "  ·  A")
                 foreground: root.foreground
                 fontFamily: root.fontFamily
               }
@@ -404,6 +449,8 @@ Panel {
                 spacing: Style.space(6)
                 TextField {
                   id: sessionField
+                  // A replacement keeps the old tile's session.
+                  visible: root.swapTile === null
                   Layout.fillWidth: true
                   placeholderText: "Session (" + (root.selectedTile ? root.selectedTile.session : "default") + ")"
                   foreground: root.foreground
@@ -411,9 +458,13 @@ Panel {
                   onAccepted: root.addTile()
                   Keys.onEscapePressed: keyCatcher.forceActiveFocus()
                 }
+                Item {
+                  visible: root.swapTile !== null
+                  Layout.fillWidth: true
+                }
                 Button {
-                  text: "Add"
-                  iconText: "󰐕"
+                  text: root.swapTile ? "Replace" : "Add"
+                  iconText: root.swapTile ? "󰓡" : "󰐕"
                   foreground: root.foreground
                   enabled: root.activity === ""
                   onClicked: root.addTile()
@@ -474,7 +525,9 @@ Panel {
             width: parent.width
             text: root.view === "hidden"
               ? "↑↓ select  ·  Enter show again  ·  H/L tabs  ·  R refresh"
-              : "↑↓ select  ·  Enter focus  ·  X remove  ·  ⇧D close session  ·  H/L tabs  ·  R refresh"
+              : root.swapTile
+                ? "1–9 or A pick the replacement  ·  Esc cancel"
+                : "↑↓ select  ·  Enter focus  ·  S swap  ·  X remove  ·  ⇧D close session  ·  H/L tabs  ·  R refresh"
             color: root.dim
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
@@ -639,7 +692,8 @@ Panel {
   component TileRow: CursorSurface {
     id: row
     property var tile: null
-    hasCursor: root.cursorActive && tile !== null && root.cursor === tile.position
+    readonly property bool swapping: root.swapTile !== null && tile !== null && root.swapTile.address === tile.address
+    hasCursor: swapping || (root.cursorActive && tile !== null && root.cursor === tile.position)
     foreground: root.foreground
     implicitHeight: content.implicitHeight + Style.spacing.rowPaddingX
 
@@ -665,7 +719,7 @@ Panel {
         Text {
           Layout.fillWidth: true
           textFormat: Text.PlainText
-          text: row.tile ? Model.tileLabel(row.tile) : ""
+          text: row.tile ? (row.swapping ? "󰓡  " : "") + Model.tileLabel(row.tile) : ""
           color: root.foreground
           font.family: root.fontFamily
           font.pixelSize: Style.font.body
@@ -679,6 +733,16 @@ Panel {
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption
           elide: Text.ElideRight
+        }
+      }
+
+      PanelActionButton {
+        iconText: "󰓡"
+        tooltipText: "Swap this tile's web app · S"
+        foreground: root.foreground
+        onClicked: {
+          if (row.swapping) root.swapTile = null
+          else root.startSwap(row.tile)
         }
       }
 
