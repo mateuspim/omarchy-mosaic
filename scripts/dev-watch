@@ -1,0 +1,15 @@
+#!/bin/bash
+# Reloads the Omarchy shell's plugins whenever a file in this repository
+# changes. The shell's own watcher does not follow the symlink from
+# ~/.config/omarchy/plugins/pym.mosaic to this checkout, so run this while
+# editing. Stop it with Ctrl+C.
+set -eu
+root=$(cd "$(dirname "$0")/.." && pwd)
+command -v inotifywait >/dev/null || { echo "dev-watch needs inotifywait (inotify-tools)" >&2; exit 1; }
+echo "Watching $root; reloading plugins on change."
+inotifywait -m -r -q -e close_write,create,delete,move --exclude '/\.git(/|$)' --format '%w%f' "$root" |
+  while read -r path; do
+    # Coalesce the burst of events one save produces.
+    while read -r -t 0.3 next; do path=$next; done
+    omarchy-shell shell rescanPlugins >/dev/null && echo "$(date +%T) reloaded after ${path#"$root"/}"
+  done

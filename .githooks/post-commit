@@ -1,17 +1,26 @@
 #!/bin/sh
-# Update the installed pym.mosaic plugin after master changes. `omarchy
-# plugin update` fast-forwards the checkout in ~/.config/omarchy/plugins from
-# this repository and reloads the shell's plugins. Logs to
-# ~/.local/state/mosaic/plugin-update.log. Set MOSAIC_NO_INSTALL=1 to skip
-# it. Enable with:
+# Keeps the installed pym.mosaic widget current after master changes.
+# - Symlinked into ~/.config/omarchy/plugins (the development setup): reload
+#   the shell's plugins, since its watcher does not follow the symlink.
+# - A git checkout from `omarchy plugin add`: fast-forward it with
+#   `omarchy plugin update`, which also reloads.
+# Logs to ~/.local/state/mosaic/plugin-update.log. Set MOSAIC_NO_INSTALL=1 to
+# skip it. Enable with:
 #   git config core.hooksPath .githooks
-[ -n "$MOSAIC_NO_INSTALL" ] && exit 0
+[ -n "${MOSAIC_NO_INSTALL:-}" ] && exit 0
 [ "$(git rev-parse --abbrev-ref HEAD)" = master ] || exit 0
-[ -d "$HOME/.config/omarchy/plugins/pym.mosaic/.git" ] || exit 0
+installed="$HOME/.config/omarchy/plugins/pym.mosaic"
 log="${XDG_STATE_HOME:-$HOME/.local/state}/mosaic/plugin-update.log"
 mkdir -p "$(dirname "$log")"
+if [ -L "$installed" ]; then
+  action="omarchy-shell shell rescanPlugins"
+elif [ -d "$installed/.git" ]; then
+  action="omarchy plugin update pym.mosaic --yes"
+else
+  exit 0
+fi
 (
   echo "== $(date -Iseconds) $(git log --oneline -1)"
-  omarchy plugin update pym.mosaic --yes || notify-send -u critical "Mosaic widget update failed" "See $log" 2>/dev/null
+  $action && echo "ok: $action" || notify-send -u critical "Mosaic widget update failed" "See $log" 2>/dev/null
 ) >> "$log" 2>&1 < /dev/null &
 exit 0

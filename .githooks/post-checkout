@@ -1,0 +1,3 @@
+#!/bin/sh
+# Branch switches change the files a symlinked install runs.
+exec "$(dirname "$0")/post-commit"

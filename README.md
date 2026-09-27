@@ -59,11 +59,24 @@ app buttons are hidden and everything else works.
 
 ## Development
 
-To have the installed widget follow this checkout, run
-`git config core.hooksPath .githooks`. Every commit, pull, or rebase on
-`master` then runs `omarchy plugin update pym.mosaic --yes`, which also
-reloads the shell's plugins (log: `~/.local/state/mosaic/plugin-update.log`;
-`MOSAIC_NO_INSTALL=1` skips it).
+For development, symlink the checkout instead of installing a copy:
+
+```bash
+ln -s ~/Projects/omarchy-mosaic-plugin ~/.config/omarchy/plugins/pym.mosaic
+omarchy-shell shell rescanPlugins && omarchy plugin enable pym.mosaic
+scripts/dev-watch      # reload the widget on every save
+```
+
+The shell's own file watcher does not follow symlinks, which is what
+`scripts/dev-watch` makes up for. With a symlink, avoid a bare
+`omarchy plugin update`: it treats every git plugin as its own checkout and
+would fetch and fast-forward this repository. Pass plugin ids instead.
+
+`git config core.hooksPath .githooks` enables hooks that keep the installed
+widget current after commits, pulls, rebases, and checkouts on `master`. A
+symlinked install is reloaded, and a copy from `omarchy plugin add` is updated
+with `omarchy plugin update pym.mosaic --yes` (log:
+`~/.local/state/mosaic/plugin-update.log`; `MOSAIC_NO_INSTALL=1` skips it).
 
 ```bash
 npm test                               # Model.js unit tests
