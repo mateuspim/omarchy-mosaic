@@ -18,10 +18,18 @@ the widget's **Browser** setting picks another Chromium-family command.
 
 ## Install
 
-Add and enable the plugin:
+Mosaic needs Omarchy with Hyprland's Lua config (tested on Hyprland 0.56.2)
+and a Chromium-family browser. Add and enable the plugin, then add the
+**Mosaic** widget to the bar in the shell's settings:
 
 ```bash
-omarchy plugin add file:///home/pym/Projects/omarchy-mosaic-plugin --enable --yes
+omarchy plugin add https://github.com/mateuspim/omarchy-mosaic.git --enable --yes
+```
+
+For the `mosaic` command, link the wrapper onto your PATH:
+
+```bash
+ln -s ~/.config/omarchy/plugins/pym.mosaic/bin/mosaic ~/.local/bin/mosaic
 ```
 
 ## Use
@@ -100,7 +108,7 @@ reports how it went.
 For development, symlink the checkout instead of installing a copy:
 
 ```bash
-ln -s ~/Projects/omarchy-mosaic-plugin ~/.config/omarchy/plugins/pym.mosaic
+ln -s ~/Projects/omarchy-mosaic ~/.config/omarchy/plugins/pym.mosaic
 omarchy-shell shell rescanPlugins && omarchy plugin enable pym.mosaic
 scripts/dev-watch      # reload the widget on every save
 ```

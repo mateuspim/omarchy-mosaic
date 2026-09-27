@@ -165,9 +165,9 @@ assert.equal(model.tileState(client("0x1", [])), "contained")
 assert.equal(model.tileState(client("0x1", [], { fullscreenClient: 0 })), "uncontained")
 
 // Shaped like a real lastIpcObject from Hyprland 0.56.
-assert.deepEqual(plain(model.clientFromIpc({ address: "0x5f4cce94d400", class: "foot", title: "odin", workspace: { id: 1, name: "1" },
+assert.deepEqual(plain(model.clientFromIpc({ address: "0x5f4cce94d400", class: "foot", title: "~", workspace: { id: 1, name: "1" },
   monitor: 0, tags: ["default-opacity*", "terminal*"], floating: false, fullscreen: 0, fullscreenClient: 0 })),
-  { address: "0x5f4cce94d400", title: "odin", workspace: 1, monitor: 0, tags: ["default-opacity*", "terminal*"], floating: false, fullscreen: 0, fullscreenClient: 0 })
+  { address: "0x5f4cce94d400", title: "~", workspace: 1, monitor: 0, tags: ["default-opacity*", "terminal*"], floating: false, fullscreen: 0, fullscreenClient: 0 })
 assert.equal(model.clientFromIpc({}), null)
 assert.equal(model.clientFromIpc(undefined), null)
 assert.deepEqual(plain(model.clientFromIpc({ address: "0x1" }).tags), [])

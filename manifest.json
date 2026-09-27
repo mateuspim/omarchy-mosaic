@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "pym.mosaic",
   "name": "Mosaic",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "author": "Mateus Pym",
   "license": "MIT",
   "description": "Tile web apps such as Twitch, Kick, and YouTube as a mosaic on Hyprland, with video fullscreen kept inside each tile.",
