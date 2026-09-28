@@ -7,8 +7,9 @@ and it took over the whole project from the Rust CLI, now retired in
 `~/Projects/omarchy-mosaic-cli`; `mosaic` on the PATH is this repository's
 `bin/mosaic` wrapper.
 
-**Start with `docs/HANDOFF.md`** for the plan, the parity checklist, and how
-to verify. Read `docs/PROJECT.md`, `docs/ARCHITECTURE.md`, and
+**Start with `docs/HANDOFF.md`** for where to pick up, the hard-won facts,
+and how to verify. It is a local working note, kept out of git
+(`.gitignore`): update it as work goes, but never commit it. Read `docs/PROJECT.md`, `docs/ARCHITECTURE.md`, and
 `docs/ROADMAP.md` before making architectural choices.
 
 ## Decisions (settled with the user, 2026-09-27)

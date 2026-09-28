@@ -17,7 +17,7 @@
 ## 1. Parity: the plugin does everything the CLI did (done 2026-09-27)
 
 The read-only engine, web apps, simple actions, `add`, the IPC, and the
-`mosaic` wrapper, each checked against the CLI (see `docs/HANDOFF.md`).
+`mosaic` wrapper, each checked against the CLI.
 Beyond the CLI: **swapping a tile's web app** in the same slot, from the
 panel or from a card over the tile opened by a changeable key.
 
