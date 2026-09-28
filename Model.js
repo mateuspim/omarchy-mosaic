@@ -880,3 +880,201 @@ function splitLines(text) {
   return String(text || "").split("\n").map(function(line) { return line.trim() })
     .filter(function(line) { return line !== "" })
 }
+
+// The browser extension (extension/), which reaches the service through the
+// native host (bin/mosaic-native-host) and the service's bridge socket.
+
+// A line from the bridge socket: a JSON object with a string `type`, or null.
+function parseBridgeMessage(line) {
+  try {
+    var message = JSON.parse(String(line))
+    return message && typeof message === "object" && !Array.isArray(message) && typeof message.type === "string" ? message : null
+  } catch (error) {
+    return null
+  }
+}
+
+// Browser names by a word in their executable's path or flags file's name,
+// most specific first.
+var BROWSER_LABELS = [
+  ["brave-origin", "Brave Origin"], ["brave", "Brave"], ["chromium", "Chromium"], ["chrome", "Google Chrome"],
+  ["msedge", "Microsoft Edge"], ["microsoft-edge", "Microsoft Edge"], ["vivaldi", "Vivaldi"], ["helium", "Helium"], ["opera", "Opera"]
+]
+
+function browserLabel(path) {
+  var text = String(path || "").toLowerCase()
+  for (var i = 0; i < BROWSER_LABELS.length; i++) {
+    if (text.indexOf(BROWSER_LABELS[i][0]) !== -1) return BROWSER_LABELS[i][1]
+  }
+  var name = text.split("/").pop()
+  return name || "the browser"
+}
+
+// The extension's app windows, keeping only well-formed ones.
+function bridgeWindows(list) {
+  var windows = []
+  var given = Array.isArray(list) ? list : []
+  for (var i = 0; i < given.length; i++) {
+    var window = given[i]
+    if (!window || !Number.isInteger(window.id) || !Array.isArray(window.tabs)) continue
+    var tabs = []
+    for (var t = 0; t < window.tabs.length; t++) {
+      var tab = window.tabs[t]
+      if (!tab || !Number.isInteger(tab.id)) continue
+      tabs.push({ id: tab.id, url: String(tab.url || ""), title: String(tab.title || ""), audible: tab.audible === true, muted: tab.muted === true })
+    }
+    windows.push({ id: window.id, type: String(window.type || ""), focused: window.focused === true, tabs: tabs })
+  }
+  return windows
+}
+
+function siteOf(url) {
+  var match = /^[a-z]+:\/\/(?:www\.)?([^\/?#:]+)/i.exec(String(url || ""))
+  return match ? match[1].toLowerCase() : ""
+}
+
+// Which extension window each tile is: `bridges` are the connected
+// extensions ({ windows }). A tile is the one app window whose tab has the
+// tile's title (Hyprland's title is the page's), else the one left on the
+// tile's site. Returns { total, matched, tiles: { ADDRESS: { bridge,
+// window, tab } }, missing: [labels] }.
+function matchTiles(tiles, bridges) {
+  var candidates = []
+  for (var b = 0; b < bridges.length; b++) {
+    var windows = bridges[b].windows || []
+    for (var w = 0; w < windows.length; w++) {
+      if (windows[w].tabs.length === 1) candidates.push({ bridge: b, window: windows[w].id, tab: windows[w].tabs[0] })
+    }
+  }
+  var found = {}
+  var taken = []
+  function claim(tile, test) {
+    if (found[tile.address]) return
+    var hits = candidates.filter(function(candidate) { return taken.indexOf(candidate) === -1 && test(candidate) })
+    if (hits.length !== 1) return
+    taken.push(hits[0])
+    found[tile.address] = { bridge: hits[0].bridge, window: hits[0].window, tab: hits[0].tab.id }
+  }
+  tiles.forEach(function(tile) {
+    claim(tile, function(candidate) { return tile.title !== "" && candidate.tab.title === tile.title })
+  })
+  tiles.forEach(function(tile) {
+    var site = siteOf(tile.url)
+    claim(tile, function(candidate) { return site !== "" && siteOf(candidate.tab.url) === site })
+  })
+  var missing = tiles.filter(function(tile) { return !found[tile.address] }).map(tileLabel)
+  return { total: tiles.length, matched: tiles.length - missing.length, tiles: found, missing: missing }
+}
+
+// Where the extension's setup stands: "connected" once an extension talks
+// to the service, "restart" when it is set up but the browser has not
+// loaded it yet, "off", or "unknown" before the host's status is in.
+// `setup` is `mosaic-native-host status` output.
+function extensionState(setup, bridges) {
+  if (bridges.length > 0) return "connected"
+  if (!setup) return "unknown"
+  var registered = setup.browsers.some(function(browser) { return browser.registered })
+  var loaded = setup.flags.some(function(flags) { return flags.loaded })
+  return registered && loaded ? "restart" : "off"
+}
+
+function flagsName(file) {
+  return String(file).split("/").pop()
+}
+
+function joinNames(names) {
+  var unique = names.filter(function(name, index) { return names.indexOf(name) === index })
+  if (unique.length <= 1) return unique.join("")
+  return unique.slice(0, -1).join(", ") + " and " + unique[unique.length - 1]
+}
+
+// Names for a checklist line: up to three, else the first two and a count.
+function shortNames(names) {
+  return names.length <= 3 ? joinNames(names) : names.slice(0, 2).join(", ") + " and " + (names.length - 2) + " more"
+}
+
+function loadedBrowsers(setup) {
+  return joinNames(setup.flags.filter(function(flags) { return flags.loaded })
+    .map(function(flags) { return browserLabel(flagsName(flags.file)) }))
+}
+
+// The Audio tab's summary of `extensionState`.
+function extensionNotice(setup, bridges) {
+  var state = extensionState(setup, bridges)
+  if (state === "connected")
+    return "Connected to " + joinNames(bridges.map(function(bridge) { return browserLabel(bridge.browser) })) + ". Your tiles are checked whenever they change; V checks that it still answers."
+  if (state === "unknown") return "Checking the browser extension…"
+  if (state === "restart")
+    return "Set up. Restart " + loadedBrowsers(setup) + " to load the extension, then verify. Closing the browser also closes its tiles."
+  if (setup.flags.length === 0)
+    return "Audio control needs the Mosaic browser extension. No browser flags file was found, so load it by hand (below)."
+  return "Audio control needs the Mosaic browser extension. Enable registers it and loads it every time the browser starts."
+}
+
+// The Audio tab's checklist: [{ label, detail, done }]. `check` is the last
+// verify ({ error } or matchTiles output), or null.
+function extensionSteps(setup, bridges, check) {
+  var browsers = setup ? setup.browsers : []
+  var flags = setup ? setup.flags : []
+  var registered = browsers.filter(function(browser) { return browser.registered })
+  var loaded = flags.filter(function(file) { return file.loaded })
+  var verified = ""
+  if (!check) verified = bridges.length > 0 ? "Checking…" : "Checked on its own once connected"
+  else if (check.error) verified = check.error
+  else if (check.total === 0) verified = "No tiles are open to look for"
+  else verified = check.matched + " of " + check.total + " tiles" + (check.missing.length > 0 ? "  ·  not found: " + check.missing.join(", ") : "")
+  return [
+    {
+      label: "Bridge registered",
+      done: registered.length > 0,
+      detail: registered.length > 0 ? shortNames(registered.map(function(browser) { return browser.name }))
+        : browsers.length > 0 ? "Enable registers it with " + shortNames(browsers.map(function(browser) { return browser.name }))
+        : "No Chromium-family browser profile found"
+    },
+    {
+      label: "Loads when the browser starts",
+      done: loaded.length > 0,
+      detail: loaded.length > 0 ? joinNames(loaded.map(function(file) { return flagsName(file.file) }))
+        : flags.length > 0 ? "Enable adds it to " + joinNames(flags.map(function(file) { return flagsName(file.file) }))
+        : "No flags file; load it by hand"
+    },
+    {
+      label: "Connected",
+      done: bridges.length > 0,
+      detail: bridges.length > 0
+        ? bridges.map(function(bridge) { return browserLabel(bridge.browser) + " · extension " + (bridge.extension || "?") }).join(", ")
+        : "Restart the browser after enabling"
+    },
+    {
+      label: "Finds your tiles",
+      done: !!check && !check.error && check.total > 0 && check.matched === check.total,
+      detail: verified
+    }
+  ]
+}
+
+// A browser's window class from its desktop id or program path:
+// "brave-origin.desktop" and "~/.local/bin/brave-origin" give "brave-origin".
+function browserClass(text) {
+  return String(text || "").split("/").pop().replace(/\.desktop$/, "")
+}
+
+// The browser processes a restart stops, from `hyprctl -j clients` text:
+// those of mosaic tiles, and of windows whose class is one of `classes`.
+// Returns sorted PIDs, or null for unexpected output.
+function browserPids(clientsText, classes) {
+  var parsed
+  try {
+    parsed = JSON.parse(String(clientsText || ""))
+  } catch (error) {
+    return null
+  }
+  if (!Array.isArray(parsed)) return null
+  var pids = []
+  parsed.forEach(function(client) {
+    if (!client || !Number.isInteger(client.pid) || client.pid <= 1) return
+    var tile = stringList(client.tags).indexOf(TAG) !== -1
+    if ((tile || classes.indexOf(String(client.class || "")) !== -1) && pids.indexOf(client.pid) === -1) pids.push(client.pid)
+  })
+  return pids.sort(function(a, b) { return a - b })
+}

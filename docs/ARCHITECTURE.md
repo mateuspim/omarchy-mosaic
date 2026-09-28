@@ -49,6 +49,48 @@ the CLI.
 | parsing `.desktop` files | `DesktopEntries.applications` |
 | `tiles.json` | `FileView`, same file and format |
 
+## The browser extension
+
+Per-tile audio needs to know which audio belongs to which tile, and PipeWire
+can't say: every `--app` window shares the browser's one process, and
+Chromium plays every tab through one audio service process, so each stream
+has the same PID, `application.name`, and `media.name` ("Playback").
+Separate browser instances per tile would fix that at the cost of separate
+logins and memory; the user chose an extension instead.
+
+- **Pieces.** `extension/` (Manifest V3, with a fixed `key`, so its ID is
+  always `ibcnbknhphdnlpfglnhelicnpnnmepbo`), the native messaging host
+  `bin/mosaic-native-host` (Python 3, standard library only), and a
+  Quickshell `SocketServer` in the service at `$XDG_RUNTIME_DIR/pym-mosaic.sock`
+  (`MOSAIC_BRIDGE_SOCKET` overrides it for both sides, for test shells).
+- **Flow.** The extension calls `connectNative("pym.mosaic")`; the browser
+  starts the host, which connects to the socket (again every 2 s while the
+  shell is down) and relays: length-prefixed JSON on stdio for the
+  browser, one JSON object per line for the shell. The host sends `host`
+  (the browser's executable, from its parent process) first, and replays
+  the extension's last `hello` and `windows` to a new shell. The service
+  sends `ping { id }`; the extension answers `windows { id, windows }` with
+  its app and popup windows (never normal browsing windows) and pushes
+  `windows` on its own when titles, audio, or windows change.
+- **Install.** Browsers only load extensions silently by policy (root) or
+  by command line. Omarchy already loads its own with `--load-extension=`
+  in `~/.config/<browser>-flags.conf`, which Arch's launchers read, so
+  `mosaic-native-host setup DIR` adds DIR there (only to flags files that
+  exist; symlinks followed, mode kept) and writes
+  `NativeMessagingHosts/pym.mosaic.json` into each browser profile folder
+  that exists. `remove` undoes both; `status` reports them as JSON. The
+  panel's Audio tab runs these, and Google Chrome, which ignores
+  `--load-extension` since 137, needs Load unpacked.
+- **Finding tiles.** A tile is the extension window whose one tab has the
+  tile's Hyprland title (`Model.matchTiles`), else the one left on its
+  site. Verify reports how many tiles were found.
+- **Quickshell facts.** A `SocketServer` makes one handler `Socket` per
+  connection; writes before `connected` turns true are lost; a closed
+  handler socket is never destroyed and `destroy()` refuses it
+  ("indestructible object"), so the service drops its references. The
+  server deletes a stale socket file itself. Unix socket paths are limited
+  to 108 bytes.
+
 ## Sessions and the store
 
 Every tile carries two static Hyprland tags: `mosaic`, and

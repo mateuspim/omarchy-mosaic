@@ -39,7 +39,7 @@ Click the icon, or middle-click it to refresh.
 | Key | Action |
 | --- | --- |
 | ↑ ↓ or J K | Select a tile (or a hidden web app) |
-| ← → or H L | Switch between the Tiles and Hidden web apps tabs |
+| ← → or H L | Switch between the Tiles, Hidden, and Audio tabs |
 | Enter | Focus the selected tile, or show the selected hidden web app again |
 | S | Swap the selected tile's web app: pick a web app (1–9) or type an address (A), and it replaces the tile in place. Esc cancels |
 | X or D | Remove the selected tile |
@@ -72,6 +72,34 @@ already uses is refused, and the panel says why. The key runs
 panel's own swap mode (S) works as before. The
 replacement keeps the old tile's session, workspace, slot, and place in the
 list.
+
+## The browser extension (for audio control)
+
+Audio control is on its way, and it needs a small browser extension,
+`extension/`. Every tile shares one browser process and one audio stream
+source, so PipeWire can't tell tiles apart; the extension can, from inside
+the browser. It talks to the plugin through a native messaging host,
+`bin/mosaic-native-host` (Python 3, which Omarchy already has).
+
+Open the panel's **Audio** tab (the Tiles tab warns while it's missing):
+
+1. **Enable** (E) registers the host with every Chromium-family browser
+   profile it finds under `~/.config`, and adds the extension to the
+   `--load-extension=` line of each browser flags file there, such as
+   `brave-origin-flags.conf`. That's how Omarchy loads its own browser
+   extensions, so there is nothing to click in the browser.
+2. **Restart the browser.** Closing it also closes its tiles.
+3. The tab then checks on its own that the extension finds every tile,
+   again whenever tiles or the browser's windows change. **Verify** (V)
+   also checks that it still answers.
+
+Without a flags file, load the extension by hand: open the browser's
+extensions page, turn on Developer mode, choose Load unpacked, and pick the
+extension folder (the tab copies its path). **Turn off** undoes Enable; do
+that before removing the plugin, so the browser isn't left loading a folder
+that's gone. The same steps are in the IPC: `omarchy-shell pym.mosaic
+extension` (status as JSON), `extensionEnable`, `extensionVerify`, and
+`extensionDisable`.
 
 ## Compatibility
 
@@ -125,7 +153,7 @@ with `omarchy plugin update pym.mosaic --yes` (log:
 `~/.local/state/mosaic/plugin-update.log`; `MOSAIC_NO_INSTALL=1` skips it).
 
 ```bash
-npm test                               # Model.js unit tests
+npm test                               # Model.js and native host tests
 omarchy plugin validate .              # manifest check
 omarchy-shell shell rescanPlugins      # reload after edits to an installed copy
 ```

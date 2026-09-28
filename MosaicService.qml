@@ -36,6 +36,10 @@ Scope {
   property string pendingMessage: ""
   property bool stepStarted: false
   property var addState: null
+  // What to do with the browser once it is known: function(program, id).
+  property var browserChosen: null
+  // restartBrowser's state: { browser, clientsText, program, name, pids }.
+  property var restartState: null
   // Where the cursor was while add or replace waited for the new window;
   // see Model.cursorMoveExpression.
   property var cursorBefore: null
@@ -69,6 +73,33 @@ Scope {
   property var results: ({})
   // Enabled monitors (Model.parseMonitors), refreshed with the list.
   property var monitors: []
+
+  // The browser extension (extension/). Each browser's copy talks to the
+  // service through the native host, bin/mosaic-native-host, which connects
+  // to `bridgePath`. `extensionSetup` is the host's `status` output (null
+  // until it answers), `bridges` the connected extensions ({ browser,
+  // extension, windows }), and `extensionCheck` the last verify: null, {
+  // error }, or Model.matchTiles output.
+  property var extensionSetup: null
+  property string extensionError: ""
+  property var bridges: []
+  property var extensionCheck: null
+  property bool verifying: false
+  readonly property string extensionState: Model.extensionState(extensionSetup, bridges)
+  readonly property string extensionDir: Qt.resolvedUrl("extension").toString().replace(/^file:\/\//, "")
+  readonly property string hostProgram: Qt.resolvedUrl("bin/mosaic-native-host").toString().replace(/^file:\/\//, "")
+  // The host uses the same override, so a test shell can have its own.
+  readonly property string bridgePath: {
+    var override = Quickshell.env("MOSAIC_BRIDGE_SOCKET") || ""
+    if (override !== "") return override
+    var runtime = Quickshell.env("XDG_RUNTIME_DIR") || ""
+    return (runtime !== "" ? runtime : "/tmp") + "/pym-mosaic.sock"
+  }
+  // Open bridge connections, and the ones a verify still waits for.
+  property var bridgeSockets: []
+  property var pingWaiting: []
+  property int pingId: 0
+  property bool extensionStarted: false
 
   // Emitted when an action ends. `error` is "" on success, and `message`
   // then says what was done, like the CLI's output.
@@ -184,6 +215,47 @@ Scope {
     return ""
   }
 
+  // Restarts the browser the tiles run in, so it loads the extension:
+  // closes it with SIGTERM, which Chromium treats as a normal quit that
+  // keeps the session, waits for it to exit, and starts it again. Its tiles
+  // close with it. `options` may hold `browser`, as for add; without it,
+  // the default browser is restarted, along with whichever browser the
+  // tiles use.
+  function restartBrowser(options, label) {
+    if (busy) return "Still busy: " + busyLabel
+    var given = options || {}
+    restartState = { browser: given.browser ? String(given.browser) : "", clientsText: "", program: "", name: "", pids: [] }
+    begin(label || "Restarting the browser")
+    phase = "restart-clients"
+    runStep(["hyprctl", "-j", "clients"])
+    return ""
+  }
+
+  function restartWith(program, id) {
+    restartState.program = program
+    restartState.name = Model.browserLabel(id || program)
+    var classes = [Model.browserClass(id), Model.browserClass(program)].filter(function(name) { return name !== "" })
+    var pids = Model.browserPids(restartState.clientsText, classes)
+    if (pids === null) return finishAction("Unexpected hyprctl clients output")
+    restartState.pids = pids
+    if (pids.length === 0) return relaunchBrowser()
+    phase = "restart-kill"
+    runStep(["kill", "-TERM"].concat(pids.map(String)))
+  }
+
+  // `tail --pid` returns once every process is gone; `timeout` bounds it.
+  function waitForBrowserExit() {
+    phase = "restart-wait"
+    var watch = restartState.pids.map(function(pid) { return "--pid=" + pid })
+    runStep(["timeout", "15", "tail", "-f", "/dev/null"].concat(watch), null, 17000)
+  }
+
+  function relaunchBrowser() {
+    Quickshell.execDetached(["uwsm-app", "--", restartState.program])
+    pendingMessage = (restartState.pids.length > 0 ? "Restarted " : "Started ") + restartState.name + "."
+    finishAction("")
+  }
+
   // Starts an action and returns "", or an error when another one is still
   // running. The action reads fresh clients, because containment can change
   // without any Hyprland event, lets `planner(list)` choose the dispatches,
@@ -207,10 +279,11 @@ Scope {
   }
 
   // Runs one command of the current action, with a time limit.
-  function runStep(command, environment) {
+  function runStep(command, environment, timeoutMs) {
     stepStarted = false
     stepProcess.environment = environment || ({})
     stepProcess.command = command
+    actionTimeout.interval = timeoutMs || 5000
     actionTimeout.restart()
     stepProcess.running = true
   }
@@ -231,6 +304,12 @@ Scope {
     var text = String(output)
     if (phase === "add-browser" || phase === "add-browser-mime")
       return browserFound(exitCode === 0 ? Model.desktopId(text) : "")
+    // A process that is already gone makes kill fail, which is fine.
+    if (phase === "restart-kill") return waitForBrowserExit()
+    if (phase === "restart-wait") {
+      if (exitCode !== 0) return finishAction(restartState.name + " is still closing; try again in a moment")
+      return relaunchBrowser()
+    }
     if (exitCode !== 0) return finishAction(String(errors).trim() || stepProcess.command[0] + " failed")
     if (phase === "plan") {
       var clients = Model.parseClients(text)
@@ -240,6 +319,12 @@ Scope {
       if (result.error) return finishAction(result.error)
       pendingMessage = result.message
       return runQueue(result.expressions, function() { root.finishAction("") })
+    }
+    if (phase === "restart-clients") {
+      restartState.clientsText = text
+      browserChosen = function(program, id) { root.restartWith(program, id) }
+      if (restartState.browser === "") return queryBrowser("add-browser")
+      return browserChosen(restartState.browser, "")
     }
     if (phase === "add-clients") {
       var current = Model.parseClients(text)
@@ -274,9 +359,12 @@ Scope {
   }
 
   function chooseBrowser() {
+    browserChosen = function(program, id) {
+      root.addState.program = program
+      root.launchNext()
+    }
     if (addState.browser === "") return queryBrowser("add-browser")
-    addState.program = addState.browser
-    launchNext()
+    browserChosen(addState.browser, "")
   }
 
   // Asks for the desktop's default browser. BROWSER is cleared, because
@@ -295,8 +383,7 @@ Scope {
     var entry = DesktopEntries.byId(id)
     var command = entry ? Model.stringList(entry.command) : []
     if (command.length === 0 || command[0] === "") return finishAction("Cannot find an Exec line for " + id)
-    addState.program = command[0]
-    launchNext()
+    browserChosen(command[0], id)
   }
 
   // Opens the next URL as an app window and waits for Hyprland to announce
@@ -500,6 +587,146 @@ Scope {
   Component.onCompleted: {
     refresh()
     rebuildWebapps()
+    refreshExtension()
+  }
+
+  // Rereads what is set up for the extension.
+  function refreshExtension() {
+    return runHost("status")
+  }
+
+  // Registers the native host with every browser profile found, and loads
+  // the extension from each browser flags file, as Omarchy loads its own.
+  // The browser picks it up on its next start.
+  function enableExtension() {
+    extensionCheck = null
+    return runHost("setup")
+  }
+
+  // Undoes enableExtension.
+  function disableExtension() {
+    extensionCheck = null
+    return runHost("remove")
+  }
+
+  function runHost(command) {
+    if (extensionProcess.running) return "Still busy with the browser extension"
+    extensionError = ""
+    extensionStarted = false
+    extensionProcess.command = [hostProgram, command, extensionDir]
+    extensionTimeout.restart()
+    extensionProcess.running = true
+    return ""
+  }
+
+  function hostFinished(exitCode, output, errors) {
+    extensionTimeout.stop()
+    var parsed = null
+    try {
+      parsed = exitCode === 0 ? JSON.parse(output) : null
+    } catch (error) {
+      parsed = null
+    }
+    if (parsed && Array.isArray(parsed.browsers) && Array.isArray(parsed.flags)) extensionSetup = parsed
+    else extensionError = String(errors).trim().replace(/^error:\s*/, "") || "The native host failed"
+  }
+
+  // Asks every connected extension for its windows and checks that each
+  // tile is one of them. The outcome lands in extensionCheck.
+  function verifyExtension() {
+    if (verifying) return ""
+    refreshExtension()
+    var open = bridgeSockets.filter(function(socket) { return socket.info.hello })
+    if (open.length === 0) {
+      extensionCheck = { error: extensionState === "restart" ? "Not connected yet: restart the browser first" : "No browser extension is connected" }
+      return ""
+    }
+    pingId++
+    pingWaiting = open
+    verifying = true
+    verifyTimeout.restart()
+    var line = JSON.stringify({ type: "ping", id: pingId }) + "\n"
+    open.forEach(function(socket) {
+      socket.write(line)
+      socket.flush()
+    })
+    return ""
+  }
+
+  function finishVerify() {
+    verifyTimeout.stop()
+    var silent = pingWaiting.length
+    verifying = false
+    pingWaiting = []
+    if (silent > 0 && silent === bridgeSockets.filter(function(socket) { return socket.info.hello }).length) {
+      extensionCheck = { error: "The browser extension did not answer" }
+      return
+    }
+    extensionCheck = Model.matchTiles(Model.shapeList(list).tiles, bridges)
+  }
+
+  function bridgeOpened(socket) {
+    socket.info = { browser: "", extension: "", windows: [], hello: false }
+    bridgeSockets = bridgeSockets.concat([socket])
+  }
+
+  // Quickshell never destroys a closed handler socket, and refuses to, so
+  // the service just lets go of it.
+  function bridgeClosed(socket) {
+    bridgeSockets = bridgeSockets.filter(function(open) { return open !== socket })
+    if (verifying) {
+      pingWaiting = pingWaiting.filter(function(open) { return open !== socket })
+      if (pingWaiting.length === 0) finishVerify()
+    }
+    updateBridges()
+  }
+
+  function bridgeRead(socket, line) {
+    var message = Model.parseBridgeMessage(line)
+    if (!message || bridgeSockets.indexOf(socket) === -1) return
+    var info = socket.info
+    if (message.type === "host") info.browser = String(message.browser || "")
+    else if (message.type === "hello") {
+      info.extension = String(message.extension || "")
+      info.hello = true
+    } else if (message.type === "windows") info.windows = Model.bridgeWindows(message.windows)
+    else return
+    updateBridges()
+    if (verifying && message.type === "windows" && message.id === pingId) {
+      pingWaiting = pingWaiting.filter(function(open) { return open !== socket })
+      if (pingWaiting.length === 0) finishVerify()
+    }
+  }
+
+  function updateBridges() {
+    bridges = bridgeSockets.filter(function(socket) { return socket.info.hello }).map(function(socket) {
+      return { browser: socket.info.browser, extension: socket.info.extension, windows: socket.info.windows }
+    })
+    autoCheck()
+  }
+
+  // Keeps extensionCheck current without a verify: the extension reports
+  // its windows whenever they change, so matching again on every change of
+  // them or of the tiles is enough. Without a connection there is nothing
+  // to check.
+  function autoCheck() {
+    if (verifying) return
+    extensionCheck = bridges.length > 0 ? Model.matchTiles(Model.shapeList(list).tiles, bridges) : null
+  }
+
+  onListChanged: autoCheck()
+
+  // The extension's state for scripts: `omarchy-shell pym.mosaic extension`.
+  function extensionStatus() {
+    return JSON.stringify({
+      state: extensionState,
+      error: extensionError,
+      setup: extensionSetup,
+      bridges: bridges.map(function(bridge) {
+        return { browser: Model.browserLabel(bridge.browser), extension: bridge.extension, windows: bridge.windows.length }
+      }),
+      check: extensionCheck
+    })
   }
 
   // Starts an IPC action: "started N", where N is the job number that
@@ -565,6 +792,63 @@ Scope {
       swapCard.openFor(tile)
       return "Pick what replaces this tile on the card over it"
     }
+
+    // The browser extension's setup and connection, as JSON.
+    function extension(): string { return root.extensionStatus() }
+    // Checks that the extension answers and finds every tile; read the
+    // outcome from `extension` a few seconds later.
+    function extensionVerify(): string { return root.verifyExtension() || "started" }
+    // Sets the extension up, or undoes that; see enableExtension.
+    function extensionEnable(): string { return root.enableExtension() || "started" }
+    function extensionDisable(): string { return root.disableExtension() || "started" }
+    // Restarts the tiles' browser so it loads the extension; see
+    // restartBrowser. Answers like add.
+    function restartBrowser(browser: string): string {
+      return root.started(root.restartBrowser({ browser: browser || root.browser }))
+    }
+  }
+
+  // The native host connects here, one connection per browser.
+  SocketServer {
+    active: true
+    path: root.bridgePath
+    handler: Socket {
+      id: bridgeSocket
+      property var info: null
+      onConnectedChanged: connected ? root.bridgeOpened(bridgeSocket) : root.bridgeClosed(bridgeSocket)
+      parser: SplitParser {
+        onRead: function(line) { root.bridgeRead(bridgeSocket, line) }
+      }
+    }
+  }
+
+  Process {
+    id: extensionProcess
+    running: false
+    stdout: StdioCollector { id: extensionStdout; waitForEnd: true }
+    stderr: StdioCollector { id: extensionStderr; waitForEnd: true }
+    onStarted: root.extensionStarted = true
+    onRunningChanged: if (!running && !root.extensionStarted) {
+      extensionTimeout.stop()
+      root.extensionError = "Cannot run " + root.hostProgram
+    }
+    onExited: function(exitCode) { root.hostFinished(exitCode, extensionStdout.text, extensionStderr.text) }
+  }
+
+  Timer {
+    id: extensionTimeout
+    interval: 5000
+    onTriggered: {
+      extensionProcess.running = false
+      root.extensionError = "The native host did not answer in time"
+    }
+  }
+
+  // How long a verify waits for every extension to answer.
+  Timer {
+    id: verifyTimeout
+    interval: 3000
+    onTriggered: root.finishVerify()
   }
 
   SwapCard {

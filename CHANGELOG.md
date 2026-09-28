@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- **Browser extension for audio control**, the groundwork for per-tile
+  audio. The panel's new Audio tab sets it up (Enable, restart the browser,
+  Verify) and the Tiles tab warns while it's missing. The extension reports
+  the browser's app windows through a native messaging host,
+  `bin/mosaic-native-host`, and a socket the service listens on
+  (`$XDG_RUNTIME_DIR/pym-mosaic.sock`). New IPC: `extension`,
+  `extensionEnable`, `extensionVerify`, `extensionDisable`.
+
 ## 1.0.0 (2026-09-27)
 
 The first release as the whole of Omarchy Mosaic. The plugin now does

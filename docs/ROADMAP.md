@@ -45,7 +45,16 @@ roughly in order of value; confirm priorities with the user before starting:
   fit. Prefer Hyprland layout settings or split ratios over floating
   geometry, which was rejected.
 - **Audio.** Mute every tile but the focused one, per-tile volume, and an
-  audio indicator in the panel (PipeWire, through the shell's audio service).
+  audio indicator in the panel. PipeWire can't do it: every tile belongs to
+  one browser process, and Chromium plays every tab through one audio
+  service process, so its streams are identical ("Chromium", "Playback",
+  the audio service's PID; checked 2026-09-28). The route is a browser
+  extension instead (see "The browser extension" in `docs/ARCHITECTURE.md`).
+  **Done:** the extension, the native host and bridge, and the setup
+  (Enable, restart, Verify) with a warning in the panel. **Next:** per-tile
+  mute (`chrome.tabs.update({ muted })`), mute all but the focused tile,
+  the audible indicator from `tab.audible`, then per-tile volume (a content
+  script setting media element volume, since the tab API only mutes).
 - **Saved sessions.** Name, monitor, layout, and apps; restore with one key
   or at login. Keep personal URLs out of the repository.
 - **Monitor awareness.** Reflow on monitor changes, portrait-friendly

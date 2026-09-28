@@ -27,8 +27,14 @@ Panel {
   // The web apps that get a button; hidden ones can still be typed.
   readonly property var shownWebapps: Model.visibleWebapps(webapps, setting("hiddenWebapps", ""))
   readonly property var hiddenRows: Model.hiddenEntries(webapps, setting("hiddenWebapps", ""))
-  // The panel's tab: "tiles", or "hidden" for the hidden web apps.
+  // The panel's tab: "tiles", "hidden" for the hidden web apps, or "audio"
+  // for the browser extension's setup.
   property string view: "tiles"
+  readonly property var views: ["tiles", "hidden", "audio"]
+  // The browser extension, which audio control needs.
+  readonly property string extensionState: service ? service.extensionState : "unknown"
+  readonly property bool extensionMissing: extensionState === "off" || extensionState === "restart"
+  property bool confirmRestart: false
   // Swap mode: the tile ({ address, label }) that the next web app or
   // address replaces, or null.
   property var swapTile: null
@@ -70,11 +76,13 @@ Panel {
   onOpenedChanged: {
     if (opened) {
       status = ""
+      confirmRestart = false
       swapTile = null
       view = "tiles"
       cursor = 0
       cursorActive = false
       refresh()
+      if (service) service.refreshExtension()
     }
   }
 
@@ -188,6 +196,41 @@ Panel {
     cursorActive = false
   }
 
+  function stepView(delta) {
+    var next = views.indexOf(view) + delta
+    if (next >= 0 && next < views.length) setView(views[next])
+  }
+
+  function enableExtension() {
+    runService(function(engine) { return engine.enableExtension() })
+  }
+
+  function disableExtension() {
+    runService(function(engine) { return engine.disableExtension() })
+  }
+
+  function verifyExtension() {
+    runService(function(engine) { return engine.verifyExtension() })
+  }
+
+  // Restarting closes every window of the browser, so the first press only
+  // asks; a second press within a few seconds restarts it.
+  function restartBrowser() {
+    if (!confirmRestart) {
+      confirmRestart = true
+      restartConfirmTimer.restart()
+      return
+    }
+    confirmRestart = false
+    runService(function(engine) { return engine.restartBrowser({ browser: root.browser }, "Restarting the browser") })
+  }
+
+  function copyExtensionPath() {
+    if (!service) return
+    Quickshell.execDetached(["wl-copy", service.extensionDir])
+    showStatus("Copied " + service.extensionDir, false)
+  }
+
   function startAdding() {
     setView("tiles")
     if (selectedTile && sessionField.text === "") sessionField.text = selectedTile.session
@@ -256,6 +299,12 @@ Panel {
     when: root.service !== null
   }
 
+  Timer {
+    id: restartConfirmTimer
+    interval: 4000
+    onTriggered: root.confirmRestart = false
+  }
+
   FileView {
     id: manifestFile
     path: Qt.resolvedUrl("manifest.json").toString().replace(/^file:\/\//, "")
@@ -298,7 +347,7 @@ Panel {
       anchors.fill: parent
       blocked: root.editing
       onMoveRequested: function(dx, dy) {
-        if (dx !== 0) root.setView(dx < 0 ? "tiles" : "hidden")
+        if (dx !== 0) root.stepView(dx < 0 ? -1 : 1)
         else root.moveCursor(dy)
       }
       onActivateRequested: {
@@ -317,6 +366,11 @@ Panel {
         else if (t === "d" && root.cursorActive) root.removeTile(root.selectedTile)
         else if (t === "D" && root.cursorActive && root.selectedTile) root.closeSession(root.selectedTile.session)
         else if (t === "r" || t === "R") root.refresh()
+        else if (root.view === "audio") {
+          if (t === "e" || t === "E") root.enableExtension()
+          else if (t === "v" || t === "V") root.verifyExtension()
+          else if ((t === "b" || t === "B") && root.extensionState === "restart") root.restartBrowser()
+        }
         else if (root.view !== "tiles") return
         else if (t === "c" || t === "C") root.contain()
         else if ((t === "s" || t === "S") && root.cursorActive) root.startSwap(root.selectedTile)
@@ -364,8 +418,9 @@ Panel {
             fontSize: Style.font.caption
             value: root.view
             options: [
-              { value: "tiles", label: "Tiles", tooltip: "H or ←" },
-              { value: "hidden", label: "Hidden web apps" + (root.hiddenRows.length > 0 ? "  ·  " + root.hiddenRows.length : ""), tooltip: "L or →" }
+              { value: "tiles", label: "Tiles", tooltip: "H/L or ←/→" },
+              { value: "hidden", label: "Hidden" + (root.hiddenRows.length > 0 ? "  ·  " + root.hiddenRows.length : ""), tooltip: "Hidden web apps · H/L or ←/→" },
+              { value: "audio", label: "Audio" + (root.extensionMissing ? "  ·  !" : ""), tooltip: "The browser extension for audio control · H/L or ←/→" }
             ]
             onChanged: function(value) { root.setView(value) }
           }
@@ -384,6 +439,15 @@ Panel {
               visible: root.service !== null && root.service.swapKeyError !== ""
               text: root.service ? root.service.swapKeyError : ""
               warning: true
+            }
+
+            Notice {
+              visible: root.extensionMissing && root.swapTile === null
+              text: root.extensionState === "restart"
+                ? "Restart the browser to load the Mosaic extension, then verify it on the Audio tab."
+                : "Audio control is off: the Mosaic browser extension is not set up. Click here or open the Audio tab."
+              clickable: true
+              onClicked: root.setView("audio")
             }
 
             Notice {
@@ -536,6 +600,103 @@ Panel {
             }
           }
 
+          Column {
+            visible: root.view === "audio"
+            width: parent.width
+            spacing: Style.space(6)
+
+            PanelSectionHeader {
+              text: "BROWSER EXTENSION"
+              foreground: root.foreground
+              fontFamily: root.fontFamily
+            }
+
+            Notice {
+              text: root.service ? Model.extensionNotice(root.service.extensionSetup, root.service.bridges) : root.listError
+              warning: root.extensionState !== "connected"
+            }
+
+            Notice {
+              visible: root.service !== null && root.service.extensionError !== ""
+              text: root.service ? root.service.extensionError : ""
+            }
+
+            Repeater {
+              model: root.service ? Model.extensionSteps(root.service.extensionSetup, root.service.bridges, root.service.extensionCheck) : []
+              StepRow {
+                required property var modelData
+                required property int index
+                width: parent.width
+                step: modelData
+                number: index + 1
+              }
+            }
+
+            // Button labels don't wrap or elide, so the warning goes here.
+            Notice {
+              visible: root.confirmRestart && root.extensionState === "restart"
+              text: "This closes every window of the browser, your tiles included, and opens it again. Press again to go ahead."
+            }
+
+            Button {
+              visible: root.extensionState === "restart"
+              width: parent.width
+              text: root.confirmRestart ? "Press again to restart" : "Restart the browser  B"
+              iconText: "󰑓"
+              foreground: root.foreground
+              enabled: root.activity === ""
+              onClicked: root.restartBrowser()
+            }
+
+            RowLayout {
+              width: parent.width
+              spacing: Style.space(6)
+              Button {
+                visible: root.extensionState === "off" || root.extensionState === "unknown"
+                Layout.fillWidth: true
+                text: "Enable  E"
+                iconText: "󰐕"
+                foreground: root.foreground
+                onClicked: root.enableExtension()
+              }
+              Button {
+                visible: root.extensionState === "restart" || root.extensionState === "connected"
+                Layout.fillWidth: true
+                text: "Turn off"
+                iconText: "󰅖"
+                foreground: root.foreground
+                onClicked: root.disableExtension()
+              }
+              Button {
+                Layout.fillWidth: true
+                text: root.service && root.service.verifying ? "Verifying…" : "Verify  V"
+                iconText: "󰄬"
+                foreground: root.foreground
+                enabled: !(root.service && root.service.verifying)
+                onClicked: root.verifyExtension()
+              }
+            }
+
+            Text {
+              visible: root.extensionState !== "connected"
+              width: parent.width
+              text: "By hand, in any Chromium browser: open its extensions page, turn on Developer mode, choose Load unpacked, and pick the extension folder."
+              color: root.dim
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+              wrapMode: Text.WordWrap
+            }
+
+            Button {
+              visible: root.extensionState !== "connected"
+              width: parent.width
+              text: "Copy the extension folder's path"
+              iconText: "󰆏"
+              foreground: root.foreground
+              onClicked: root.copyExtensionPath()
+            }
+          }
+
           Notice {
             visible: root.status !== ""
             text: root.status
@@ -544,7 +705,10 @@ Panel {
 
           Text {
             width: parent.width
-            text: root.view === "hidden"
+            text: root.view === "audio"
+              ? (root.extensionState === "restart" ? "B restart browser  ·  V verify  ·  H/L tabs"
+                : root.extensionState === "connected" ? "V verify  ·  H/L tabs" : "E enable  ·  V verify  ·  H/L tabs")
+              : root.view === "hidden"
               ? "↑↓ select  ·  Enter show again  ·  H/L tabs  ·  R refresh"
               : root.swapTile
                 ? "1–9 or A pick the replacement  ·  Esc cancel"
@@ -575,6 +739,9 @@ Panel {
     id: notice
     property alias text: noticeText.text
     property bool warning: true
+    // A clickable notice reacts to the mouse with `clicked`.
+    property bool clickable: false
+    signal clicked()
     width: parent ? parent.width : 0
     height: noticeText.implicitHeight + Style.spacing.md * 2
     radius: Style.cornerRadius
@@ -587,6 +754,60 @@ Panel {
       font.family: root.fontFamily
       font.pixelSize: Style.font.caption
       wrapMode: Text.WordWrap
+    }
+    MouseArea {
+      anchors.fill: parent
+      enabled: notice.clickable
+      cursorShape: Qt.PointingHandCursor
+      onClicked: notice.clicked()
+    }
+  }
+
+  // One step of the extension's setup, done or not.
+  component StepRow: Item {
+    id: stepRow
+    property var step: null
+    property int number: 0
+    implicitHeight: stepContent.implicitHeight + Style.space(6)
+
+    RowLayout {
+      anchors.left: parent.left
+      anchors.right: parent.right
+      anchors.verticalCenter: parent.verticalCenter
+      anchors.leftMargin: Style.space(10)
+      spacing: Style.space(10)
+
+      Text {
+        Layout.alignment: Qt.AlignTop
+        text: stepRow.step && stepRow.step.done ? "󰗠" : "󰄰"
+        color: stepRow.step && stepRow.step.done ? root.foreground : root.dim
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.body
+      }
+
+      ColumnLayout {
+        id: stepContent
+        Layout.fillWidth: true
+        spacing: Style.space(1)
+        Text {
+          Layout.fillWidth: true
+          textFormat: Text.PlainText
+          text: stepRow.step ? stepRow.number + ". " + stepRow.step.label : ""
+          color: root.foreground
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.body
+          elide: Text.ElideRight
+        }
+        Text {
+          Layout.fillWidth: true
+          textFormat: Text.PlainText
+          text: stepRow.step ? stepRow.step.detail : ""
+          color: root.dim
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
+          wrapMode: Text.WordWrap
+        }
+      }
     }
   }
 

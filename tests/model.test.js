@@ -5,7 +5,7 @@ import vm from "node:vm"
 const source = fs.readFileSync(new URL("../Model.js", import.meta.url), "utf8")
   .replace(/^\.pragma library\s*/m, "")
 const model = {}
-vm.runInNewContext(source + "\nObject.assign(model, { hiddenEntries, showWebapp, nameList, visibleWebapps, hideWebapp, sessionOf, clientFromIpc, parseStore, tileState, buildList, shapeList, parseClients, validAddress, dispatchExpression, listTiles, findTile, planFocus, planRemove, planClose, planContain, restoreAfterMove, monitorFromIpc, parseMonitors, resolveAddTargets, chooseWorkspace, desktopId, isChromiumFamily, isAppWindow, parseOpenWindow, tileDispatches, pruneRecords, serializeStore, planReplace, replaceRecord, parseCursorPos, cursorMoveExpression, parseKeySpec, bindConflict, tileRect, listText, webappsText, monitorsText, splitLines, swapBindLua, unbindLua, webappUrl, webappFromEntry, buildWebapps, shapeWebapps, findWebapp, resolveTarget, parseList, tileLabel, tileMeta, normalizeUrl, sessionName, summary, anyUncontained, parseManifest });", { model })
+vm.runInNewContext(source + "\nObject.assign(model, { hiddenEntries, showWebapp, nameList, visibleWebapps, hideWebapp, sessionOf, clientFromIpc, parseStore, tileState, buildList, shapeList, parseClients, validAddress, dispatchExpression, listTiles, findTile, planFocus, planRemove, planClose, planContain, restoreAfterMove, monitorFromIpc, parseMonitors, resolveAddTargets, chooseWorkspace, desktopId, isChromiumFamily, isAppWindow, parseOpenWindow, tileDispatches, pruneRecords, serializeStore, planReplace, replaceRecord, parseCursorPos, cursorMoveExpression, parseKeySpec, bindConflict, tileRect, listText, webappsText, monitorsText, splitLines, parseBridgeMessage, browserLabel, bridgeWindows, siteOf, matchTiles, extensionState, extensionNotice, extensionSteps, browserClass, browserPids, swapBindLua, unbindLua, webappUrl, webappFromEntry, buildWebapps, shapeWebapps, findWebapp, resolveTarget, parseList, tileLabel, tileMeta, normalizeUrl, sessionName, summary, anyUncontained, parseManifest });", { model })
 
 // Values built inside the VM belong to another realm, so compare copies.
 const plain = value => JSON.parse(JSON.stringify(value))
@@ -378,5 +378,88 @@ assert.equal(model.monitorsText(screens), [
 ].join("\n"))
 assert.deepEqual(plain(model.splitLines(" twitch \n\nTeam Chat\n")), ["twitch", "Team Chat"])
 assert.deepEqual(plain(model.splitLines("")), [])
+
+// The browser extension.
+assert.deepEqual(plain(model.parseBridgeMessage('{"type":"hello","extension":"0.1.0"}')), { type: "hello", extension: "0.1.0" })
+assert.equal(model.parseBridgeMessage("[1]"), null)
+assert.equal(model.parseBridgeMessage('{"id":1}'), null)
+assert.equal(model.parseBridgeMessage("nope"), null)
+assert.equal(model.browserLabel("/opt/brave-origin-bin/brave"), "Brave Origin")
+assert.equal(model.browserLabel("/opt/brave-bin/brave"), "Brave")
+assert.equal(model.browserLabel("/usr/lib/chromium/chromium"), "Chromium")
+assert.equal(model.browserLabel("chrome-flags.conf"), "Google Chrome")
+assert.equal(model.browserLabel("/usr/bin/odd"), "odd")
+assert.equal(model.browserLabel(""), "the browser")
+assert.deepEqual(plain(model.bridgeWindows([
+  { id: 1, type: "app", focused: true, tabs: [{ id: 2, url: "https://twitch.tv/a", title: "a", audible: true, muted: false }, { url: "x" }] },
+  { id: "3", tabs: [] }, null
+])), [{ id: 1, type: "app", focused: true, tabs: [{ id: 2, url: "https://twitch.tv/a", title: "a", audible: true, muted: false }] }])
+assert.deepEqual(plain(model.bridgeWindows("nope")), [])
+
+const extensionTiles = [
+  { address: "0xa", url: "https://twitch.tv", title: "(4) chan - Twitch", index: 1 },
+  { address: "0xb", url: "https://www.youtube.com/", title: "Old title", index: 2 },
+  { address: "0xc", url: "https://kick.com", title: "Kick", index: 3 }
+]
+const tab = (id, url, title) => ({ id, type: "app", focused: false, tabs: [{ id: id + 100, url, title, audible: false, muted: false }] })
+const matched = model.matchTiles(extensionTiles, [
+  { windows: [tab(1, "https://www.twitch.tv/chan", "(4) chan - Twitch"), tab(2, "https://youtube.com/watch?v=1", "New title")] },
+  { windows: [{ id: 3, type: "app", focused: false, tabs: [] }] }
+])
+assert.deepEqual(plain(matched), {
+  total: 3, matched: 2,
+  tiles: { "0xa": { bridge: 0, window: 1, tab: 101 }, "0xb": { bridge: 0, window: 2, tab: 102 } },
+  missing: ["kick.com"]
+})
+// Two windows with one title fall back to the site, and a site shared by
+// two leftover windows matches nothing.
+const twins = model.matchTiles(
+  [{ address: "0xa", url: "https://twitch.tv/a", title: "Twitch", index: 1 }, { address: "0xb", url: "https://kick.com", title: "Twitch", index: 2 }],
+  [{ windows: [tab(1, "https://twitch.tv/a", "Twitch"), tab(2, "https://kick.com/b", "Twitch")] }])
+assert.deepEqual(plain(twins.tiles), { "0xa": { bridge: 0, window: 1, tab: 101 }, "0xb": { bridge: 0, window: 2, tab: 102 } })
+assert.equal(model.matchTiles([extensionTiles[0]], [{ windows: [tab(1, "https://twitch.tv/x", "x"), tab(2, "https://twitch.tv/y", "y")] }]).matched, 0)
+
+const setupOff = { browsers: [{ name: "Brave Origin", registered: false }, { name: "Chromium", registered: false }], flags: [{ file: "/h/.config/brave-origin-flags.conf", loaded: false }] }
+const setupOn = { browsers: [{ name: "Brave Origin", registered: true }, { name: "Chromium", registered: true }], flags: [{ file: "/h/.config/brave-origin-flags.conf", loaded: true }, { file: "/h/.config/chromium-flags.conf", loaded: true }] }
+const bridge = { browser: "/opt/brave-origin-bin/brave", extension: "0.1.0", windows: [] }
+assert.equal(model.extensionState(null, []), "unknown")
+assert.equal(model.extensionState(setupOff, []), "off")
+assert.equal(model.extensionState(setupOn, []), "restart")
+assert.equal(model.extensionState(null, [bridge]), "connected")
+assert.equal(model.extensionNotice(setupOn, []), "Set up. Restart Brave Origin and Chromium to load the extension, then verify. Closing the browser also closes its tiles.")
+assert.equal(model.extensionNotice(setupOn, [bridge]), "Connected to Brave Origin. Your tiles are checked whenever they change; V checks that it still answers.")
+assert.equal(model.extensionNotice({ browsers: [], flags: [] }, []).includes("load it by hand"), true)
+assert.deepEqual(plain(model.extensionSteps(setupOff, [], null)), [
+  { label: "Bridge registered", done: false, detail: "Enable registers it with Brave Origin and Chromium" },
+  { label: "Loads when the browser starts", done: false, detail: "Enable adds it to brave-origin-flags.conf" },
+  { label: "Connected", done: false, detail: "Restart the browser after enabling" },
+  { label: "Finds your tiles", done: false, detail: "Checked on its own once connected" }
+])
+assert.deepEqual(plain(model.extensionSteps(setupOn, [bridge], matched).map(step => [step.done, step.detail])), [
+  [true, "Brave Origin and Chromium"],
+  [true, "brave-origin-flags.conf and chromium-flags.conf"],
+  [true, "Brave Origin · extension 0.1.0"],
+  [false, "2 of 3 tiles  ·  not found: kick.com"]
+])
+assert.equal(model.extensionSteps(setupOn, [bridge], null)[3].detail, "Checking…")
+assert.equal(model.extensionSteps(setupOn, [bridge], { total: 1, matched: 1, tiles: {}, missing: [] })[3].done, true)
+assert.equal(model.extensionSteps(setupOn, [], { error: "No browser extension answered" })[3].detail, "No browser extension answered")
+const many = { browsers: ["A", "B", "C", "D", "E"].map(name => ({ name, registered: true })), flags: [] }
+assert.equal(model.extensionSteps(many, [], null)[0].detail, "A, B and 3 more")
+assert.equal(model.extensionSteps(null, [], null)[0].detail, "No Chromium-family browser profile found")
+
+assert.equal(model.browserClass("brave-origin.desktop"), "brave-origin")
+assert.equal(model.browserClass("/home/u/.local/bin/brave-origin"), "brave-origin")
+assert.equal(model.browserClass(""), "")
+assert.deepEqual(plain(model.browserPids(JSON.stringify([
+  { pid: 62992, class: "brave-twitch.tv__-Default", tags: ["mosaic", "mosaic-default"] },
+  { pid: 62992, class: "brave-origin", tags: [] },
+  { pid: 700, class: "chromium", tags: [] },
+  { pid: 12, class: "foot", tags: [] },
+  { pid: 1, class: "brave-origin", tags: [] },
+  { pid: "9", class: "brave-origin", tags: ["mosaic"] }
+]), ["brave-origin", "chromium"])), [700, 62992])
+assert.deepEqual(plain(model.browserPids("[]", ["brave-origin"])), [])
+assert.equal(model.browserPids("nope", []), null)
 
 console.log("model tests passed")

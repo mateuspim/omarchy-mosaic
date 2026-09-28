@@ -1,0 +1,394 @@
+#!/usr/bin/env python3
+"""Omarchy Mosaic's native messaging host and its installer.
+
+Run by a Chromium-family browser for the Mosaic extension (extension/), it
+relays JSON messages between the extension (length-prefixed on stdin and
+stdout) and the Mosaic service in the Omarchy shell (one JSON object per
+line on a Unix socket). It keeps running while the browser keeps the
+extension's port open and reconnects whenever the shell restarts.
+
+The panel also runs it to set the extension up:
+
+  mosaic-native-host status            what is set up, as JSON
+  mosaic-native-host setup DIR         register the host with every browser
+                                       found, and load the extension in DIR
+                                       from each browser's flags file
+  mosaic-native-host remove DIR        undo setup
+
+Only the standard library is used; Omarchy already depends on Python.
+"""
+
+import json
+import os
+import socket
+import struct
+import sys
+import tempfile
+import threading
+import time
+
+HOST_NAME = "pym.mosaic"
+EXTENSION_ID = "ibcnbknhphdnlpfglnhelicnpnnmepbo"
+MAX_MESSAGE = 1024 * 1024
+RETRY_SECONDS = 2
+
+# Browser profile folders under XDG_CONFIG_HOME, with the names the panel
+# shows. The host is registered in each one that exists.
+BROWSERS = [
+    ("BraveSoftware/Brave-Origin", "Brave Origin"),
+    ("BraveSoftware/Brave-Browser", "Brave"),
+    ("BraveSoftware/Brave-Browser-Beta", "Brave Beta"),
+    ("BraveSoftware/Brave-Browser-Nightly", "Brave Nightly"),
+    ("chromium", "Chromium"),
+    ("google-chrome", "Google Chrome"),
+    ("google-chrome-beta", "Google Chrome Beta"),
+    ("google-chrome-unstable", "Google Chrome Dev"),
+    ("microsoft-edge", "Microsoft Edge"),
+    ("microsoft-edge-beta", "Microsoft Edge Beta"),
+    ("microsoft-edge-dev", "Microsoft Edge Dev"),
+    ("vivaldi", "Vivaldi"),
+]
+
+# The flags files that Arch's browser launchers read, one flag per line.
+# Omarchy loads its own extensions from these with --load-extension, so
+# Mosaic does the same, but only in files that already exist.
+FLAGS_FILES = [
+    "brave-origin-flags.conf",
+    "brave-flags.conf",
+    "brave-beta-flags.conf",
+    "brave-nightly-flags.conf",
+    "chromium-flags.conf",
+    "chrome-flags.conf",
+    "chrome-beta-flags.conf",
+    "chrome-dev-flags.conf",
+    "microsoft-edge-stable-flags.conf",
+    "microsoft-edge-beta-flags.conf",
+    "microsoft-edge-dev-flags.conf",
+]
+
+LOAD_EXTENSION = "--load-extension="
+
+
+def config_home():
+    value = os.environ.get("XDG_CONFIG_HOME", "")
+    return value if value.startswith("/") else os.path.join(os.path.expanduser("~"), ".config")
+
+
+def socket_path():
+    override = os.environ.get("MOSAIC_BRIDGE_SOCKET", "")
+    if override:
+        return override
+    runtime = os.environ.get("XDG_RUNTIME_DIR", "") or "/run/user/%d" % os.getuid()
+    return os.path.join(runtime, "pym-mosaic.sock")
+
+
+# --- Flags files -------------------------------------------------------------
+
+
+def is_mosaic_extension(item, directory):
+    """Whether a --load-extension entry is this extension, here or at an
+    older plugin path."""
+    if not item:
+        return False
+    if directory and (item == directory or os.path.realpath(item) == os.path.realpath(directory)):
+        return True
+    try:
+        with open(os.path.join(item, "manifest.json"), encoding="utf-8") as file:
+            return json.load(file).get("name") == "Omarchy Mosaic"
+    except (OSError, ValueError, AttributeError):
+        # A plugin that moved leaves a path to nothing behind.
+        return item.rstrip("/").endswith("/pym.mosaic/extension") and not os.path.exists(item)
+
+
+def with_extension(text, directory):
+    """The flags text with DIR on its --load-extension line, and any older
+    Mosaic entry gone. The last --load-extension line is the one Chromium
+    uses, so that is the one extended."""
+    lines = without_extension(text, directory).split("\n")
+    for index in range(len(lines) - 1, -1, -1):
+        if lines[index].strip().startswith(LOAD_EXTENSION):
+            lines[index] = lines[index].rstrip() + "," + directory
+            return "\n".join(lines)
+    if lines and lines[-1] == "":
+        lines.pop()
+    lines.append(LOAD_EXTENSION + directory)
+    return "\n".join(lines) + "\n"
+
+
+def without_extension(text, directory):
+    """The flags text with every Mosaic entry taken off --load-extension."""
+    out = []
+    for line in text.split("\n"):
+        stripped = line.strip()
+        if stripped.startswith(LOAD_EXTENSION):
+            items = stripped[len(LOAD_EXTENSION):].split(",")
+            kept = [item for item in items if item and not is_mosaic_extension(item, directory)]
+            if not kept:
+                continue
+            line = LOAD_EXTENSION + ",".join(kept)
+        out.append(line)
+    return "\n".join(out)
+
+
+def loads_extension(text, directory):
+    for line in text.split("\n"):
+        stripped = line.strip()
+        if stripped.startswith(LOAD_EXTENSION):
+            items = stripped[len(LOAD_EXTENSION):].split(",")
+            if directory and any(item == directory or os.path.realpath(item) == os.path.realpath(directory) for item in items):
+                return True
+    return False
+
+
+def write_atomically(path, text):
+    """Replaces the file a path points to, following a symlink, and keeps
+    its mode."""
+    target = os.path.realpath(path)
+    mode = os.stat(target).st_mode & 0o777 if os.path.exists(target) else 0o644
+    folder = os.path.dirname(target)
+    os.makedirs(folder, exist_ok=True)
+    handle, temporary = tempfile.mkstemp(dir=folder, prefix=".mosaic-")
+    try:
+        with os.fdopen(handle, "w", encoding="utf-8") as file:
+            file.write(text)
+        os.chmod(temporary, mode)
+        os.replace(temporary, target)
+    except BaseException:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+        raise
+
+
+def read_text(path):
+    with open(path, encoding="utf-8") as file:
+        return file.read()
+
+
+# --- Setup -------------------------------------------------------------------
+
+
+def host_manifest():
+    return {
+        "name": HOST_NAME,
+        "description": "Omarchy Mosaic bridge to the Omarchy shell",
+        "path": os.path.realpath(__file__),
+        "type": "stdio",
+        "allowed_origins": ["chrome-extension://%s/" % EXTENSION_ID],
+    }
+
+
+def host_file(folder):
+    return os.path.join(config_home(), folder, "NativeMessagingHosts", HOST_NAME + ".json")
+
+
+def status(directory):
+    """What is set up. DIR, when given, is the extension the flags files
+    should load."""
+    browsers = []
+    expected = host_manifest()
+    for folder, name in BROWSERS:
+        if not os.path.isdir(os.path.join(config_home(), folder)):
+            continue
+        try:
+            registered = json.loads(read_text(host_file(folder))) == expected
+        except (OSError, ValueError):
+            registered = False
+        browsers.append({"name": name, "folder": folder, "registered": registered})
+    flags = []
+    for name in FLAGS_FILES:
+        path = os.path.join(config_home(), name)
+        if not os.path.isfile(path):
+            continue
+        try:
+            loaded = bool(directory) and loads_extension(read_text(path), directory)
+        except OSError:
+            loaded = False
+        flags.append({"file": path, "loaded": loaded})
+    return {
+        "extensionId": EXTENSION_ID,
+        "extension": directory,
+        "host": os.path.realpath(__file__),
+        "socket": socket_path(),
+        "browsers": browsers,
+        "flags": flags,
+    }
+
+
+def check_directory(directory):
+    if not directory.startswith("/"):
+        raise SystemExit("error: the extension folder must be an absolute path")
+    if "," in directory or "\n" in directory:
+        raise SystemExit("error: the extension folder's path cannot contain commas or line breaks")
+    if not os.path.isfile(os.path.join(directory, "manifest.json")):
+        raise SystemExit("error: no extension manifest in " + directory)
+
+
+def setup(directory):
+    check_directory(directory)
+    text = json.dumps(host_manifest(), indent=2) + "\n"
+    for folder, _ in BROWSERS:
+        if os.path.isdir(os.path.join(config_home(), folder)):
+            write_atomically(host_file(folder), text)
+    for name in FLAGS_FILES:
+        path = os.path.join(config_home(), name)
+        if os.path.isfile(path):
+            current = read_text(path)
+            wanted = with_extension(current, directory)
+            if wanted != current:
+                write_atomically(path, wanted)
+
+
+def remove(directory):
+    for folder, _ in BROWSERS:
+        try:
+            os.unlink(host_file(folder))
+        except FileNotFoundError:
+            pass
+    for name in FLAGS_FILES:
+        path = os.path.join(config_home(), name)
+        if os.path.isfile(path):
+            current = read_text(path)
+            wanted = without_extension(current, directory)
+            if wanted != current:
+                write_atomically(path, wanted)
+
+
+# --- Relay -------------------------------------------------------------------
+
+
+class Relay:
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.connection = None
+        # Replayed to a new shell, which has not heard from the extension.
+        self.hello = None
+        self.windows = None
+
+    def browser(self):
+        try:
+            return os.readlink("/proc/%d/exe" % os.getppid())
+        except OSError:
+            return ""
+
+    def to_browser(self, message):
+        data = json.dumps(message, separators=(",", ":")).encode("utf-8")
+        if len(data) > MAX_MESSAGE:
+            return
+        with self.lock:
+            sys.stdout.buffer.write(struct.pack("<I", len(data)) + data)
+            sys.stdout.buffer.flush()
+
+    def to_shell(self, message):
+        with self.lock:
+            connection = self.connection
+        if connection is None:
+            return
+        try:
+            connection.sendall(json.dumps(message, separators=(",", ":")).encode("utf-8") + b"\n")
+        except OSError:
+            self.drop(connection)
+
+    def drop(self, connection):
+        with self.lock:
+            if self.connection is connection:
+                self.connection = None
+        try:
+            connection.close()
+        except OSError:
+            pass
+
+    def from_browser(self, message):
+        if message.get("type") == "hello":
+            self.hello = message
+        elif message.get("type") == "windows" and "id" not in message:
+            self.windows = message
+        self.to_shell(message)
+
+    # Connects to the shell, and again whenever it goes away.
+    def shell_loop(self):
+        while True:
+            try:
+                connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                connection.connect(socket_path())
+            except OSError:
+                connection.close()
+                time.sleep(RETRY_SECONDS)
+                continue
+            with self.lock:
+                self.connection = connection
+            self.to_shell({"type": "host", "pid": os.getppid(), "browser": self.browser()})
+            for message in (self.hello, self.windows):
+                if message is not None:
+                    self.to_shell(message)
+            self.read_shell(connection)
+            self.drop(connection)
+            time.sleep(RETRY_SECONDS)
+
+    def read_shell(self, connection):
+        buffer = b""
+        while True:
+            try:
+                chunk = connection.recv(65536)
+            except OSError:
+                return
+            if not chunk:
+                return
+            buffer += chunk
+            while b"\n" in buffer:
+                line, buffer = buffer.split(b"\n", 1)
+                self.shell_line(line)
+            if len(buffer) > MAX_MESSAGE:
+                buffer = b""
+
+    def shell_line(self, line):
+        try:
+            message = json.loads(line.decode("utf-8"))
+        except (UnicodeDecodeError, ValueError):
+            return
+        if isinstance(message, dict):
+            self.to_browser(message)
+
+    # Reads the browser's messages until it closes the port.
+    def browser_loop(self):
+        stdin = sys.stdin.buffer
+        while True:
+            header = stdin.read(4)
+            if len(header) < 4:
+                return
+            length = struct.unpack("<I", header)[0]
+            data = stdin.read(length)
+            if len(data) < length:
+                return
+            if length > MAX_MESSAGE:
+                continue
+            try:
+                message = json.loads(data.decode("utf-8"))
+            except (UnicodeDecodeError, ValueError):
+                continue
+            if isinstance(message, dict):
+                self.from_browser(message)
+
+
+def relay():
+    bridge = Relay()
+    threading.Thread(target=bridge.shell_loop, daemon=True).start()
+    bridge.browser_loop()
+
+
+def main(arguments):
+    command = arguments[0] if arguments else ""
+    if command in ("status", "setup", "remove"):
+        directory = os.path.abspath(arguments[1]) if len(arguments) > 1 and arguments[1] else ""
+        if command == "setup":
+            setup(directory)
+        elif command == "remove":
+            remove(directory)
+        print(json.dumps(status(directory)))
+        return 0
+    # The browser passes the extension's origin, and nothing needs it.
+    relay()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
