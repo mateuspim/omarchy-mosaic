@@ -43,7 +43,10 @@ roughly in order of value; confirm priorities with the user before starting:
 - **Layouts.** A dedicated workspace per session, and layouts the user picks:
   balanced grid, vertical stack, one large plus several small, and a 16:9
   fit. Prefer Hyprland layout settings or split ratios over floating
-  geometry, which was rejected.
+  geometry, which was rejected. **Done (2026-09-29):** the four layouts,
+  as Hyprland Lua tiling layouts (`layouts.lua`), picked per session on the
+  panel's session header (G) or with `mosaic layout`. **Next:** a layout
+  editor (the user's request), and a dedicated workspace per session.
 - **Audio.** Mute every tile but the focused one, per-tile volume, and an
   audio indicator in the panel. PipeWire can't do it: every tile belongs to
   one browser process, and Chromium plays every tab through one audio

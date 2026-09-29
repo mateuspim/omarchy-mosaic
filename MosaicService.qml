@@ -74,6 +74,24 @@ Scope {
   // Enabled monitors (Model.parseMonitors), refreshed with the list.
   property var monitors: []
 
+  // Layouts (layouts.lua), chosen per session and saved in layouts.json
+  // ({ SESSION: { layout, before } }). Hyprland sets them per workspace,
+  // and forgets them on a config reload, so `appliedLayouts` ({ SESSION:
+  // workspace }) says where each one is in place now; syncLayouts applies
+  // the rest. `layoutError` is why the last attempt failed.
+  property var layouts: ({})
+  property var appliedLayouts: ({})
+  property string layoutError: ""
+  property bool layoutSyncPending: false
+  // Tile states from just before a config reload ({ ADDRESS: state }). A
+  // reload may reset contained tiles' records, so the next sync puts these
+  // back instead of what the list reads by then.
+  property var statesBeforeReload: null
+  // What a running layout action saves once its steps succeed.
+  property var pendingLayouts: null
+  readonly property string layoutsPath: storePath.replace(/tiles\.json$/, "layouts.json")
+  readonly property string layoutsLua: Model.layoutsLoadLua(Qt.resolvedUrl("layouts.lua").toString().replace(/^file:\/\//, ""))
+
   // The browser extension (extension/). Each browser's copy talks to the
   // service through the native host, bin/mosaic-native-host, which connects
   // to `bridgePath`. `extensionSetup` is the host's `status` output (null
@@ -185,6 +203,63 @@ Scope {
   // `mosaic contain [--session NAME]`; "" contains every session's tiles.
   function contain(session, label) {
     return startAction(label || "Containing fullscreen", function(list) { return Model.planContain(list, session) })
+  }
+
+  // `mosaic layout SESSION NAME`: gives the session's workspace a layout
+  // (Model.LAYOUT_CHOICES; "default" hands it back), and saves the choice.
+  function setLayout(session, name, label) {
+    return startAction(label || "Setting the layout of " + session, function(list) {
+      var workspace = Model.sessionWorkspace(list, session)
+      var result = Model.planLayout(list, root.layouts, session, name, root.workspaceLayout(workspace), root.layoutsLua)
+      if (result.error) return result
+      var applied = Object.assign({}, root.appliedLayouts)
+      if (result.layouts[session]) applied[session] = workspace
+      else delete applied[session]
+      root.pendingLayouts = { layouts: result.layouts, applied: applied }
+      return { error: "", expressions: result.expressions, message: result.message }
+    })
+  }
+
+  // The choice saved for a session: a Model.LAYOUTS name, or "default".
+  function layoutOf(session) {
+    return layouts[session] ? layouts[session].layout : "default"
+  }
+
+  // The tiled layout Hyprland reports for a workspace, or "".
+  function workspaceLayout(id) {
+    var values = Hyprland.workspaces.values
+    for (var i = 0; i < values.length; i++) {
+      var ipc = values[i].lastIpcObject
+      if (values[i].id === id && ipc) return String(ipc.tiledLayout || "")
+    }
+    return ""
+  }
+
+  // Applies saved layouts wherever they are not in place yet (see
+  // Model.layoutChanges): after a start or a config reload, and when a
+  // session's tiles move to another workspace. Waits for a running action.
+  function syncLayouts() {
+    if (busy) {
+      layoutSyncPending = true
+      return
+    }
+    layoutSyncPending = false
+    var check = Model.layoutChanges(list, layouts, appliedLayouts)
+    if (check.changes.length === 0) {
+      statesBeforeReload = null
+      if (JSON.stringify(check.applied) !== JSON.stringify(appliedLayouts)) appliedLayouts = check.applied
+      return
+    }
+    startAction("Applying layouts", function(fresh) {
+      var changes = Model.layoutChanges(fresh, root.layouts, root.appliedLayouts)
+      var steps = Model.layoutSteps(fresh, changes.changes, root.layoutsLua, root.statesBeforeReload)
+      root.statesBeforeReload = null
+      // Marked as applied even when a step fails, so a broken layout isn't
+      // retried on every list change; layoutError says what went wrong.
+      root.pendingLayouts = { layouts: root.layouts, applied: changes.applied, sync: true }
+      if (steps.error) return steps
+      return { error: "", expressions: steps.expressions, message: "" }
+    })
   }
 
   // `mosaic add [--session NAME] [--monitor NAME] [--browser CMD] TARGET...`.
@@ -344,6 +419,13 @@ Scope {
       if (exitCode !== 0) return finishAction(restartState.name + " is still closing; try again in a moment")
       return relaunchBrowser()
     }
+    // Loading the layouts may complain about names an older load
+    // registered, and hyprctl then exits non-zero; see Model.layoutsLoaded.
+    if (phase === "dispatch" && stepProcess.command[1] === "eval" && stepProcess.command[2] === layoutsLua) {
+      if (!Model.layoutsLoaded(text + "\n" + String(errors)))
+        return finishAction("Cannot load the layouts: " + (text + " " + String(errors)).trim())
+      return runQueue(pendingQueue, afterQueue)
+    }
     if (exitCode !== 0) return finishAction(String(errors).trim() || stepProcess.command[0] + " failed")
     if (phase === "plan") {
       var clients = Model.parseClients(text)
@@ -479,13 +561,16 @@ Scope {
     if (!cursorProcess.running) cursorProcess.running = true
   }
 
-  // Runs Hyprland dispatches in order, then `then()`.
+  // Runs Hyprland dispatches in order, then `then()`. A step is a dispatch
+  // expression, or { eval } for Lua that is not a dispatcher, such as a
+  // workspace rule.
   function runQueue(expressions, then) {
     if (expressions.length === 0) return then()
     pendingQueue = expressions.slice(1)
     afterQueue = then
     phase = "dispatch"
-    runStep(["hyprctl", "dispatch", expressions[0]])
+    var step = expressions[0]
+    runStep(typeof step === "string" ? ["hyprctl", "dispatch", step] : ["hyprctl", "eval", step.eval])
   }
 
   function knownMonitors() {
@@ -505,6 +590,7 @@ Scope {
     pendingPlan = null
     pendingQueue = []
     afterQueue = null
+    if (pendingLayouts) finishLayouts(error)
     refresh()
     var kept = {}
     for (var n = job - 19; n < job; n++) if (results[n]) kept[n] = results[n]
@@ -512,6 +598,20 @@ Scope {
     results = kept
     settleTimer.restart()
     actionFinished(label, error, error ? "" : pendingMessage)
+    if (layoutSyncPending) layoutSync.restart()
+  }
+
+  // Keeps what a layout action changed: on success, always; on failure,
+  // only a sync's `applied`, so it is not retried in a loop.
+  function finishLayouts(error) {
+    var done = pendingLayouts
+    pendingLayouts = null
+    if (error && !done.sync) return
+    layoutError = error
+    appliedLayouts = done.applied
+    if (JSON.stringify(done.layouts) === JSON.stringify(layouts)) return
+    layouts = done.layouts
+    layoutsFile.setText(Model.serializeLayouts(layouts))
   }
 
   // Queues re-applying a moved tile's fullscreen state, since a move leaves
@@ -847,7 +947,10 @@ Scope {
     applyAudioFocus()
   }
 
-  onListChanged: autoCheck()
+  onListChanged: {
+    autoCheck()
+    layoutSync.restart()
+  }
 
   // The extension's state for scripts: `omarchy-shell pym.mosaic extension`.
   function extensionStatus() {
@@ -907,6 +1010,10 @@ Scope {
     function close(session: string): string { return root.started(root.close(session)) }
     // `mosaic contain [--session S]`.
     function contain(session: string): string { return root.started(root.contain(session)) }
+    // `mosaic layout --session NAME LAYOUT`.
+    function layout(session: string, name: string): string { return root.started(root.setLayout(session, name)) }
+    // `mosaic layout`: each session's layout.
+    function layouts(): string { return Model.layoutsText(root.list, root.layouts) }
 
     // How action JOB went: "running", "done" or "error" on the first line,
     // then the CLI's message or the error; "unknown" for an old number.
@@ -1051,7 +1158,11 @@ Scope {
       if (name === "openwindow") root.windowOpened(event.data)
       if (name === "activewindowv2") root.windowFocused(event.data)
       // A config reload drops runtime binds, the swap key among them.
+      // It drops runtime layouts and workspace rules too.
       if (name === "configreloaded") {
+        root.appliedLayouts = ({})
+        root.statesBeforeReload = Model.tileStates(root.list)
+        layoutSync.restart()
         root.boundSwapKey = ""
         keySync.restart()
       }
@@ -1179,6 +1290,13 @@ Scope {
     interval: 500
   }
 
+  // Lets the list settle before checking where layouts belong.
+  Timer {
+    id: layoutSync
+    interval: 300
+    onTriggered: root.syncLayouts()
+  }
+
   // How long a launched browser has to open its app window.
   Timer {
     id: windowTimeout
@@ -1226,6 +1344,17 @@ Scope {
     id: manifestFile
     path: Qt.resolvedUrl("manifest.json").toString().replace(/^file:\/\//, "")
     printErrors: false
+  }
+
+  FileView {
+    id: layoutsFile
+    path: root.layoutsPath
+    printErrors: false
+    onLoaded: {
+      root.layouts = Model.parseLayouts(text())
+      layoutSync.restart()
+    }
+    onSaveFailed: function(error) { root.layoutError = "Cannot write " + root.layoutsPath + ": " + error }
   }
 
   FileView {

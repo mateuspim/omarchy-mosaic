@@ -314,6 +314,18 @@ Panel {
     runService(function(engine) { return engine.close(name) })
   }
 
+  // Gives a session the next layout in Model.LAYOUT_CHOICES.
+  function cycleLayout(name) {
+    runService(function(engine) {
+      var next = Model.nextLayout(engine.layoutOf(name))
+      return engine.setLayout(name, next, "Layout of " + name + ": " + Model.layoutLabel(next))
+    })
+  }
+
+  function layoutOf(name) {
+    return service ? service.layoutOf(name) : "default"
+  }
+
   function moveCursor(delta) {
     if (cursorCount === 0) return
     cursorActive = true
@@ -430,6 +442,7 @@ Panel {
         if (t === "a" || t === "A") root.startAdding()
         else if (t === "d" && root.cursorActive) root.removeTile(root.selectedTile)
         else if (t === "D" && root.cursorActive && root.selectedTile) root.closeSession(root.selectedTile.session)
+        else if ((t === "g" || t === "G") && root.view === "tiles" && root.cursorActive && root.selectedTile) root.cycleLayout(root.selectedTile.session)
         else if (t === "r" || t === "R") root.refresh()
         else if (root.view === "extension") {
           if (t === "e" || t === "E") root.enableExtension()
@@ -511,6 +524,12 @@ Panel {
             }
 
             Notice {
+              visible: root.service !== null && root.service.layoutError !== ""
+              text: root.service ? "Layouts: " + root.service.layoutError : ""
+              warning: true
+            }
+
+            Notice {
               visible: root.extensionMissing && root.swapTile === null
               text: root.extensionState === "restart"
                 ? "Restart the browser to load the Mosaic extension; the Extension tab does it."
@@ -585,9 +604,17 @@ Panel {
                   width: parent.width
                   PanelSectionHeader {
                     text: sessionColumn.modelData.name.toUpperCase() + "  ·  " + sessionColumn.modelData.tiles.length
+                      + "  ·  " + Model.layoutLabel(root.layoutOf(sessionColumn.modelData.name)).toUpperCase()
                     foreground: root.foreground
                     fontFamily: root.fontFamily
                     Layout.fillWidth: true
+                  }
+                  PanelActionButton {
+                    iconText: "󰕰"
+                    tooltipText: "Layout: " + Model.layoutLabel(root.layoutOf(sessionColumn.modelData.name))
+                      + ". Click for " + Model.layoutLabel(Model.nextLayout(root.layoutOf(sessionColumn.modelData.name))) + " · G"
+                    foreground: root.foreground
+                    onClicked: root.cycleLayout(sessionColumn.modelData.name)
                   }
                   PanelActionButton {
                     iconText: "󰅙"
@@ -833,7 +860,7 @@ Panel {
               ? "↑↓ select  ·  Enter show again  ·  H/L tabs  ·  R refresh"
               : root.swapTile
                 ? "1–9 or A pick the replacement  ·  Esc cancel"
-                : "↑↓ select  ·  Enter focus  ·  S swap  ·  M mute  ·  −/+ volume  ·  F focused only  ·  X remove  ·  ⇧D close session  ·  H/L tabs  ·  R refresh"
+                : "↑↓ select  ·  Enter focus  ·  S swap  ·  G layout  ·  M mute  ·  −/+ volume  ·  F focused only  ·  X remove  ·  ⇧D close session  ·  H/L tabs  ·  R refresh"
             color: root.dim
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption

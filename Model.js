@@ -514,6 +514,196 @@ function restoreAfterMove(list, eventData) {
   return ""
 }
 
+// Layouts (layouts.lua): Hyprland Lua tiling layouts set per workspace.
+// "default" hands the workspace back to the layout it had before.
+var LAYOUTS = ["grid", "stack", "main", "fit"]
+var LAYOUT_CHOICES = ["default"].concat(LAYOUTS)
+var LAYOUT_LABELS = { "default": "Hyprland", grid: "Grid", stack: "Stack", main: "Main + small", fit: "16:9 fit" }
+
+function layoutLabel(name) {
+  return LAYOUT_LABELS[name] || LAYOUT_LABELS["default"]
+}
+
+// The choice after `name` in the panel's cycle.
+function nextLayout(name) {
+  var at = LAYOUT_CHOICES.indexOf(name)
+  return LAYOUT_CHOICES[(at + 1) % LAYOUT_CHOICES.length]
+}
+
+// A layout choice from user text ("Grid", "16:9", "main"), or "".
+function parseLayoutName(text) {
+  var name = String(text || "").trim().toLowerCase()
+  if (name === "16:9" || name === "16x9") return "fit"
+  if (name === "hyprland" || name === "none" || name === "off") return "default"
+  return LAYOUT_CHOICES.indexOf(name) === -1 ? "" : name
+}
+
+// A layout Hyprland reports in `tiledLayout`, safe to put back in a rule.
+function validHyprLayout(name) {
+  return /^[a-z][a-z0-9_:-]{0,39}$/.test(String(name || ""))
+}
+
+// layouts.json: `{ version: 1, sessions: { NAME: { layout, before } } }`,
+// where `before` is the workspace's layout before Mosaic changed it. An
+// unreadable file has no layouts.
+function parseLayouts(text) {
+  var parsed
+  try {
+    parsed = JSON.parse(String(text || ""))
+  } catch (error) {
+    return {}
+  }
+  var source = parsed && parsed.sessions && typeof parsed.sessions === "object" ? parsed.sessions : {}
+  var layouts = {}
+  Object.keys(source).forEach(function(session) {
+    var entry = source[session]
+    if (sessionName(session) !== session || !entry || LAYOUTS.indexOf(entry.layout) === -1) return
+    layouts[session] = { layout: entry.layout, before: validHyprLayout(entry.before) ? entry.before : "" }
+  })
+  return layouts
+}
+
+function serializeLayouts(layouts) {
+  var sessions = {}
+  Object.keys(layouts).sort().forEach(function(session) {
+    sessions[session] = { layout: layouts[session].layout, before: layouts[session].before }
+  })
+  return JSON.stringify({ version: 1, sessions: sessions }, null, 2) + "\n"
+}
+
+// The Lua that loads layouts.lua into Hyprland, or "" for a path that can't
+// be quoted plainly.
+function layoutsLoadLua(path) {
+  if (!/^\/[A-Za-z0-9_.\/ +-]+\.lua$/.test(String(path || ""))) return ""
+  return 'dofile("' + path + '")'
+}
+
+// Whether a reply to layoutsLoadLua means the layouts are there: "ok", or
+// only complaints that a name is already registered (by an older load that
+// predates layouts.lua's own guard).
+function layoutsLoaded(reply) {
+  var lines = String(reply || "").trim().split("\n").filter(function(line) { return line.trim() !== "" })
+  if (lines.length === 1 && lines[0].trim() === "ok") return true
+  return lines.length > 0 && lines.every(function(line) { return /is already registered/.test(line) || line.trim() === "ok" })
+}
+
+// The Lua that sets workspace `workspace`'s tiled layout: a Mosaic layout
+// name, or a Hyprland one (`dwindle`) to hand it back. "" when invalid.
+function layoutRuleLua(workspace, layout) {
+  if (typeof workspace !== "number" || Math.floor(workspace) !== workspace || workspace < 1) return ""
+  var value = LAYOUTS.indexOf(layout) !== -1 ? "lua:mosaic-" + layout : layout
+  if (!validHyprLayout(value)) return ""
+  return 'hl.workspace_rule({ workspace = "' + workspace + '", layout = "' + value + '" })'
+}
+
+// The workspace a session's layout applies to: its first tiled tile's, or
+// null when every tile floats or the session is gone.
+function sessionWorkspace(list, session) {
+  var tiles = listTiles(list).filter(function(tile) { return tile.session === session && tile.state !== "floating" })
+  return tiles.length > 0 ? tiles[0].workspace : null
+}
+
+// The steps that give each workspace its layout, then put back the
+// fullscreen state of every tile on it, since switching a workspace's
+// layout resets Hyprland's record of it (contained tiles read 0 again).
+// `changes` is [{ workspace, layout }], where layout is a Mosaic name or a
+// Hyprland one. Steps are { eval } for `hyprctl eval` and plain strings for
+// dispatches. `states` ({ ADDRESS: state }, optional) overrides the
+// list's state for tiles whose record was reset before the list saw it,
+// as by a config reload. Returns { expressions } or { error }.
+function layoutSteps(list, changes, loadLua, states) {
+  if (changes.length === 0) return { expressions: [] }
+  if (loadLua === "") return { error: "Cannot load the layouts from this plugin's folder" }
+  var steps = [{ eval: loadLua }]
+  var tiles = listTiles(list)
+  for (var i = 0; i < changes.length; i++) {
+    var rule = layoutRuleLua(changes[i].workspace, changes[i].layout)
+    if (rule === "") return { error: "Cannot set layout " + JSON.stringify(String(changes[i].layout)) + " on workspace " + changes[i].workspace }
+    steps.push({ eval: rule })
+    for (var t = 0; t < tiles.length; t++) {
+      if (tiles[t].workspace !== changes[i].workspace) continue
+      var state = states && states[tiles[t].address] ? states[tiles[t].address] : tiles[t].state
+      var action = state === "contained" ? "contain" : state === "uncontained" ? "release" : ""
+      if (action !== "") steps.push(dispatchExpression(action, tiles[t].address))
+    }
+  }
+  return { expressions: steps }
+}
+
+// `mosaic layout SESSION NAME`: the new saved layouts and the steps that
+// apply them. `layouts` is the saved map, `current` the session's
+// workspace's tiledLayout now (for `before`). Returns { layouts,
+// expressions, message } or { error }.
+function planLayout(list, layouts, session, name, current, loadLua) {
+  var error = sessionFilterError(session)
+  if (error || !session) return { error: error || "Name a session" }
+  var choice = parseLayoutName(name)
+  if (choice === "") return { error: "Unknown layout " + JSON.stringify(String(name)) + "; use " + LAYOUT_CHOICES.join(", ") }
+  var workspace = sessionWorkspace(list, session)
+  if (workspace === null) return { error: "Session " + session + " has no tiled tiles" }
+  var saved = layouts[session]
+  var next = {}
+  Object.keys(layouts).forEach(function(name) { next[name] = layouts[name] })
+  var target
+  if (choice === "default") {
+    delete next[session]
+    target = saved && saved.before ? saved.before : "dwindle"
+  } else {
+    var mosaicNow = String(current || "").indexOf("lua:") === 0
+    var before = saved ? saved.before : mosaicNow || !validHyprLayout(current) ? "" : String(current)
+    next[session] = { layout: choice, before: before }
+    target = choice
+  }
+  var steps = layoutSteps(list, [{ workspace: workspace, layout: target }], loadLua)
+  if (steps.error) return { error: steps.error }
+  return { layouts: next, expressions: steps.expressions, message: "Layout of " + session + ": " + layoutLabel(choice) + "." }
+}
+
+// Each tile's state by address, to keep across a config reload.
+function tileStates(list) {
+  var states = {}
+  listTiles(list).forEach(function(tile) { states[tile.address] = tile.state })
+  return states
+}
+
+// Where saved layouts need applying again: sessions whose workspace is not
+// the one `applied` ({ SESSION: workspace }) says has their layout, as
+// after a config reload (applied is then empty) or when the tiles moved.
+// A workspace left behind gets its earlier layout back, unless another
+// session with a layout is on it. Returns { changes, applied }.
+function layoutChanges(list, layouts, applied) {
+  var changes = []
+  var next = {}
+  var used = {}
+  Object.keys(layouts).sort().forEach(function(session) {
+    var workspace = sessionWorkspace(list, session)
+    if (workspace === null) return
+    next[session] = workspace
+    used[workspace] = true
+    if (applied[session] !== workspace) changes.push({ workspace: workspace, layout: layouts[session].layout })
+  })
+  Object.keys(applied).forEach(function(session) {
+    var old = applied[session]
+    if (old === next[session] || used[old] || !layouts[session]) return
+    used[old] = true
+    changes.push({ workspace: old, layout: layouts[session].before || "dwindle" })
+  })
+  return { changes: changes, applied: next }
+}
+
+// `mosaic layout`: each open session and its layout.
+function layoutsText(list, layouts) {
+  var sessions = list && Array.isArray(list.sessions) ? list.sessions : []
+  if (sessions.length === 0) return "No mosaic tiles are open."
+  var width = 0
+  sessions.forEach(function(session) { width = Math.max(width, session.name.length) })
+  return sessions.map(function(session) {
+    var name = session.name
+    while (name.length < width) name += " "
+    return name + "  " + layoutLabel(layouts[session.name] ? layouts[session.name].layout : "default")
+  }).join("\n")
+}
+
 // How long `add` waits for a launched browser's app window.
 var WINDOW_TIMEOUT_MS = 15000
 // How many targets one `add` accepts.

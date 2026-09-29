@@ -10,6 +10,15 @@
   Extension tab), which also keeps levels when the browser stops its
   worker.
 
+- **Layouts**: Grid, Stack, Main + small, and 16:9 fit, per session. Click
+  the grid button on a session header or press G to cycle; `mosaic layout
+  --session NAME LAYOUT` from scripts. They are Hyprland Lua tiling layouts
+  (`layouts.lua`), so tiles stay tiled and swappable, and they follow
+  portrait monitors. The choice is saved in `layouts.json` next to
+  `tiles.json` and applied again after a config reload or a move to
+  another workspace, with each tile's fullscreen containment kept. New IPC:
+  `layout`, `layouts`.
+
 - **Audio on the Tiles tab**: "Only the focused tile plays" (F) sits above
   the sessions, next to each tile's own slider and mute button. The setup
   tab is now **Extension**, for enabling and checking the extension only.

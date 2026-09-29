@@ -14,6 +14,7 @@ Usage: mosaic [add] [--session NAME] [--monitor NAME] [--browser CMD] URL|WEBAPP
        mosaic focus TILE
        mosaic close [--session NAME]
        mosaic contain [--session NAME]
+       mosaic layout [--session NAME] [grid|stack|main|fit|default]
        mosaic webapps [--json]
        mosaic monitors
        mosaic --version
@@ -27,6 +28,8 @@ Usage: mosaic [add] [--session NAME] [--monitor NAME] [--browser CMD] URL|WEBAPP
   focus     Focus a tile, switching to its workspace
   close     Close a session, or every mosaic tile
   contain   Turn tile-contained fullscreen back on for tiled windows
+  layout    Show each session's layout, or set one: a balanced grid, a stack,
+            one main tile plus small ones, 16:9 fit, or default (Hyprland's)
   webapps   List installed web apps, such as Omarchy's, and their URLs
   monitors  List active monitors
 
@@ -79,7 +82,7 @@ run() {
 
 command=add
 case ${1:-} in
-  add | list | remove | focus | close | contain | webapps | monitors)
+  add | list | remove | focus | close | contain | layout | webapps | monitors)
     command=$1
     shift
     ;;
@@ -113,7 +116,7 @@ done
 case $command in
   add) allowed=" session monitor browser " ;;
   list | webapps) allowed=" json " ;;
-  close | contain) allowed=" session " ;;
+  close | contain | layout) allowed=" session " ;;
   *) allowed=" " ;;
 esac
 for name in "${given[@]}"; do
@@ -128,6 +131,7 @@ case $command in
   add) ((count >= 1 && count <= 9)) || fail "Pass 1 to 9 URLs or web apps" usage ;;
   remove) ((count >= 1)) || fail "Pass the tiles to remove" usage ;;
   focus) ((count == 1)) || fail "Pass one tile to focus" usage ;;
+  layout) ((count <= 1)) || fail "Pass one layout" usage ;;
   *) ((count == 0)) || fail "Unexpected argument: ${targets[0]}" usage ;;
 esac
 
@@ -143,6 +147,14 @@ case $command in
   focus) run focus "${targets[0]}" ;;
   close) run close "$session" ;;
   contain) run contain "$session" ;;
+  layout)
+    if ((count == 0)); then
+      [[ -z $session ]] || fail "Pass the layout for $session" usage
+      call layouts; echo
+    else
+      run layout "${session:-default}" "${targets[0]}"
+    fi
+    ;;
   list) if $json; then call list; else call listText; fi; echo ;;
   webapps) if $json; then call webapps; else call webappsText; fi; echo ;;
   monitors) call monitors; echo ;;

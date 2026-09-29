@@ -5,7 +5,7 @@ import vm from "node:vm"
 const source = fs.readFileSync(new URL("../Model.js", import.meta.url), "utf8")
   .replace(/^\.pragma library\s*/m, "")
 const model = {}
-vm.runInNewContext(source + "\nObject.assign(model, { reconcileVolumes, hiddenEntries, showWebapp, nameList, visibleWebapps, hideWebapp, sessionOf, clientFromIpc, parseStore, tileState, buildList, shapeList, parseClients, validAddress, dispatchExpression, listTiles, findTile, planFocus, planRemove, planClose, planContain, restoreAfterMove, monitorFromIpc, parseMonitors, resolveAddTargets, chooseWorkspace, desktopId, isChromiumFamily, isAppWindow, parseOpenWindow, tileDispatches, pruneRecords, serializeStore, planReplace, replaceRecord, parseCursorPos, cursorMoveExpression, parseKeySpec, bindConflict, tileRect, listText, webappsText, monitorsText, splitLines, parseBridgeMessage, browserLabel, bridgeWindows, siteOf, matchTiles, extensionState, extensionNotice, extensionSteps, browserClass, browserPids, tileAudio, focusMutes, audioIcon, extensionFromManifest, bridgeHas, stepVolume, parseVolume, swapBindLua, unbindLua, webappUrl, webappFromEntry, buildWebapps, shapeWebapps, findWebapp, resolveTarget, parseList, tileLabel, tileMeta, normalizeUrl, sessionName, summary, anyUncontained, parseManifest });", { model })
+vm.runInNewContext(source + "\nObject.assign(model, { reconcileVolumes, tileStates, layoutsText, layoutLabel, nextLayout, parseLayoutName, validHyprLayout, parseLayouts, serializeLayouts, layoutsLoadLua, layoutsLoaded, layoutRuleLua, sessionWorkspace, layoutSteps, planLayout, layoutChanges, hiddenEntries, showWebapp, nameList, visibleWebapps, hideWebapp, sessionOf, clientFromIpc, parseStore, tileState, buildList, shapeList, parseClients, validAddress, dispatchExpression, listTiles, findTile, planFocus, planRemove, planClose, planContain, restoreAfterMove, monitorFromIpc, parseMonitors, resolveAddTargets, chooseWorkspace, desktopId, isChromiumFamily, isAppWindow, parseOpenWindow, tileDispatches, pruneRecords, serializeStore, planReplace, replaceRecord, parseCursorPos, cursorMoveExpression, parseKeySpec, bindConflict, tileRect, listText, webappsText, monitorsText, splitLines, parseBridgeMessage, browserLabel, bridgeWindows, siteOf, matchTiles, extensionState, extensionNotice, extensionSteps, browserClass, browserPids, tileAudio, focusMutes, audioIcon, extensionFromManifest, bridgeHas, stepVolume, parseVolume, swapBindLua, unbindLua, webappUrl, webappFromEntry, buildWebapps, shapeWebapps, findWebapp, resolveTarget, parseList, tileLabel, tileMeta, normalizeUrl, sessionName, summary, anyUncontained, parseManifest });", { model })
 
 // Values built inside the VM belong to another realm, so compare copies.
 const plain = value => JSON.parse(JSON.stringify(value))
@@ -500,6 +500,72 @@ assert.equal(model.parseVolume("-80", 0.5), 0)
 assert.equal(model.parseVolume("250", 0.5), 1)
 assert.equal(model.parseVolume("loud", 0.5), null)
 assert.equal(model.audioIcon({ audible: true, muted: false, volume: 0.3 }), "󰖀")
+
+// Layouts. `live`: streams (0x2 contained, 0x3 uncontained) on workspace
+// 1, news (0x1 contained) on workspace 10.
+assert.equal(model.nextLayout("default"), "grid")
+assert.equal(model.nextLayout("fit"), "default")
+assert.equal(model.layoutLabel("main"), "Main + small")
+assert.equal(model.parseLayoutName(" Grid "), "grid")
+assert.equal(model.parseLayoutName("16:9"), "fit")
+assert.equal(model.parseLayoutName("off"), "default")
+assert.equal(model.parseLayoutName("spiral"), "")
+assert.deepEqual(plain(model.parseLayouts('{"version":1,"sessions":{"streams":{"layout":"grid","before":"dwindle"},'
+  + '"Bad":{"layout":"grid"},"news":{"layout":"spiral"},"x":{"layout":"fit","before":"a\\"b"}}}')),
+  { streams: { layout: "grid", before: "dwindle" }, x: { layout: "fit", before: "" } })
+assert.deepEqual(plain(model.parseLayouts("oops")), {})
+assert.deepEqual(plain(model.parseLayouts(model.serializeLayouts({ b: { layout: "main", before: "" }, a: { layout: "fit", before: "master" } }))),
+  { a: { layout: "fit", before: "master" }, b: { layout: "main", before: "" } })
+assert.equal(model.layoutsLoadLua("/home/u/omarchy-mosaic/layouts.lua"), 'dofile("/home/u/omarchy-mosaic/layouts.lua")')
+assert.equal(model.layoutsLoadLua('/home/u/x") os.exit() --.lua'), "")
+assert.equal(model.layoutsLoaded("ok\n"), true)
+assert.equal(model.layoutsLoaded("error: x.lua:130: hl.layout.register: layout 'lua:mosaic-grid' is already registered\n"), true)
+assert.equal(model.layoutsLoaded("error: x.lua:3: syntax error"), false)
+assert.equal(model.layoutsLoaded(""), false)
+assert.equal(model.layoutRuleLua(9, "grid"), 'hl.workspace_rule({ workspace = "9", layout = "lua:mosaic-grid" })')
+assert.equal(model.layoutRuleLua(9, "dwindle"), 'hl.workspace_rule({ workspace = "9", layout = "dwindle" })')
+assert.equal(model.layoutRuleLua(-98, "grid"), "")
+assert.equal(model.layoutRuleLua(9, 'x" })'), "")
+assert.equal(model.sessionWorkspace(live, "news"), 10)
+assert.equal(model.sessionWorkspace(live, "gone"), null)
+
+const load = 'dofile("/p/layouts.lua")'
+const containOn = address => model.dispatchExpression("contain", address)
+assert.deepEqual(plain(model.planLayout(live, {}, "streams", "grid", "dwindle", load)), {
+  layouts: { streams: { layout: "grid", before: "dwindle" } },
+  expressions: [{ eval: load }, { eval: model.layoutRuleLua(1, "grid") }, containOn("0x2"), model.dispatchExpression("release", "0x3")],
+  message: "Layout of streams: Grid." })
+// A second change keeps the first `before`, even though Hyprland now
+// reports a Lua layout; going back to default restores it.
+const saved = { streams: { layout: "grid", before: "master" } }
+assert.deepEqual(plain(model.planLayout(live, saved, "streams", "fit", "lua:mosaic-grid", load).layouts), { streams: { layout: "fit", before: "master" } })
+const back = model.planLayout(live, saved, "streams", "default", "lua:mosaic-grid", load)
+assert.deepEqual(plain(back.layouts), {})
+assert.deepEqual(plain(back.expressions[1]), { eval: model.layoutRuleLua(1, "master") })
+assert.equal(model.planLayout(live, {}, "streams", "grid", "lua:mosaicprobe", load).layouts.streams.before, "")
+assert.equal(model.planLayout(live, {}, "streams", "spiral", "dwindle", load).error.startsWith("Unknown layout"), true)
+assert.equal(model.planLayout(live, {}, "gone", "grid", "dwindle", load).error, "Session gone has no tiled tiles")
+assert.equal(model.planLayout(live, {}, "Bad", "grid", "dwindle", load).error.startsWith("Invalid session name"), true)
+assert.equal(model.planLayout(live, {}, "streams", "grid", "dwindle", "").error.startsWith("Cannot load"), true)
+
+// Re-applying: nothing applied yet applies every saved layout; a session
+// that moved gets its layout on the new workspace and hands the old one back.
+const both = { news: { layout: "fit", before: "" }, streams: { layout: "grid", before: "master" } }
+assert.deepEqual(plain(model.layoutChanges(live, both, {})), {
+  changes: [{ workspace: 10, layout: "fit" }, { workspace: 1, layout: "grid" }], applied: { news: 10, streams: 1 } })
+assert.deepEqual(plain(model.layoutChanges(live, both, { news: 10, streams: 1 })).changes, [])
+assert.deepEqual(plain(model.layoutChanges(live, both, { news: 10, streams: 4 })).changes,
+  [{ workspace: 1, layout: "grid" }, { workspace: 4, layout: "master" }])
+assert.deepEqual(plain(model.layoutChanges(live, { streams: { layout: "grid", before: "" } }, { streams: 1, gone: 3 })).changes, [])
+assert.deepEqual(plain(model.layoutSteps(live, [{ workspace: 10, layout: "fit" }], load).expressions),
+  [{ eval: load }, { eval: model.layoutRuleLua(10, "fit") }, containOn("0x1")])
+assert.deepEqual(plain(model.layoutSteps(live, [], load).expressions), [])
+// States from before a reload win over the list's.
+assert.deepEqual(plain(model.tileStates(live)), { "0x1": "contained", "0x2": "contained", "0x3": "uncontained" })
+assert.deepEqual(plain(model.layoutSteps(live, [{ workspace: 1, layout: "grid" }], load, { "0x3": "contained" }).expressions.slice(2)),
+  [containOn("0x2"), containOn("0x3")])
+assert.equal(model.layoutsText(live, { streams: { layout: "fit", before: "" } }), "news     Hyprland\nstreams  16:9 fit")
+assert.equal(model.layoutsText({ version: 1, sessions: [] }, {}), "No mosaic tiles are open.")
 
 // Volumes: a following extension's report wins unless the tile was just
 // set; an older one gets the level again; gone tiles are dropped.

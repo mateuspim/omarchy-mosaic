@@ -165,6 +165,46 @@ and tiles by store order. `index` is 1-based across all sessions. `state` is
 `contained`, `uncontained`, `floating`, or `fullscreen`. `version` changes
 only on incompatible changes; adding a field doesn't bump it.
 
+## Layouts
+
+`layouts.lua` defines four Hyprland **Lua tiling layouts** (Hyprland 0.56's
+`hl.layout.register`): `mosaic-grid` (balanced grid, a short last line
+stretched), `mosaic-stack` (one row on a landscape area, one column on a
+portrait one), `mosaic-main` (the first tile takes 70% of the long side,
+the rest share a line beside or below it), and `mosaic-fit` (the grid
+whose 16:9 tiles come out largest, centered). They are real tiled
+layouts: Hyprland applies the gaps, and swaps (Omarchy's bindings,
+`hl.dsp.window.swap`) move tiles between slots. Floating geometry stays
+rejected (see "Compared approaches").
+
+- The service loads the file with `hyprctl eval 'dofile("…/layouts.lua")'`
+  and sets a layout per workspace with `hl.workspace_rule({ workspace =
+  "N", layout = "lua:mosaic-grid" })`. The **`lua:` prefix** is required;
+  an unknown name silently falls back to dwindle.
+- Hyprland refuses a name registered twice and can't unregister one, so the
+  file registers the names once per Lua state and has them call the code in
+  the global `MosaicLayouts`, which every load replaces.
+- A layout belongs to a session, saved in
+  `$XDG_STATE_HOME/mosaic/layouts.json`: `{ "version": 1, "sessions": {
+  "streams": { "layout": "grid", "before": "dwindle" } } }`, where `before`
+  is the workspace's layout before Mosaic changed it, which `default` puts
+  back. It applies to the workspace of the session's first tiled tile, so
+  other windows there join the layout, and two sessions on one workspace
+  share whichever was applied last.
+- Runtime rules and registrations are gone after a config reload, so the
+  service applies saved layouts again on `configreloaded`, at start, and
+  when a session's tiles move to another workspace (handing the old one its
+  `before` layout back). See `Model.layoutChanges`.
+- **Switching a workspace's layout resets `fullscreenClient` 2 → 0** for
+  its tiles (seen for dwindle → master and master → Lua; a relayout within
+  one layout keeps it). So every switch is followed by re-applying each
+  tile's state from the list read before the switch; after a reload, from
+  states saved at the `configreloaded` event.
+- `hyprctl -j workspaces` reports every Lua layout under the first name
+  registered in that Hyprland session (a Hyprland bug, 0.56.2), so the
+  service can tell a Lua layout from dwindle but not which one; the saved
+  choice is what the panel shows.
+
 ## Web apps
 
 `webapps` returns
@@ -309,8 +349,9 @@ and only to tagged tiles in the `uncontained` state.
   opens.
 - While a tile floats, its video fullscreen covers the monitor. Containment
   comes back when it is tiled again.
-- Tiles share the workspace with any windows already on it, and Hyprland's
-  layout (dwindle by default) decides their sizes.
+- Tiles share the workspace with any windows already on it, and the
+  workspace's layout (dwindle by default, or a Mosaic layout; see
+  "Layouts") decides their sizes.
 - The user confirmed containment on the Twitch and YouTube home pages. Real
   players (fullscreen button, `f`, double-click, theater mode) still need a
   check per site before the site is called supported.

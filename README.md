@@ -44,6 +44,7 @@ Click the icon, or middle-click it to refresh.
 | M | Mute or unmute the selected tile (needs the browser extension) |
 | F | Turn "Only the focused tile plays" on or off |
 | − and + (or =) | Turn the selected tile's volume down or up by 10% |
+| G | Cycle the selected tile's session through the layouts: Grid, Stack, Main + small, 16:9 fit, and back to Hyprland's own |
 | S | Swap the selected tile's web app: pick a web app (1–9) or type an address (A), and it replaces the tile in place. Esc cancels |
 | X or D | Remove the selected tile |
 | Shift+D | Close the selected tile's session |
@@ -75,6 +76,25 @@ already uses is refused, and the panel says why. The key runs
 panel's own swap mode (S) works as before. The
 replacement keeps the old tile's session, workspace, slot, and place in the
 list.
+
+## Layouts
+
+Each session header shows its layout; click the grid button there, or press
+**G** on a tile, to switch to the next one:
+
+- **Grid**: a balanced grid; a short last row stretches across.
+- **Stack**: one row on a landscape monitor, one column on a portrait one.
+- **Main + small**: the first tile takes 70% of the monitor, the rest line
+  up beside it (or below it, on a portrait monitor). Swap a tile into the
+  first slot with Omarchy's swap keys.
+- **16:9 fit**: the largest 16:9 tiles that fit, centered.
+- **Hyprland**: the workspace's own layout again.
+
+The layout belongs to the session and applies to the workspace its tiles
+are on, including any other windows there. Tiles stay tiled, so Omarchy's
+window bindings keep working. Mosaic remembers the choice and applies it
+again after a Hyprland config reload or when the tiles move to another
+workspace.
 
 ## Audio
 
@@ -144,6 +164,8 @@ mosaic remove 2
 mosaic focus 1
 mosaic close --session streams
 mosaic contain
+mosaic layout                          # each session's layout
+mosaic layout --session streams grid   # grid, stack, main, fit, or default
 mosaic webapps         # or: mosaic webapps --json
 mosaic monitors
 ```
