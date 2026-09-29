@@ -87,7 +87,7 @@ logins and memory; the user chose an extension instead.
   state. Focus mode (`audioFollowsFocus`, a widget setting) reacts to
   `activewindowv2` for tiles and re-applies after every check, so a new
   tile starts muted.
-- **Commands (extension 0.3.0).** `mute`, `volume { level }` (0 to 1;
+- **Commands (extension 0.3.0 and later).** `mute`, `volume { level }` (0 to 1;
   an injected isolated-world script sets every media element and again on
   each `play` and `loadeddata` while below 1, and the worker sets it again
   when the page finishes loading), `navigate { url }` (http and https
@@ -95,10 +95,24 @@ logins and memory; the user chose an extension instead.
   windows, may carry an `id` answered by `done { id, error }`, and shows its
   effect in the next `windows` report (tabs now carry `favIconUrl` and
   `volume`). `hello.features` lists them; the service checks
-  `Model.bridgeHas` before sending. The worker keeps volumes in memory, so
-  the service keeps each tile's level (`tileVolumes`) and sends it again
-  when a report disagrees. Permissions include `scripting` and
+  `Model.bridgeHas` before sending. Permissions include `scripting` and
   `<all_urls>`, taken now so later features need no restart.
+- **Volume follows the page (extension 0.4.0, `background-4.js`,
+  feature `follow`).** The last change wins: the page script watches
+  `volumechange`, and a change made within 1.5 s of trusted input in the
+  page (pointer, key, wheel), such as YouTube's own slider or arrow keys,
+  becomes the tab's level and is reported (`pageVolume` message to the
+  worker). A change a player makes on its own is undone at the next
+  `play` or `loadeddata`, as before. The worker injects the watcher into
+  every tile page on load, so it follows pages the service never set, and
+  keeps levels in `chrome.storage.session` (permission `storage`), which
+  outlives the worker being stopped. The service then mirrors reports
+  (`Model.reconcileVolumes`), keeping its own level only for 3 s after
+  the user sets one. With an older extension it still sends its level
+  again when a report disagrees, because those workers lose it.
+  Checked 2026-09-29 with a headless Chromium on a localhost video.
+  Clicking a new video counts as input, so the volume a site applies on
+  that load is followed too.
 - **Updates.** There is no automatic reload: after `chrome.runtime.reload()`
   the service worker wasn't started again (46 s in a test), which would
   leave the browser disconnected. Nor is a version check enough: after a

@@ -5,7 +5,7 @@ import vm from "node:vm"
 const source = fs.readFileSync(new URL("../Model.js", import.meta.url), "utf8")
   .replace(/^\.pragma library\s*/m, "")
 const model = {}
-vm.runInNewContext(source + "\nObject.assign(model, { hiddenEntries, showWebapp, nameList, visibleWebapps, hideWebapp, sessionOf, clientFromIpc, parseStore, tileState, buildList, shapeList, parseClients, validAddress, dispatchExpression, listTiles, findTile, planFocus, planRemove, planClose, planContain, restoreAfterMove, monitorFromIpc, parseMonitors, resolveAddTargets, chooseWorkspace, desktopId, isChromiumFamily, isAppWindow, parseOpenWindow, tileDispatches, pruneRecords, serializeStore, planReplace, replaceRecord, parseCursorPos, cursorMoveExpression, parseKeySpec, bindConflict, tileRect, listText, webappsText, monitorsText, splitLines, parseBridgeMessage, browserLabel, bridgeWindows, siteOf, matchTiles, extensionState, extensionNotice, extensionSteps, browserClass, browserPids, tileAudio, focusMutes, audioIcon, extensionFromManifest, bridgeHas, stepVolume, parseVolume, swapBindLua, unbindLua, webappUrl, webappFromEntry, buildWebapps, shapeWebapps, findWebapp, resolveTarget, parseList, tileLabel, tileMeta, normalizeUrl, sessionName, summary, anyUncontained, parseManifest });", { model })
+vm.runInNewContext(source + "\nObject.assign(model, { reconcileVolumes, hiddenEntries, showWebapp, nameList, visibleWebapps, hideWebapp, sessionOf, clientFromIpc, parseStore, tileState, buildList, shapeList, parseClients, validAddress, dispatchExpression, listTiles, findTile, planFocus, planRemove, planClose, planContain, restoreAfterMove, monitorFromIpc, parseMonitors, resolveAddTargets, chooseWorkspace, desktopId, isChromiumFamily, isAppWindow, parseOpenWindow, tileDispatches, pruneRecords, serializeStore, planReplace, replaceRecord, parseCursorPos, cursorMoveExpression, parseKeySpec, bindConflict, tileRect, listText, webappsText, monitorsText, splitLines, parseBridgeMessage, browserLabel, bridgeWindows, siteOf, matchTiles, extensionState, extensionNotice, extensionSteps, browserClass, browserPids, tileAudio, focusMutes, audioIcon, extensionFromManifest, bridgeHas, stepVolume, parseVolume, swapBindLua, unbindLua, webappUrl, webappFromEntry, buildWebapps, shapeWebapps, findWebapp, resolveTarget, parseList, tileLabel, tileMeta, normalizeUrl, sessionName, summary, anyUncontained, parseManifest });", { model })
 
 // Values built inside the VM belong to another realm, so compare copies.
 const plain = value => JSON.parse(JSON.stringify(value))
@@ -500,5 +500,17 @@ assert.equal(model.parseVolume("-80", 0.5), 0)
 assert.equal(model.parseVolume("250", 0.5), 1)
 assert.equal(model.parseVolume("loud", 0.5), null)
 assert.equal(model.audioIcon({ audible: true, muted: false, volume: 0.3 }), "󰖀")
+
+// Volumes: a following extension's report wins unless the tile was just
+// set; an older one gets the level again; gone tiles are dropped.
+{
+  const audio = { "0x1": { bridge: 0, volume: 0.1 }, "0x2": { bridge: 1, volume: 1 }, "0x3": { bridge: 0, volume: 0.5 } }
+  const follows = index => index === 0
+  const set = { "0x1": 0.8, "0x2": 0.4, "0x3": 0.5, "0x9": 0.2 }
+  assert.deepEqual(plain(model.reconcileVolumes(set, audio, ["0x1", "0x2", "0x3"], follows, () => false)),
+    { volumes: { "0x1": 0.1, "0x2": 0.4, "0x3": 0.5 }, resend: ["0x2"] })
+  assert.deepEqual(plain(model.reconcileVolumes(set, audio, ["0x1"], follows, address => address === "0x1")),
+    { volumes: { "0x1": 0.8 }, resend: [] })
+}
 
 console.log("model tests passed")

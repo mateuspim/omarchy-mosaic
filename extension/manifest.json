@@ -1,11 +1,11 @@
 {
   "manifest_version": 3,
   "name": "Omarchy Mosaic",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Connects Omarchy Mosaic tiles to the Mosaic shell plugin. Installed by the pym.mosaic plugin.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv2xjus5OTvGnDUhv6moJqhNse43OqGzkaZVVVnqibHg4xkvLjyrGdNVnyVq793iC+YvW3M/D/Am++EUnFvgY4MqNBKgq0Vf7BKwEOUc1ey8pVmHpggy5kC8XQEYFuJ6JjOs6UyXnZcJwe6hF1PRhV2iL4q8tARw+34WSO/XtnJu+9tfhTdszY+aPQwSw66Hr17rs+aWVJvl25W++PHeKKzWttoGOlcy/sYEuTknGuQjPy3jI6dDgyDLieFFYP51ma/tIMigiwCL4cmTUxcr35PVxximfgDgqyoykpg+Q/q7iNBAGPEIjNjDdhY082kWwEHSGXksgAth0pGAevtRbHwIDAQAB",
   "minimum_chrome_version": "110",
-  "permissions": ["nativeMessaging", "tabs", "alarms", "scripting"],
+  "permissions": ["nativeMessaging", "tabs", "alarms", "scripting", "storage"],
   "host_permissions": ["<all_urls>"],
-  "background": { "service_worker": "background-3.js" }
+  "background": { "service_worker": "background-4.js" }
 }

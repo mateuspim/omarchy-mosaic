@@ -11,6 +11,8 @@
 //   from the service: ping { id }, answered by windows { id, windows }
 //                     mute { tab, muted }
 //                     volume { tab, level }: 0 to 1, kept on the tab's media
+//                       until the page's own controls change it, which
+//                       the next windows report then shows
 //                     navigate { tab, url }: an http(s) address, in place
 //                     reload { tab }
 //                     media { tab, action }: "play", "pause", or "toggle"
@@ -31,8 +33,11 @@
 // reporting the new manifest's version; a new file name per change forces
 // the new code (Omarchy's Copy URL extension does the same). Rename the file,
 // update manifest.json, and change this together.
-const SCRIPT = "background-3.js";
-const FEATURES = ["mute", "volume", "navigate", "reload", "media", "favicon"];
+const SCRIPT = "background-4.js";
+// "follow": reported volumes follow changes made with the page's own
+// controls, and survive the worker stopping, so the service mirrors them
+// instead of setting its own again.
+const FEATURES = ["mute", "volume", "follow", "navigate", "reload", "media", "favicon"];
 const HOST = "pym.mosaic";
 const RETRY_FIRST_MS = 1000;
 const RETRY_LAST_MS = 60000;
@@ -41,10 +46,20 @@ let port = null;
 let retryMs = RETRY_FIRST_MS;
 let retryTimer = null;
 let windowsTimer = null;
-// The volume set on each tab; a tab without one plays at the site's own.
-// Lost if the browser stops the worker, and the service sets it again when
-// a report shows it missing.
+// Each tab's volume, set by the service or with the page's own controls; a
+// tab without one plays at the site's own. Kept in session storage, which
+// outlives the worker (the browser stops it when idle) but not the browser.
 const volumes = new Map();
+const volumesReady = chrome.storage.session.get("volumes").then(function(stored) {
+  const saved = stored && stored.volumes ? stored.volumes : {};
+  Object.keys(saved).forEach(function(id) { volumes.set(Number(id), saved[id]); });
+}).catch(function() {});
+
+function setVolume(tabId, level) {
+  if (level >= 1) volumes.delete(tabId);
+  else volumes.set(tabId, level);
+  chrome.storage.session.set({ volumes: Object.fromEntries(volumes) }).catch(function() {});
+}
 
 function connect() {
   if (port) return;
@@ -94,8 +109,7 @@ const COMMANDS = {
   volume: async function(tab, message) {
     const level = Number(message.level);
     if (!Number.isFinite(level) || level < 0 || level > 1) throw new Error("level must be from 0 to 1");
-    if (level === 1) volumes.delete(tab.id);
-    else volumes.set(tab.id, level);
+    setVolume(tab.id, level);
     await applyVolume(tab.id, level);
     windowsChanged();
   },
@@ -115,6 +129,7 @@ const COMMANDS = {
 
 async function receive(message) {
   retryMs = RETRY_FIRST_MS;
+  await volumesReady;
   if (!message || typeof message !== "object") return;
   if (message.type === "ping") return reportWindows(Number.isInteger(message.id) ? message.id : undefined);
   const command = COMMANDS[message.type];
@@ -138,9 +153,13 @@ async function tileTab(tabId) {
   return tab;
 }
 
-// Sets the page's media to `level` now, and again whenever a media element
-// loads or starts, since players reset their volume. At 1 it only sets it
-// once, so the site's own volume control keeps working.
+// Sets the page's media to `level` (null: leave it as it is, only watch),
+// and again whenever a media element loads or starts, since players reset
+// their volume. At 1 it only sets it once, so the site's own volume keeps
+// working. Last change wins: a change made with the page's own controls
+// (right after the user clicked, dragged, scrolled, or typed in the page)
+// becomes the tab's level and is reported; one a player makes on its own
+// is undone at the next load or start.
 function applyVolume(tabId, level) {
   return chrome.scripting.executeScript({ target: { tabId: tabId, allFrames: true }, func: pageVolume, args: [level] })
     .catch(function() { /* A page that can't take scripts, such as an error page. */ });
@@ -149,18 +168,34 @@ function applyVolume(tabId, level) {
 // Runs in the page (isolated world), so it shares the DOM but not the
 // page's scripts.
 function pageVolume(level) {
-  const state = globalThis.__mosaicVolume || (globalThis.__mosaicVolume = { level: 1, hooked: false });
-  state.level = level;
+  const INPUT_MS = 1500;
+  const state = globalThis.__mosaicVolume || (globalThis.__mosaicVolume = { level: 1, hooked: false, input: -Infinity });
+  if (level !== null) state.level = level;
   function apply(element) {
     if (element instanceof HTMLMediaElement && Math.abs(element.volume - state.level) > 0.001) element.volume = state.level;
   }
   if (!state.hooked) {
     state.hooked = true;
+    function touched(event) {
+      if (event.isTrusted && (event.type !== "pointermove" || event.buttons !== 0)) state.input = performance.now();
+    }
+    ["pointerdown", "pointermove", "pointerup", "keydown", "wheel"].forEach(function(type) {
+      window.addEventListener(type, touched, { capture: true, passive: true });
+    });
     ["play", "loadeddata"].forEach(function(type) {
       document.addEventListener(type, function(event) { if (state.level < 1) apply(event.target); }, true);
     });
+    document.addEventListener("volumechange", function(event) {
+      const element = event.target;
+      if (!(element instanceof HTMLMediaElement) || Math.abs(element.volume - state.level) <= 0.001) return;
+      if (performance.now() - state.input > INPUT_MS) return;
+      state.level = element.volume;
+      try {
+        chrome.runtime.sendMessage({ type: "pageVolume", level: element.volume }).catch(function() {});
+      } catch (error) { /* The extension was updated or removed. */ }
+    }, true);
   }
-  document.querySelectorAll("video, audio").forEach(apply);
+  if (level !== null) document.querySelectorAll("video, audio").forEach(apply);
 }
 
 function pageMedia(action) {
@@ -173,6 +208,7 @@ function pageMedia(action) {
 // App windows only: tiles are `--app` windows, and the user's normal
 // browsing windows are none of Mosaic's business.
 async function reportWindows(id) {
+  await volumesReady;
   let windows = [];
   try {
     const all = await chrome.windows.getAll({ populate: true, windowTypes: ["app", "popup"] });
@@ -208,13 +244,38 @@ function windowsChanged() {
   windowsTimer = setTimeout(function() { reportWindows(); }, 250);
 }
 
+// A page's own volume controls, reported by pageVolume.
+chrome.runtime.onMessage.addListener(function(message, sender) {
+  if (!message || message.type !== "pageVolume" || !sender.tab) return;
+  const level = Number(message.level);
+  if (!Number.isFinite(level) || level < 0 || level > 1) return;
+  const tabId = sender.tab.id;
+  tileTab(tabId).then(async function() {
+    await volumesReady;
+    setVolume(tabId, Math.round(level * 100) / 100);
+    windowsChanged();
+  }).catch(function() {});
+});
+
+// Watches every tile's page, so its own volume controls are followed even
+// before the service sets a volume, and sets the tile's level again on a
+// new page, which starts at the site's volume.
+async function watchPage(tabId) {
+  try {
+    await tileTab(tabId);
+  } catch (error) {
+    return;
+  }
+  await volumesReady;
+  applyVolume(tabId, volumes.has(tabId) ? volumes.get(tabId) : null);
+}
+
 chrome.tabs.onUpdated.addListener(function(tabId, change) {
-  // A new page starts at the site's volume; set the tile's again.
-  if (change.status === "complete" && volumes.has(tabId)) applyVolume(tabId, volumes.get(tabId));
+  if (change.status === "complete") watchPage(tabId);
   if ("title" in change || "url" in change || "audible" in change || "mutedInfo" in change || "favIconUrl" in change) windowsChanged();
 });
 chrome.tabs.onRemoved.addListener(function(tabId) {
-  volumes.delete(tabId);
+  if (volumes.has(tabId)) setVolume(tabId, 1);
   windowsChanged();
 });
 chrome.windows.onCreated.addListener(windowsChanged);
@@ -228,3 +289,7 @@ chrome.alarms.onAlarm.addListener(function(alarm) {
 });
 
 connect();
+// Pages already open when the worker starts, as after an update.
+chrome.windows.getAll({ populate: true, windowTypes: ["app", "popup"] }).then(function(all) {
+  all.forEach(function(window) { (window.tabs || []).forEach(function(tab) { watchPage(tab.id); }); });
+}).catch(function() {});

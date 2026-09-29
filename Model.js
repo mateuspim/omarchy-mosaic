@@ -1119,6 +1119,30 @@ function parseVolume(text, current) {
 
 // Each found tile's audio, from a check (matchTiles output) and the bridges
 // it was made from: { ADDRESS: { bridge, tab, audible, muted } }.
+// Squares the levels the user set (`volumes`, by address) with what the
+// extension reports (`audio`, from tileAudio). A browser whose extension
+// can `follow` reports the tab's real level, including changes made with
+// the page's own controls, so its report wins, except for a tile set in
+// the last moments (`recent`), whose report may still be on its way. An
+// older extension forgets levels when its worker stops, so those tiles
+// are set again (`resend`). Tiles no longer in `live` are dropped.
+// Returns { volumes, resend }.
+function reconcileVolumes(volumes, audio, live, follows, recent) {
+  var next = {}
+  var resend = []
+  Object.keys(volumes).forEach(function(address) {
+    if (live.indexOf(address) === -1) return
+    var level = volumes[address]
+    var entry = audio[address]
+    if (entry && Math.abs(entry.volume - level) > 0.001) {
+      if (!follows(entry.bridge)) resend.push(address)
+      else if (!recent(address)) level = entry.volume
+    }
+    next[address] = level
+  })
+  return { volumes: next, resend: resend }
+}
+
 function tileAudio(check, bridges) {
   var audio = {}
   if (!check || !check.tiles) return audio

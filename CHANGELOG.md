@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **Volume follows the site**: a tile's volume changed with the page's own
+  control (YouTube's slider, arrow keys) is now kept and shown on the
+  panel's slider, instead of being reset to the level last set in Mosaic
+  at the next video. The last change wins, from either side. Needs
+  extension 0.4.0 (`background-4.js`, one browser restart: B on the
+  Extension tab), which also keeps levels when the browser stops its
+  worker.
+
 - **Audio on the Tiles tab**: "Only the focused tile plays" (F) sits above
   the sessions, next to each tile's own slider and mute button. The setup
   tab is now **Extension**, for enabling and checking the extension only.

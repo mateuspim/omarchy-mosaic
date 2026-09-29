@@ -103,10 +103,12 @@ Scope {
   // Each found tile's audio (Model.tileAudio): { ADDRESS: { bridge, tab,
   // audible, muted } }.
   readonly property var tileAudio: Model.tileAudio(extensionCheck, bridges)
-  // The volume the user set per tile (0 to 1, by address). The extension
-  // loses it when the browser stops its worker, so the service sets it
-  // again whenever a report disagrees.
+  // The volume the user set per tile (0 to 1, by address), shown until the
+  // extension's report catches up; see keepVolumes.
   property var tileVolumes: ({})
+  // When the user last set each tile's volume (ms), so a report sent
+  // before that doesn't undo it.
+  property var volumeSetAt: ({})
   // The widget's setting: mute every tile but the one last focused.
   property bool audioFollowsFocus: false
   // The tile focused last, tracked whether or not the mode is on, so
@@ -754,19 +756,18 @@ Scope {
     keepVolumes()
   }
 
-  // Forgets volumes of tiles that are gone, and sets the rest again where
-  // the extension reports otherwise.
+  // Forgets volumes of tiles that are gone, follows the levels an up to
+  // date extension reports, and sets them again where an older one lost
+  // them (see Model.reconcileVolumes).
   function keepVolumes() {
     var audio = Model.tileAudio(extensionCheck, bridges)
-    var tiles = Model.listTiles(list).map(function(tile) { return tile.address })
-    var kept = {}
-    Object.keys(tileVolumes).forEach(function(address) {
-      if (tiles.indexOf(address) === -1) return
-      kept[address] = root.tileVolumes[address]
-      var entry = audio[address]
-      if (entry && Math.abs(entry.volume - kept[address]) > 0.001) root.tileCommand(address, "volume", { level: kept[address] })
-    })
-    if (Object.keys(kept).length !== Object.keys(tileVolumes).length) tileVolumes = kept
+    var now = Date.now()
+    var result = Model.reconcileVolumes(tileVolumes, audio,
+      Model.listTiles(list).map(function(tile) { return tile.address }),
+      function(index) { return root.bridges[index] ? Model.bridgeHas(root.bridges[index], "follow") : false },
+      function(address) { return now - (root.volumeSetAt[address] || 0) < 3000 })
+    result.resend.forEach(function(address) { root.tileCommand(address, "volume", { level: result.volumes[address] }) })
+    if (JSON.stringify(result.volumes) !== JSON.stringify(tileVolumes)) tileVolumes = result.volumes
   }
 
   // Sends a command for a tile's tab to its extension, if that extension
@@ -791,6 +792,7 @@ Scope {
     // that is still on its way.
     var next = Object.assign({}, tileVolumes)
     next[address] = clamped
+    volumeSetAt[address] = Date.now()
     tileVolumes = next
     return ""
   }
