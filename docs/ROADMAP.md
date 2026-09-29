@@ -50,11 +50,11 @@ roughly in order of value; confirm priorities with the user before starting:
   service process, so its streams are identical ("Chromium", "Playback",
   the audio service's PID; checked 2026-09-28). The route is a browser
   extension instead (see "The browser extension" in `docs/ARCHITECTURE.md`).
-  **Done:** the extension, the native host and bridge, and the setup
-  (Enable, restart, Verify) with a warning in the panel. **Next:** per-tile
-  mute (`chrome.tabs.update({ muted })`), mute all but the focused tile,
-  the audible indicator from `tab.audible`, then per-tile volume (a content
-  script setting media element volume, since the tab API only mutes).
+  **Done:** the extension, the native host and bridge, the setup (Enable,
+  restart, Verify) with a warning in the panel, per-tile mute with a
+  playing/silent/muted indicator, and muting every tile but the focused
+  one. **Next:** per-tile volume (a content script setting media element
+  volume, since the tab API only mutes).
 - **Saved sessions.** Name, monitor, layout, and apps; restore with one key
   or at login. Keep personal URLs out of the repository.
 - **Monitor awareness.** Reflow on monitor changes, portrait-friendly

@@ -20,7 +20,8 @@
     "defaults": {
       "browser": "",
       "swapKey": "SUPER + SHIFT + S",
-      "hiddenWebapps": ""
+      "hiddenWebapps": "",
+      "audioFollowsFocus": false
     },
     "schema": [
       {

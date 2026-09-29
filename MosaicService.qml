@@ -100,6 +100,32 @@ Scope {
   property var pingWaiting: []
   property int pingId: 0
   property bool extensionStarted: false
+  // Each found tile's audio (Model.tileAudio): { ADDRESS: { bridge, tab,
+  // audible, muted } }.
+  readonly property var tileAudio: Model.tileAudio(extensionCheck, bridges)
+  // The widget's setting: mute every tile but the one last focused.
+  property bool audioFollowsFocus: false
+  property string audioFocus: ""
+  // The extension on disk: its version and worker script. A browser
+  // running other code loads it on its next start; see extensionOutdated.
+  readonly property var extensionOnDisk: Model.extensionFromManifest(extensionManifest.text())
+  readonly property string extensionVersion: extensionOnDisk ? extensionOnDisk.version : ""
+  readonly property bool extensionOutdated: extensionOnDisk !== null && bridges.some(function(bridge) {
+    return bridge.script !== root.extensionOnDisk.script
+  })
+
+  onAudioFollowsFocusChanged: {
+    if (audioFollowsFocus) {
+      var focused = focusedTile()
+      if (focused) audioFocus = focused.address
+      applyAudioFocus()
+    } else {
+      // Leaving the mode unmutes every tile it muted.
+      Object.keys(tileAudio).forEach(function(address) {
+        if (root.tileAudio[address].muted) root.setTileMuted(address, false)
+      })
+    }
+  }
 
   // Emitted when an action ends. `error` is "" on success, and `message`
   // then says what was done, like the CLI's output.
@@ -666,7 +692,7 @@ Scope {
   }
 
   function bridgeOpened(socket) {
-    socket.info = { browser: "", extension: "", windows: [], hello: false }
+    socket.info = { browser: "", extension: "", script: "", windows: [], hello: false }
     bridgeSockets = bridgeSockets.concat([socket])
   }
 
@@ -688,6 +714,8 @@ Scope {
     if (message.type === "host") info.browser = String(message.browser || "")
     else if (message.type === "hello") {
       info.extension = String(message.extension || "")
+      // The worker script's name, which says what code actually runs.
+      info.script = String(message.script || "")
       info.hello = true
     } else if (message.type === "windows") info.windows = Model.bridgeWindows(message.windows)
     else return
@@ -700,7 +728,7 @@ Scope {
 
   function updateBridges() {
     bridges = bridgeSockets.filter(function(socket) { return socket.info.hello }).map(function(socket) {
-      return { browser: socket.info.browser, extension: socket.info.extension, windows: socket.info.windows }
+      return { browser: socket.info.browser, extension: socket.info.extension, script: socket.info.script, windows: socket.info.windows }
     })
     autoCheck()
   }
@@ -712,6 +740,53 @@ Scope {
   function autoCheck() {
     if (verifying) return
     extensionCheck = bridges.length > 0 ? Model.matchTiles(Model.shapeList(list).tiles, bridges) : null
+    applyAudioFocus()
+  }
+
+  function helloSockets() {
+    return bridgeSockets.filter(function(socket) { return socket.info.hello })
+  }
+
+  function sendBridge(index, message) {
+    var socket = helloSockets()[index]
+    if (!socket) return false
+    socket.write(JSON.stringify(message) + "\n")
+    socket.flush()
+    return true
+  }
+
+  // Mutes or unmutes a tile (its address); "" once sent, else why not.
+  // The tile's new state arrives with the extension's next windows report.
+  function setTileMuted(address, muted) {
+    var entry = tileAudio[address]
+    if (!entry) return extensionState === "connected" ? "The browser extension has not found this tile" : "Audio control needs the browser extension; see the Audio tab"
+    var bridge = bridges[entry.bridge]
+    if (bridge && !Model.canMute(bridge))
+      return "Restart the browser to load the updated extension (B on the Audio tab)"
+    return sendBridge(entry.bridge, { type: "mute", tab: entry.tab, muted: muted === true }) ? "" : "The browser extension is not connected"
+  }
+
+  function toggleTileMute(address) {
+    var entry = tileAudio[address]
+    return setTileMuted(address, entry ? !entry.muted : true)
+  }
+
+  // In focus mode, leaves only the last focused tile unmuted.
+  function applyAudioFocus() {
+    if (!audioFollowsFocus || audioFocus === "") return
+    Model.focusMutes(Model.tileAudio(extensionCheck, bridges), audioFocus).forEach(function(change) {
+      root.sendBridge(change.bridge, { type: "mute", tab: change.tab, muted: change.muted })
+    })
+  }
+
+  // activewindowv2: a tile that takes focus becomes the audible one. Other
+  // windows leave the audio as it is.
+  function windowFocused(data) {
+    if (!audioFollowsFocus) return
+    var address = "0x" + String(data).trim()
+    if (!tileAudio[address] || address === audioFocus) return
+    audioFocus = address
+    applyAudioFocus()
   }
 
   onListChanged: autoCheck()
@@ -723,9 +798,11 @@ Scope {
       error: extensionError,
       setup: extensionSetup,
       bridges: bridges.map(function(bridge) {
-        return { browser: Model.browserLabel(bridge.browser), extension: bridge.extension, windows: bridge.windows.length }
+        return { browser: Model.browserLabel(bridge.browser), extension: bridge.extension, script: bridge.script, windows: bridge.windows.length }
       }),
-      check: extensionCheck
+      check: extensionCheck,
+      audio: tileAudio,
+      audioFollowsFocus: audioFollowsFocus
     })
   }
 
@@ -801,6 +878,14 @@ Scope {
     // Sets the extension up, or undoes that; see enableExtension.
     function extensionEnable(): string { return root.enableExtension() || "started" }
     function extensionDisable(): string { return root.disableExtension() || "started" }
+    // Mutes TILE (a list number or address): "on", "off", or "toggle".
+    function mute(tile: string, state: string): string {
+      var found = Model.findTile(Model.listTiles(root.list), tile)
+      if (!found) return "error: No tile " + tile
+      if (state !== "on" && state !== "off" && state !== "toggle") return "error: Use on, off, or toggle"
+      var error = state === "toggle" ? root.toggleTileMute(found.address) : root.setTileMuted(found.address, state === "on")
+      return error ? "error: " + error : "ok"
+    }
     // Restarts the tiles' browser so it loads the extension; see
     // restartBrowser. Answers like add.
     function restartBrowser(browser: string): string {
@@ -881,6 +966,7 @@ Scope {
       // Checked against the list from before the move, so this runs first.
       if (name === "movewindowv2") root.restoreMoved(event.data)
       if (name === "openwindow") root.windowOpened(event.data)
+      if (name === "activewindowv2") root.windowFocused(event.data)
       // A config reload drops runtime binds, the swap key among them.
       if (name === "configreloaded") {
         root.boundSwapKey = ""
@@ -1045,6 +1131,12 @@ Scope {
   readonly property string versionText: {
     var manifest = Model.parseManifest(manifestFile.text())
     return manifest ? "mosaic " + manifest.version : "mosaic"
+  }
+
+  FileView {
+    id: extensionManifest
+    path: Qt.resolvedUrl("extension/manifest.json").toString().replace(/^file:\/\//, "")
+    printErrors: false
   }
 
   FileView {

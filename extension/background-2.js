@@ -4,9 +4,20 @@
 // windows, which is how the service finds its tiles in this browser.
 //
 // Messages are JSON objects with a `type`:
-//   to the service:   hello { extension }, windows { id?, windows }
-//   from the service: ping { id }, answered by windows { id, windows }
+//   to the service:   hello { extension, script }, windows { id?, windows }
+//   from the service: ping { id }, answered by windows { id, windows };
+//                     and mute { tab, muted }, which mutes or unmutes a tab
+//                     (the tab's change then arrives as windows).
+// No reload message: after chrome.runtime.reload() the service worker isn't
+// started again until something wakes it, so it would stay disconnected.
+// A newer extension loads when the browser restarts.
 
+// This file's own name. Brave kept running a cached copy of the old worker
+// script after the extension's files changed, even across a restart, while
+// reporting the new manifest's version; a new file name per change forces
+// the new code (Omarchy's Copy URL extension does the same). Rename the file,
+// update manifest.json, and change this together.
+const SCRIPT = "background-2.js";
 const HOST = "pym.mosaic";
 const RETRY_FIRST_MS = 1000;
 const RETRY_LAST_MS = 60000;
@@ -34,7 +45,7 @@ function connect() {
     port = null;
     scheduleRetry();
   });
-  send({ type: "hello", extension: chrome.runtime.getManifest().version });
+  send({ type: "hello", extension: chrome.runtime.getManifest().version, script: SCRIPT });
   reportWindows();
 }
 
@@ -60,6 +71,19 @@ function receive(message) {
   retryMs = RETRY_FIRST_MS;
   if (!message || typeof message !== "object") return;
   if (message.type === "ping") reportWindows(Number.isInteger(message.id) ? message.id : undefined);
+  else if (message.type === "mute" && Number.isInteger(message.tab) && typeof message.muted === "boolean") mute(message.tab, message.muted);
+}
+
+// Only tabs in app windows, which are the tiles, are ever muted.
+async function mute(tabId, muted) {
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    const window = await chrome.windows.get(tab.windowId);
+    if (window.type !== "app" && window.type !== "popup") return;
+    await chrome.tabs.update(tabId, { muted: muted });
+  } catch (error) {
+    // The tab closed meanwhile; the next windows report shows it gone.
+  }
 }
 
 // App windows only: tiles are `--app` windows, and the user's normal

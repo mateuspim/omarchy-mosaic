@@ -41,6 +41,7 @@ Click the icon, or middle-click it to refresh.
 | ↑ ↓ or J K | Select a tile (or a hidden web app) |
 | ← → or H L | Switch between the Tiles, Hidden, and Audio tabs |
 | Enter | Focus the selected tile, or show the selected hidden web app again |
+| M | Mute or unmute the selected tile (needs the browser extension) |
 | S | Swap the selected tile's web app: pick a web app (1–9) or type an address (A), and it replaces the tile in place. Esc cancels |
 | X or D | Remove the selected tile |
 | Shift+D | Close the selected tile's session |
@@ -73,9 +74,19 @@ panel's own swap mode (S) works as before. The
 replacement keeps the old tile's session, workspace, slot, and place in the
 list.
 
+## Audio
+
+Each tile row has a speaker button showing whether the tile is playing
+(󰕾), silent (󰕿), or muted (󰖁); click it or press **M** to mute or unmute.
+On the **Audio** tab, **Mute every tile but the focused one** (F) makes the
+tile you focus the only one you hear: focusing another tile unmutes it and
+mutes the rest, and focusing any other window leaves them as they are.
+Turning it off unmutes every tile. From scripts: `omarchy-shell pym.mosaic
+mute TILE on|off|toggle`.
+
 ## The browser extension (for audio control)
 
-Audio control is on its way, and it needs a small browser extension,
+Audio control needs a small browser extension,
 `extension/`. Every tile shares one browser process and one audio stream
 source, so PipeWire can't tell tiles apart; the extension can, from inside
 the browser. It talks to the plugin through a native messaging host,
@@ -97,7 +108,10 @@ Without a flags file, load the extension by hand: open the browser's
 extensions page, turn on Developer mode, choose Load unpacked, and pick the
 extension folder (the tab copies its path). **Turn off** undoes Enable; do
 that before removing the plugin, so the browser isn't left loading a folder
-that's gone. The same steps are in the IPC: `omarchy-shell pym.mosaic
+that's gone. When the plugin brings a newer extension, or the browser is
+still running an old copy of it, the Audio tab says so, and the browser
+loads the current one on its next restart (the tab's Restart button,
+B). The same steps are in the IPC: `omarchy-shell pym.mosaic
 extension` (status as JSON), `extensionEnable`, `extensionVerify`, and
 `extensionDisable`.
 

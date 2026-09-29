@@ -81,6 +81,24 @@ logins and memory; the user chose an extension instead.
   that exists. `remove` undoes both; `status` reports them as JSON. The
   panel's Audio tab runs these, and Google Chrome, which ignores
   `--load-extension` since 137, needs Load unpacked.
+- **Mute.** The service sends `mute { tab, muted }`; the extension only
+  mutes tabs in app windows (`chrome.tabs.update`) and its next `windows`
+  report carries the change, which `Model.tileAudio` turns into each tile's
+  state. Focus mode (`audioFollowsFocus`, a widget setting) reacts to
+  `activewindowv2` for tiles and re-applies after every check, so a new
+  tile starts muted.
+- **Updates.** There is no automatic reload: after `chrome.runtime.reload()`
+  the service worker wasn't started again (46 s in a test), which would
+  leave the browser disconnected. Nor is a version check enough: after a
+  restart, Brave Origin 153 reported the new manifest's version while still
+  running its cached copy of the old worker script (pings answered, `mute`
+  ignored), until Developer mode was switched on, which reloads unpacked
+  extensions. So the worker script is named per change (`background-2.js`,
+  as Omarchy's Copy URL uses `background-4.js`), `hello` carries the
+  script's own name, and the service compares it with the manifest's
+  `service_worker` (`extensionOutdated`); the panel then asks for a browser
+  restart, and `mute` needs a script that reports its name
+  (`Model.canMute`). **Rename the worker on every extension change.**
 - **Finding tiles.** A tile is the extension window whose one tab has the
   tile's Hyprland title (`Model.matchTiles`), else the one left on its
   site. Verify reports how many tiles were found.

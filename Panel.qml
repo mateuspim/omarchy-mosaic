@@ -34,6 +34,12 @@ Panel {
   // The browser extension, which audio control needs.
   readonly property string extensionState: service ? service.extensionState : "unknown"
   readonly property bool extensionMissing: extensionState === "off" || extensionState === "restart"
+  // The browser has to restart to load the extension, or a newer one.
+  readonly property bool restartNeeded: extensionState === "restart" || (service !== null && service.extensionOutdated)
+  // Each found tile's audio, by address (Model.tileAudio).
+  readonly property var tileAudio: service ? service.tileAudio : ({})
+  // The audioFollowsFocus setting: mute every tile but the focused one.
+  readonly property bool audioFollowsFocus: setting("audioFollowsFocus", false) === true
   property bool confirmRestart: false
   // Swap mode: the tile ({ address, label }) that the next web app or
   // address replaces, or null.
@@ -166,16 +172,31 @@ Panel {
     if (app) addUrl(app.url, app.name)
   }
 
-  // Saves the hiddenWebapps setting; the shell writes it to shell.json.
-  function saveHidden(text) {
+  // Saves one widget setting; the shell writes it to shell.json.
+  function saveSetting(key, value) {
     var shell = bar ? bar.shell : null
     if (!shell || typeof shell.updateEntryInline !== "function") {
-      showStatus("Cannot save settings here; edit Hidden web apps in the widget settings", true)
+      showStatus("Cannot save settings here", true)
       return false
     }
-    settings = Object.assign({}, settings, { hiddenWebapps: text })
+    var changed = {}
+    changed[key] = value
+    settings = Object.assign({}, settings, changed)
     shell.updateEntryInline(moduleName, settings)
     return true
+  }
+
+  function saveHidden(text) {
+    return saveSetting("hiddenWebapps", text)
+  }
+
+  function toggleMute(tile) {
+    if (!tile) return
+    runService(function(engine) { return engine.toggleTileMute(tile.address) })
+  }
+
+  function toggleAudioFocus() {
+    saveSetting("audioFollowsFocus", !audioFollowsFocus)
   }
 
   function hideWebapp(app) {
@@ -294,6 +315,13 @@ Panel {
 
   Binding {
     target: root.service
+    property: "audioFollowsFocus"
+    value: root.audioFollowsFocus
+    when: root.service !== null
+  }
+
+  Binding {
+    target: root.service
     property: "hiddenWebapps"
     value: String(root.setting("hiddenWebapps", ""))
     when: root.service !== null
@@ -369,11 +397,13 @@ Panel {
         else if (root.view === "audio") {
           if (t === "e" || t === "E") root.enableExtension()
           else if (t === "v" || t === "V") root.verifyExtension()
-          else if ((t === "b" || t === "B") && root.extensionState === "restart") root.restartBrowser()
+          else if ((t === "b" || t === "B") && root.restartNeeded) root.restartBrowser()
+          else if (t === "f" || t === "F") root.toggleAudioFocus()
         }
         else if (root.view !== "tiles") return
         else if (t === "c" || t === "C") root.contain()
         else if ((t === "s" || t === "S") && root.cursorActive) root.startSwap(root.selectedTile)
+        else if ((t === "m" || t === "M") && root.cursorActive) root.toggleMute(root.selectedTile)
         else if (t >= "1" && t <= "9") root.addWebapp(root.shownWebapps[Number(t) - 1])
       }
 
@@ -632,14 +662,51 @@ Panel {
               }
             }
 
+            Notice {
+              visible: root.service !== null && root.service.extensionOutdated
+              text: root.service ? "The browser is running an older copy of the Mosaic extension. Restart it to load the current one (" + root.service.extensionVersion + ")." : ""
+            }
+
             // Button labels don't wrap or elide, so the warning goes here.
             Notice {
-              visible: root.confirmRestart && root.extensionState === "restart"
+              visible: root.confirmRestart && root.restartNeeded
               text: "This closes every window of the browser, your tiles included, and opens it again. Press again to go ahead."
             }
 
+            RowLayout {
+              visible: root.extensionState === "connected"
+              width: parent.width
+              spacing: Style.space(10)
+              ColumnLayout {
+                Layout.fillWidth: true
+                Layout.leftMargin: Style.space(10)
+                spacing: Style.space(1)
+                Text {
+                  Layout.fillWidth: true
+                  text: "Mute every tile but the focused one"
+                  color: root.foreground
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.body
+                  wrapMode: Text.WordWrap
+                }
+                Text {
+                  Layout.fillWidth: true
+                  text: "Focusing a tile unmutes it and mutes the rest  ·  F"
+                  color: root.dim
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                  wrapMode: Text.WordWrap
+                }
+              }
+              ToggleSwitch {
+                checked: root.audioFollowsFocus
+                foreground: root.foreground
+                onToggled: root.toggleAudioFocus()
+              }
+            }
+
             Button {
-              visible: root.extensionState === "restart"
+              visible: root.restartNeeded
               width: parent.width
               text: root.confirmRestart ? "Press again to restart" : "Restart the browser  B"
               iconText: "󰑓"
@@ -706,13 +773,13 @@ Panel {
           Text {
             width: parent.width
             text: root.view === "audio"
-              ? (root.extensionState === "restart" ? "B restart browser  ·  V verify  ·  H/L tabs"
-                : root.extensionState === "connected" ? "V verify  ·  H/L tabs" : "E enable  ·  V verify  ·  H/L tabs")
+              ? (root.restartNeeded ? "B restart browser  ·  V verify  ·  H/L tabs"
+                : root.extensionState === "connected" ? "F mute all but focused  ·  V verify  ·  H/L tabs" : "E enable  ·  V verify  ·  H/L tabs")
               : root.view === "hidden"
               ? "↑↓ select  ·  Enter show again  ·  H/L tabs  ·  R refresh"
               : root.swapTile
                 ? "1–9 or A pick the replacement  ·  Esc cancel"
-                : "↑↓ select  ·  Enter focus  ·  S swap  ·  X remove  ·  ⇧D close session  ·  H/L tabs  ·  R refresh"
+                : "↑↓ select  ·  Enter focus  ·  S swap  ·  M mute  ·  X remove  ·  ⇧D close session  ·  H/L tabs  ·  R refresh"
             color: root.dim
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
@@ -976,6 +1043,15 @@ Panel {
           font.pixelSize: Style.font.caption
           elide: Text.ElideRight
         }
+      }
+
+      PanelActionButton {
+        readonly property var audio: row.tile ? root.tileAudio[row.tile.address] : undefined
+        visible: audio !== undefined
+        iconText: Model.audioIcon(audio)
+        tooltipText: !audio ? "" : (audio.muted ? "Muted; unmute · M" : (audio.audible ? "Playing; mute · M" : "Silent; mute · M"))
+        foreground: root.foreground
+        onClicked: root.toggleMute(row.tile)
       }
 
       PanelActionButton {

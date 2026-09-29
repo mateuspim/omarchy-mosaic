@@ -1078,3 +1078,58 @@ function browserPids(clientsText, classes) {
   })
   return pids.sort(function(a, b) { return a - b })
 }
+
+// { version, script } from the extension's manifest.json text, or null.
+function extensionFromManifest(text) {
+  try {
+    var manifest = JSON.parse(String(text || ""))
+    var script = manifest && manifest.background ? manifest.background.service_worker : ""
+    return manifest && typeof manifest.version === "string" && typeof script === "string" && script !== ""
+      ? { version: manifest.version, script: script } : null
+  } catch (error) {
+    return null
+  }
+}
+
+// Whether a connected extension understands `mute`. Its version alone can't
+// say: Brave has run an old worker script under a new manifest. Scripts
+// that report their name (background-2.js on) all understand it.
+function canMute(bridge) {
+  return /^background-\d+\.js$/.test(String(bridge.script || ""))
+}
+
+// Each found tile's audio, from a check (matchTiles output) and the bridges
+// it was made from: { ADDRESS: { bridge, tab, audible, muted } }.
+function tileAudio(check, bridges) {
+  var audio = {}
+  if (!check || !check.tiles) return audio
+  Object.keys(check.tiles).forEach(function(address) {
+    var found = check.tiles[address]
+    var bridge = bridges[found.bridge]
+    if (!bridge) return
+    bridge.windows.forEach(function(window) {
+      window.tabs.forEach(function(tab) {
+        if (tab.id === found.tab) audio[address] = { bridge: found.bridge, tab: tab.id, audible: tab.audible, muted: tab.muted }
+      })
+    })
+  })
+  return audio
+}
+
+// The mute changes that leave only the tile at `focused` unmuted, as
+// [{ bridge, tab, muted }]; none when that tile has no audio entry.
+function focusMutes(audio, focused) {
+  if (!audio[focused]) return []
+  return Object.keys(audio).filter(function(address) {
+    return audio[address].muted !== (address !== focused)
+  }).map(function(address) {
+    return { bridge: audio[address].bridge, tab: audio[address].tab, muted: address !== focused }
+  })
+}
+
+// The icon for a tile's audio: muted, playing, or silent.
+function audioIcon(entry) {
+  if (!entry) return ""
+  if (entry.muted) return "󰖁"
+  return entry.audible ? "󰕾" : "󰕿"
+}

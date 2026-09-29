@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Per-tile mute**: a speaker button on each tile row (and M) shows
+  whether the tile is playing, silent, or muted, and mutes or unmutes it.
+  **Mute every tile but the focused one** on the Audio tab follows
+  Hyprland focus. New IPC: `mute TILE on|off|toggle`. Needs extension
+  0.2.0; the Audio tab asks for a browser restart while a browser runs an
+  older copy of it, which it tells from the worker script's name.
 - **Browser extension for audio control**, the groundwork for per-tile
   audio. The panel's new Audio tab sets it up (Enable, restart the browser,
   Verify) and the Tiles tab warns while it's missing. The extension reports
