@@ -39,9 +39,10 @@ Click the icon, or middle-click it to refresh.
 | Key | Action |
 | --- | --- |
 | ↑ ↓ or J K | Select a tile (or a hidden web app) |
-| ← → or H L | Switch between the Tiles, Hidden, and Audio tabs |
+| ← → or H L | Switch between the Tiles, Hidden, and Extension tabs |
 | Enter | Focus the selected tile, or show the selected hidden web app again |
 | M | Mute or unmute the selected tile (needs the browser extension) |
+| F | Turn "Only the focused tile plays" on or off |
 | − and + (or =) | Turn the selected tile's volume down or up by 10% |
 | S | Swap the selected tile's web app: pick a web app (1–9) or type an address (A), and it replaces the tile in place. Esc cancels |
 | X or D | Remove the selected tile |
@@ -85,7 +86,7 @@ scrolling over the speaker button, or **−** and **+**, work too. At 100% the
 site's own volume control is in charge again. The level holds when the
 page reloads or a new video starts, but the site's volume slider can
 change it until then.
-On the **Audio** tab, **Mute every tile but the focused one** (F) makes the
+At the top of the Tiles tab, **Only the focused tile plays** (F) makes the
 tile you focus the only one you hear: focusing another tile unmutes it and
 mutes the rest, and focusing any other window leaves them as they are.
 Turning it off unmutes every tile. From scripts: `omarchy-shell pym.mosaic
@@ -100,7 +101,7 @@ source, so PipeWire can't tell tiles apart; the extension can, from inside
 the browser. It talks to the plugin through a native messaging host,
 `bin/mosaic-native-host` (Python 3, which Omarchy already has).
 
-Open the panel's **Audio** tab (the Tiles tab warns while it's missing):
+Open the panel's **Extension** tab (the Tiles tab warns while it's missing):
 
 1. **Enable** (E) registers the host with every Chromium-family browser
    profile it finds under `~/.config`, and adds the extension to the
@@ -117,7 +118,7 @@ extensions page, turn on Developer mode, choose Load unpacked, and pick the
 extension folder (the tab copies its path). **Turn off** undoes Enable; do
 that before removing the plugin, so the browser isn't left loading a folder
 that's gone. When the plugin brings a newer extension, or the browser is
-still running an old copy of it, the Audio tab says so, and the browser
+still running an old copy of it, the Extension tab says so, and the browser
 loads the current one on its next restart (the tab's Restart button,
 B). The same steps are in the IPC: `omarchy-shell pym.mosaic
 extension` (status as JSON), `extensionEnable`, `extensionVerify`, and

@@ -1000,7 +1000,7 @@ function loadedBrowsers(setup) {
     .map(function(flags) { return browserLabel(flagsName(flags.file)) }))
 }
 
-// The Audio tab's summary of `extensionState`.
+// The Extension tab's summary of `extensionState`.
 function extensionNotice(setup, bridges) {
   var state = extensionState(setup, bridges)
   if (state === "connected")
@@ -1013,7 +1013,7 @@ function extensionNotice(setup, bridges) {
   return "Audio control needs the Mosaic browser extension. Enable registers it and loads it every time the browser starts."
 }
 
-// The Audio tab's checklist: [{ label, detail, done }]. `check` is the last
+// The Extension tab's checklist: [{ label, detail, done }]. `check` is the last
 // verify ({ error } or matchTiles output), or null.
 function extensionSteps(setup, bridges, check) {
   var browsers = setup ? setup.browsers : []

@@ -27,10 +27,10 @@ Panel {
   // The web apps that get a button; hidden ones can still be typed.
   readonly property var shownWebapps: Model.visibleWebapps(webapps, setting("hiddenWebapps", ""))
   readonly property var hiddenRows: Model.hiddenEntries(webapps, setting("hiddenWebapps", ""))
-  // The panel's tab: "tiles", "hidden" for the hidden web apps, or "audio"
-  // for the browser extension's setup.
+  // The panel's tab: "tiles", "hidden" for the hidden web apps, or
+  // "extension" for the browser extension's setup and health.
   property string view: "tiles"
-  readonly property var views: ["tiles", "hidden", "audio"]
+  readonly property var views: ["tiles", "hidden", "extension"]
   // The browser extension, which audio control needs.
   readonly property string extensionState: service ? service.extensionState : "unknown"
   readonly property bool extensionMissing: extensionState === "off" || extensionState === "restart"
@@ -40,6 +40,9 @@ Panel {
   readonly property var tileAudio: service ? service.tileAudio : ({})
   // The audioFollowsFocus setting: mute every tile but the focused one.
   readonly property bool audioFollowsFocus: setting("audioFollowsFocus", false) === true
+  // Audio controls show on the Tiles tab once the extension is connected
+  // and a tile is open.
+  readonly property bool audioReady: extensionState === "connected" && tiles.length > 0
   property bool confirmRestart: false
   // Swap mode: the tile ({ address, label }) that the next web app or
   // address replaces, or null.
@@ -428,16 +431,16 @@ Panel {
         else if (t === "d" && root.cursorActive) root.removeTile(root.selectedTile)
         else if (t === "D" && root.cursorActive && root.selectedTile) root.closeSession(root.selectedTile.session)
         else if (t === "r" || t === "R") root.refresh()
-        else if (root.view === "audio") {
+        else if (root.view === "extension") {
           if (t === "e" || t === "E") root.enableExtension()
           else if (t === "v" || t === "V") root.verifyExtension()
           else if ((t === "b" || t === "B") && root.restartNeeded) root.restartBrowser()
-          else if (t === "f" || t === "F") root.toggleAudioFocus()
         }
         else if (root.view !== "tiles") return
         else if (t === "c" || t === "C") root.contain()
         else if ((t === "s" || t === "S") && root.cursorActive) root.startSwap(root.selectedTile)
         else if ((t === "m" || t === "M") && root.cursorActive) root.toggleMute(root.selectedTile)
+        else if ((t === "f" || t === "F") && root.audioReady) root.toggleAudioFocus()
         else if (t === "-" && root.cursorActive) root.stepVolume(root.selectedTile, -0.1)
         else if ((t === "+" || t === "=") && root.cursorActive) root.stepVolume(root.selectedTile, 0.1)
         else if (t >= "1" && t <= "9") root.addWebapp(root.shownWebapps[Number(t) - 1])
@@ -486,7 +489,7 @@ Panel {
             options: [
               { value: "tiles", label: "Tiles", tooltip: "H/L or ←/→" },
               { value: "hidden", label: "Hidden" + (root.hiddenRows.length > 0 ? "  ·  " + root.hiddenRows.length : ""), tooltip: "Hidden web apps · H/L or ←/→" },
-              { value: "audio", label: "Audio" + (root.extensionMissing ? "  ·  !" : ""), tooltip: "The browser extension for audio control · H/L or ←/→" }
+              { value: "extension", label: "Extension" + (root.extensionMissing || (root.service !== null && root.service.extensionOutdated) ? "  ·  !" : ""), tooltip: "The browser extension that audio control needs · H/L or ←/→" }
             ]
             onChanged: function(value) { root.setView(value) }
           }
@@ -510,16 +513,63 @@ Panel {
             Notice {
               visible: root.extensionMissing && root.swapTile === null
               text: root.extensionState === "restart"
-                ? "Restart the browser to load the Mosaic extension, then verify it on the Audio tab."
-                : "Audio control is off: the Mosaic browser extension is not set up. Click here or open the Audio tab."
+                ? "Restart the browser to load the Mosaic extension; the Extension tab does it."
+                : "Audio control is off: the Mosaic browser extension is not set up. Click here or open the Extension tab."
               clickable: true
-              onClicked: root.setView("audio")
+              onClicked: root.setView("extension")
             }
 
             Notice {
               visible: root.swapTile !== null
               warning: false
               text: root.swapTile ? "Replacing " + root.swapTile.label + ". Pick a web app, or press A and type an address. Esc cancels." : ""
+            }
+
+            // Audio for the whole mosaic, kept to one line; each tile's own
+            // controls are on its row.
+            CursorSurface {
+              visible: root.audioReady
+              width: parent.width
+              foreground: root.foreground
+              hasCursor: focusAudioMouse.containsMouse
+              implicitHeight: focusAudioRow.implicitHeight + Style.space(6)
+
+              MouseArea {
+                id: focusAudioMouse
+                anchors.fill: parent
+                hoverEnabled: true
+                onClicked: root.toggleAudioFocus()
+              }
+
+              RowLayout {
+                id: focusAudioRow
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                anchors.leftMargin: Style.space(10)
+                anchors.rightMargin: Style.space(6)
+                spacing: Style.space(8)
+                Text {
+                  text: root.audioFollowsFocus ? "󰕾" : "󰖀"
+                  color: root.audioFollowsFocus ? root.foreground : root.dim
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.body
+                }
+                Text {
+                  Layout.fillWidth: true
+                  textFormat: Text.PlainText
+                  text: "Only the focused tile plays  ·  F"
+                  color: root.audioFollowsFocus ? root.foreground : root.dim
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                  elide: Text.ElideRight
+                }
+                ToggleSwitch {
+                  checked: root.audioFollowsFocus
+                  interactive: false
+                  foreground: root.foreground
+                }
+              }
             }
 
             Repeater {
@@ -667,7 +717,7 @@ Panel {
           }
 
           Column {
-            visible: root.view === "audio"
+            visible: root.view === "extension"
             width: parent.width
             spacing: Style.space(6)
 
@@ -707,38 +757,6 @@ Panel {
             Notice {
               visible: root.confirmRestart && root.restartNeeded
               text: "This closes every window of the browser, your tiles included, and opens it again. Press again to go ahead."
-            }
-
-            RowLayout {
-              visible: root.extensionState === "connected"
-              width: parent.width
-              spacing: Style.space(10)
-              ColumnLayout {
-                Layout.fillWidth: true
-                Layout.leftMargin: Style.space(10)
-                spacing: Style.space(1)
-                Text {
-                  Layout.fillWidth: true
-                  text: "Mute every tile but the focused one"
-                  color: root.foreground
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.body
-                  wrapMode: Text.WordWrap
-                }
-                Text {
-                  Layout.fillWidth: true
-                  text: "Focusing a tile unmutes it and mutes the rest  ·  F"
-                  color: root.dim
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.caption
-                  wrapMode: Text.WordWrap
-                }
-              }
-              ToggleSwitch {
-                checked: root.audioFollowsFocus
-                foreground: root.foreground
-                onToggled: root.toggleAudioFocus()
-              }
             }
 
             Button {
@@ -808,14 +826,14 @@ Panel {
 
           Text {
             width: parent.width
-            text: root.view === "audio"
+            text: root.view === "extension"
               ? (root.restartNeeded ? "B restart browser  ·  V verify  ·  H/L tabs"
-                : root.extensionState === "connected" ? "F mute all but focused  ·  V verify  ·  H/L tabs" : "E enable  ·  V verify  ·  H/L tabs")
+                : root.extensionState === "connected" ? "V verify  ·  H/L tabs" : "E enable  ·  V verify  ·  H/L tabs")
               : root.view === "hidden"
               ? "↑↓ select  ·  Enter show again  ·  H/L tabs  ·  R refresh"
               : root.swapTile
                 ? "1–9 or A pick the replacement  ·  Esc cancel"
-                : "↑↓ select  ·  Enter focus  ·  S swap  ·  M mute  ·  −/+ volume  ·  X remove  ·  ⇧D close session  ·  H/L tabs  ·  R refresh"
+                : "↑↓ select  ·  Enter focus  ·  S swap  ·  M mute  ·  −/+ volume  ·  F focused only  ·  X remove  ·  ⇧D close session  ·  H/L tabs  ·  R refresh"
             color: root.dim
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption

@@ -109,6 +109,8 @@ Scope {
   property var tileVolumes: ({})
   // The widget's setting: mute every tile but the one last focused.
   property bool audioFollowsFocus: false
+  // The tile focused last, tracked whether or not the mode is on, so
+  // turning it on from the panel (which takes focus from no tile) keeps it.
   property string audioFocus: ""
   // The extension on disk: its version and worker script. A browser
   // running other code loads it on its next start; see extensionOutdated.
@@ -615,6 +617,8 @@ Scope {
   }
 
   Component.onCompleted: {
+    var focused = focusedTile()
+    if (focused) audioFocus = focused.address
     refresh()
     rebuildWebapps()
     refreshExtension()
@@ -769,10 +773,10 @@ Scope {
   // can do `feature`. Returns "" once sent, else why not.
   function tileCommand(address, feature, message) {
     var entry = tileAudio[address]
-    if (!entry) return extensionState === "connected" ? "The browser extension has not found this tile" : "This needs the browser extension; see the Audio tab"
+    if (!entry) return extensionState === "connected" ? "The browser extension has not found this tile" : "This needs the browser extension; see the Extension tab"
     var bridge = bridges[entry.bridge]
     if (!bridge || !Model.bridgeHas(bridge, feature))
-      return "Restart the browser to load the updated extension (B on the Audio tab)"
+      return "Restart the browser to load the updated extension (B on the Extension tab)"
     var sent = Object.assign({ type: feature, tab: entry.tab }, message)
     return sendBridge(entry.bridge, sent) ? "" : "The browser extension is not connected"
   }
@@ -833,9 +837,10 @@ Scope {
   // activewindowv2: a tile that takes focus becomes the audible one. Other
   // windows leave the audio as it is.
   function windowFocused(data) {
-    if (!audioFollowsFocus) return
     var address = "0x" + String(data).trim()
-    if (!tileAudio[address] || address === audioFocus) return
+    if (address === audioFocus) return
+    var isTile = Model.listTiles(list).some(function(tile) { return tile.address === address })
+    if (!isTile) return
     audioFocus = address
     applyAudioFocus()
   }

@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **Audio on the Tiles tab**: "Only the focused tile plays" (F) sits above
+  the sessions, next to each tile's own slider and mute button. The setup
+  tab is now **Extension**, for enabling and checking the extension only.
 - **Per-tile volume**: a slider under each tile the extension found (like
   the shell's audio panel for apps; right-click mutes), − and + on a
   tile, or the mouse wheel over its speaker button. New IPC: `volume`, `media`
@@ -11,12 +14,11 @@
   restart.
 - **Per-tile mute**: a speaker button on each tile row (and M) shows
   whether the tile is playing, silent, or muted, and mutes or unmutes it.
-  **Mute every tile but the focused one** on the Audio tab follows
-  Hyprland focus. New IPC: `mute TILE on|off|toggle`. Needs extension
-  0.2.0; the Audio tab asks for a browser restart while a browser runs an
+  **Mute every tile but the focused one** follows Hyprland focus. New IPC: `mute TILE on|off|toggle`. Needs extension
+  0.2.0; the Extension tab asks for a browser restart while a browser runs an
   older copy of it, which it tells from the worker script's name.
 - **Browser extension for audio control**, the groundwork for per-tile
-  audio. The panel's new Audio tab sets it up (Enable, restart the browser,
+  audio. The panel's new Extension tab sets it up (Enable, restart the browser,
   Verify) and the Tiles tab warns while it's missing. The extension reports
   the browser's app windows through a native messaging host,
   `bin/mosaic-native-host`, and a socket the service listens on

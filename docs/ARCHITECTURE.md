@@ -79,7 +79,7 @@ logins and memory; the user chose an extension instead.
   exist; symlinks followed, mode kept) and writes
   `NativeMessagingHosts/pym.mosaic.json` into each browser profile folder
   that exists. `remove` undoes both; `status` reports them as JSON. The
-  panel's Audio tab runs these, and Google Chrome, which ignores
+  panel's Extension tab runs these, and Google Chrome, which ignores
   `--load-extension` since 137, needs Load unpacked.
 - **Mute.** The service sends `mute { tab, muted }`; the extension only
   mutes tabs in app windows (`chrome.tabs.update`) and its next `windows`
