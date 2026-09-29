@@ -5,7 +5,7 @@ import vm from "node:vm"
 const source = fs.readFileSync(new URL("../Model.js", import.meta.url), "utf8")
   .replace(/^\.pragma library\s*/m, "")
 const model = {}
-vm.runInNewContext(source + "\nObject.assign(model, { hiddenEntries, showWebapp, nameList, visibleWebapps, hideWebapp, sessionOf, clientFromIpc, parseStore, tileState, buildList, shapeList, parseClients, validAddress, dispatchExpression, listTiles, findTile, planFocus, planRemove, planClose, planContain, restoreAfterMove, monitorFromIpc, parseMonitors, resolveAddTargets, chooseWorkspace, desktopId, isChromiumFamily, isAppWindow, parseOpenWindow, tileDispatches, pruneRecords, serializeStore, planReplace, replaceRecord, parseCursorPos, cursorMoveExpression, parseKeySpec, bindConflict, tileRect, listText, webappsText, monitorsText, splitLines, parseBridgeMessage, browserLabel, bridgeWindows, siteOf, matchTiles, extensionState, extensionNotice, extensionSteps, browserClass, browserPids, tileAudio, focusMutes, audioIcon, extensionFromManifest, canMute, swapBindLua, unbindLua, webappUrl, webappFromEntry, buildWebapps, shapeWebapps, findWebapp, resolveTarget, parseList, tileLabel, tileMeta, normalizeUrl, sessionName, summary, anyUncontained, parseManifest });", { model })
+vm.runInNewContext(source + "\nObject.assign(model, { hiddenEntries, showWebapp, nameList, visibleWebapps, hideWebapp, sessionOf, clientFromIpc, parseStore, tileState, buildList, shapeList, parseClients, validAddress, dispatchExpression, listTiles, findTile, planFocus, planRemove, planClose, planContain, restoreAfterMove, monitorFromIpc, parseMonitors, resolveAddTargets, chooseWorkspace, desktopId, isChromiumFamily, isAppWindow, parseOpenWindow, tileDispatches, pruneRecords, serializeStore, planReplace, replaceRecord, parseCursorPos, cursorMoveExpression, parseKeySpec, bindConflict, tileRect, listText, webappsText, monitorsText, splitLines, parseBridgeMessage, browserLabel, bridgeWindows, siteOf, matchTiles, extensionState, extensionNotice, extensionSteps, browserClass, browserPids, tileAudio, focusMutes, audioIcon, extensionFromManifest, bridgeHas, stepVolume, parseVolume, swapBindLua, unbindLua, webappUrl, webappFromEntry, buildWebapps, shapeWebapps, findWebapp, resolveTarget, parseList, tileLabel, tileMeta, normalizeUrl, sessionName, summary, anyUncontained, parseManifest });", { model })
 
 // Values built inside the VM belong to another realm, so compare copies.
 const plain = value => JSON.parse(JSON.stringify(value))
@@ -393,7 +393,8 @@ assert.equal(model.browserLabel(""), "the browser")
 assert.deepEqual(plain(model.bridgeWindows([
   { id: 1, type: "app", focused: true, tabs: [{ id: 2, url: "https://twitch.tv/a", title: "a", audible: true, muted: false }, { url: "x" }] },
   { id: "3", tabs: [] }, null
-])), [{ id: 1, type: "app", focused: true, tabs: [{ id: 2, url: "https://twitch.tv/a", title: "a", audible: true, muted: false }] }])
+])), [{ id: 1, type: "app", focused: true, tabs: [{ id: 2, url: "https://twitch.tv/a", title: "a", favIconUrl: "", audible: true, muted: false, volume: 1 }] }])
+assert.equal(model.bridgeWindows([{ id: 1, tabs: [{ id: 2, volume: 0.25 }, { id: 3, volume: 7 }] }])[0].tabs.map(tab => tab.volume).join(), "0.25,1")
 assert.deepEqual(plain(model.bridgeWindows("nope")), [])
 
 const extensionTiles = [
@@ -463,14 +464,14 @@ assert.deepEqual(plain(model.browserPids("[]", ["brave-origin"])), [])
 assert.equal(model.browserPids("nope", []), null)
 
 const audioBridges = [{ windows: [
-  { id: 1, type: "app", focused: false, tabs: [{ id: 101, url: "", title: "", audible: true, muted: false }] },
-  { id: 2, type: "app", focused: false, tabs: [{ id: 102, url: "", title: "", audible: false, muted: true }] }
+  { id: 1, type: "app", focused: false, tabs: [{ id: 101, url: "", title: "", audible: true, muted: false, volume: 1 }] },
+  { id: 2, type: "app", focused: false, tabs: [{ id: 102, url: "", title: "", audible: false, muted: true, volume: 0.5 }] }
 ] }]
 const audioCheck = { total: 3, matched: 2, tiles: { "0xa": { bridge: 0, window: 1, tab: 101 }, "0xb": { bridge: 0, window: 2, tab: 102 }, "0xc": { bridge: 3, window: 9, tab: 9 } }, missing: [] }
 const audio = model.tileAudio(audioCheck, audioBridges)
 assert.deepEqual(plain(audio), {
-  "0xa": { bridge: 0, tab: 101, audible: true, muted: false },
-  "0xb": { bridge: 0, tab: 102, audible: false, muted: true }
+  "0xa": { bridge: 0, tab: 101, audible: true, muted: false, volume: 1 },
+  "0xb": { bridge: 0, tab: 102, audible: false, muted: true, volume: 0.5 }
 })
 assert.deepEqual(plain(model.tileAudio(null, audioBridges)), {})
 assert.deepEqual(plain(model.focusMutes(audio, "0xb")), [{ bridge: 0, tab: 101, muted: true }, { bridge: 0, tab: 102, muted: false }])
@@ -484,8 +485,20 @@ assert.equal(model.audioIcon(undefined), "")
 assert.deepEqual(plain(model.extensionFromManifest('{"version":"0.2.0","background":{"service_worker":"background-2.js"}}')), { version: "0.2.0", script: "background-2.js" })
 assert.equal(model.extensionFromManifest('{"version":"0.2.0"}'), null)
 assert.equal(model.extensionFromManifest("nope"), null)
-assert.equal(model.canMute({ script: "background-2.js" }), true)
-assert.equal(model.canMute({ script: "" }), false)
-assert.equal(model.canMute({}), false)
+assert.equal(model.bridgeHas({ script: "background-2.js" }, "mute"), true)
+assert.equal(model.bridgeHas({ script: "background-2.js" }, "volume"), false)
+assert.equal(model.bridgeHas({ script: "" }, "mute"), false)
+assert.equal(model.bridgeHas({ script: "background-3.js", features: ["mute", "volume"] }, "volume"), true)
+assert.equal(model.bridgeHas({ script: "background-3.js", features: ["mute"] }, "media"), false)
+assert.equal(model.stepVolume(1, -0.1), 0.9)
+assert.equal(model.stepVolume(0.05, -0.1), 0)
+assert.equal(model.stepVolume(0.97, 0.1), 1)
+assert.equal(model.parseVolume("40", 1), 0.4)
+assert.equal(model.parseVolume("40%", 1), 0.4)
+assert.equal(model.parseVolume("+10", 0.5), 0.6)
+assert.equal(model.parseVolume("-80", 0.5), 0)
+assert.equal(model.parseVolume("250", 0.5), 1)
+assert.equal(model.parseVolume("loud", 0.5), null)
+assert.equal(model.audioIcon({ audible: true, muted: false, volume: 0.3 }), "󰖀")
 
 console.log("model tests passed")

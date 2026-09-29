@@ -42,6 +42,7 @@ Click the icon, or middle-click it to refresh.
 | ← → or H L | Switch between the Tiles, Hidden, and Audio tabs |
 | Enter | Focus the selected tile, or show the selected hidden web app again |
 | M | Mute or unmute the selected tile (needs the browser extension) |
+| − and + (or =) | Turn the selected tile's volume down or up by 10% |
 | S | Swap the selected tile's web app: pick a web app (1–9) or type an address (A), and it replaces the tile in place. Esc cancels |
 | X or D | Remove the selected tile |
 | Shift+D | Close the selected tile's session |
@@ -77,12 +78,19 @@ list.
 ## Audio
 
 Each tile row has a speaker button showing whether the tile is playing
-(󰕾), silent (󰕿), or muted (󰖁); click it or press **M** to mute or unmute.
+(󰕾, or 󰖀 when turned down), silent (󰕿), or muted (󰖁); click it or press
+**M** to mute or unmute. Under it, a slider sets the tile's own volume
+(right-click the slider to mute), as the shell's audio panel does for apps;
+scrolling over the speaker button, or **−** and **+**, work too. At 100% the
+site's own volume control is in charge again. The level holds when the
+page reloads or a new video starts, but the site's volume slider can
+change it until then.
 On the **Audio** tab, **Mute every tile but the focused one** (F) makes the
 tile you focus the only one you hear: focusing another tile unmutes it and
 mutes the rest, and focusing any other window leaves them as they are.
 Turning it off unmutes every tile. From scripts: `omarchy-shell pym.mosaic
-mute TILE on|off|toggle`.
+mute TILE on|off|toggle`, `volume TILE 40` (or `+10`, `-10`), `media TILE
+play|pause|toggle`, and `reloadTile TILE`.
 
 ## The browser extension (for audio control)
 

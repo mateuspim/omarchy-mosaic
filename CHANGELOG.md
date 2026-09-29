@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Per-tile volume**: a slider under each tile the extension found (like
+  the shell's audio panel for apps; right-click mutes), − and + on a
+  tile, or the mouse wheel over its speaker button. New IPC: `volume`, `media`
+  (play, pause, toggle), and `reloadTile`. Extension 0.3.0 also carries
+  in-place navigation, reloading, media control, and favicons, and says
+  what it can do (`features`), so later panel features need no browser
+  restart.
 - **Per-tile mute**: a speaker button on each tile row (and M) shows
   whether the tile is playing, silent, or muted, and mutes or unmutes it.
   **Mute every tile but the focused one** on the Audio tab follows

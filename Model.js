@@ -921,7 +921,9 @@ function bridgeWindows(list) {
     for (var t = 0; t < window.tabs.length; t++) {
       var tab = window.tabs[t]
       if (!tab || !Number.isInteger(tab.id)) continue
-      tabs.push({ id: tab.id, url: String(tab.url || ""), title: String(tab.title || ""), audible: tab.audible === true, muted: tab.muted === true })
+      var volume = Number(tab.volume)
+      tabs.push({ id: tab.id, url: String(tab.url || ""), title: String(tab.title || ""), favIconUrl: String(tab.favIconUrl || ""),
+        audible: tab.audible === true, muted: tab.muted === true, volume: tab.volume === undefined || !(volume >= 0 && volume <= 1) ? 1 : volume })
     }
     windows.push({ id: window.id, type: String(window.type || ""), focused: window.focused === true, tabs: tabs })
   }
@@ -1091,11 +1093,28 @@ function extensionFromManifest(text) {
   }
 }
 
-// Whether a connected extension understands `mute`. Its version alone can't
-// say: Brave has run an old worker script under a new manifest. Scripts
-// that report their name (background-2.js on) all understand it.
-function canMute(bridge) {
-  return /^background-\d+\.js$/.test(String(bridge.script || ""))
+// Whether a connected extension can do `feature` ("mute", "volume", …).
+// Its version can't say: Brave has run an old worker script under a new
+// manifest. From background-3.js on, hello lists the features;
+// background-2.js had only mute.
+function bridgeHas(bridge, feature) {
+  if (Array.isArray(bridge.features)) return bridge.features.indexOf(feature) !== -1
+  return feature === "mute" && bridge.script === "background-2.js"
+}
+
+// A tile volume from 0 to 1 after stepping `current` by `delta`, in 5%
+// steps, or from a percentage the user typed ("40", "+10", "-10").
+function stepVolume(current, delta) {
+  var next = Math.round((Number(current) + Number(delta)) * 20) / 20
+  return Math.max(0, Math.min(1, next))
+}
+
+function parseVolume(text, current) {
+  var match = /^\s*([+-]?)(\d{1,3})\s*%?\s*$/.exec(String(text || ""))
+  if (!match) return null
+  var amount = Number(match[2]) / 100
+  var level = match[1] === "+" ? current + amount : match[1] === "-" ? current - amount : amount
+  return Math.max(0, Math.min(1, Math.round(level * 100) / 100))
 }
 
 // Each found tile's audio, from a check (matchTiles output) and the bridges
@@ -1109,7 +1128,7 @@ function tileAudio(check, bridges) {
     if (!bridge) return
     bridge.windows.forEach(function(window) {
       window.tabs.forEach(function(tab) {
-        if (tab.id === found.tab) audio[address] = { bridge: found.bridge, tab: tab.id, audible: tab.audible, muted: tab.muted }
+        if (tab.id === found.tab) audio[address] = { bridge: found.bridge, tab: tab.id, audible: tab.audible, muted: tab.muted, volume: tab.volume }
       })
     })
   })
@@ -1127,9 +1146,11 @@ function focusMutes(audio, focused) {
   })
 }
 
-// The icon for a tile's audio: muted, playing, or silent.
+// The icon for a tile's audio: muted, playing (loud or turned down), or
+// silent.
 function audioIcon(entry) {
   if (!entry) return ""
   if (entry.muted) return "󰖁"
-  return entry.audible ? "󰕾" : "󰕿"
+  if (!entry.audible) return "󰕿"
+  return entry.volume !== undefined && entry.volume < 0.5 ? "󰖀" : "󰕾"
 }

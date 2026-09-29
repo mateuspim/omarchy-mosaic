@@ -53,8 +53,9 @@ roughly in order of value; confirm priorities with the user before starting:
   **Done:** the extension, the native host and bridge, the setup (Enable,
   restart, Verify) with a warning in the panel, per-tile mute with a
   playing/silent/muted indicator, and muting every tile but the focused
-  one. **Next:** per-tile volume (a content script setting media element
-  volume, since the tab API only mutes).
+  one, and per-tile volume (extension 0.3.0). The extension also carries
+  navigate, reload, media, and favicons for later features (an in-place
+  swap, a richer panel) without another browser restart.
 - **Saved sessions.** Name, monitor, layout, and apps; restore with one key
   or at login. Keep personal URLs out of the repository.
 - **Monitor awareness.** Reflow on monitor changes, portrait-friendly

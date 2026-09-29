@@ -87,6 +87,18 @@ logins and memory; the user chose an extension instead.
   state. Focus mode (`audioFollowsFocus`, a widget setting) reacts to
   `activewindowv2` for tiles and re-applies after every check, so a new
   tile starts muted.
+- **Commands (extension 0.3.0).** `mute`, `volume { level }` (0 to 1;
+  an injected isolated-world script sets every media element and again on
+  each `play` and `loadeddata` while below 1, and the worker sets it again
+  when the page finishes loading), `navigate { url }` (http and https
+  only), `reload`, and `media { action }`. Each only touches tabs in app
+  windows, may carry an `id` answered by `done { id, error }`, and shows its
+  effect in the next `windows` report (tabs now carry `favIconUrl` and
+  `volume`). `hello.features` lists them; the service checks
+  `Model.bridgeHas` before sending. The worker keeps volumes in memory, so
+  the service keeps each tile's level (`tileVolumes`) and sends it again
+  when a report disagrees. Permissions include `scripting` and
+  `<all_urls>`, taken now so later features need no restart.
 - **Updates.** There is no automatic reload: after `chrome.runtime.reload()`
   the service worker wasn't started again (46 s in a test), which would
   leave the browser disconnected. Nor is a version check enough: after a

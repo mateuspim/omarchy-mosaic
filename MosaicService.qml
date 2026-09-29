@@ -103,6 +103,10 @@ Scope {
   // Each found tile's audio (Model.tileAudio): { ADDRESS: { bridge, tab,
   // audible, muted } }.
   readonly property var tileAudio: Model.tileAudio(extensionCheck, bridges)
+  // The volume the user set per tile (0 to 1, by address). The extension
+  // loses it when the browser stops its worker, so the service sets it
+  // again whenever a report disagrees.
+  property var tileVolumes: ({})
   // The widget's setting: mute every tile but the one last focused.
   property bool audioFollowsFocus: false
   property string audioFocus: ""
@@ -692,7 +696,7 @@ Scope {
   }
 
   function bridgeOpened(socket) {
-    socket.info = { browser: "", extension: "", script: "", windows: [], hello: false }
+    socket.info = { browser: "", extension: "", script: "", features: null, windows: [], hello: false }
     bridgeSockets = bridgeSockets.concat([socket])
   }
 
@@ -716,6 +720,7 @@ Scope {
       info.extension = String(message.extension || "")
       // The worker script's name, which says what code actually runs.
       info.script = String(message.script || "")
+      info.features = Array.isArray(message.features) ? message.features.map(String) : null
       info.hello = true
     } else if (message.type === "windows") info.windows = Model.bridgeWindows(message.windows)
     else return
@@ -728,7 +733,8 @@ Scope {
 
   function updateBridges() {
     bridges = bridgeSockets.filter(function(socket) { return socket.info.hello }).map(function(socket) {
-      return { browser: socket.info.browser, extension: socket.info.extension, script: socket.info.script, windows: socket.info.windows }
+      return { browser: socket.info.browser, extension: socket.info.extension, script: socket.info.script,
+        features: socket.info.features, windows: socket.info.windows }
     })
     autoCheck()
   }
@@ -741,6 +747,56 @@ Scope {
     if (verifying) return
     extensionCheck = bridges.length > 0 ? Model.matchTiles(Model.shapeList(list).tiles, bridges) : null
     applyAudioFocus()
+    keepVolumes()
+  }
+
+  // Forgets volumes of tiles that are gone, and sets the rest again where
+  // the extension reports otherwise.
+  function keepVolumes() {
+    var audio = Model.tileAudio(extensionCheck, bridges)
+    var tiles = Model.listTiles(list).map(function(tile) { return tile.address })
+    var kept = {}
+    Object.keys(tileVolumes).forEach(function(address) {
+      if (tiles.indexOf(address) === -1) return
+      kept[address] = root.tileVolumes[address]
+      var entry = audio[address]
+      if (entry && Math.abs(entry.volume - kept[address]) > 0.001) root.tileCommand(address, "volume", { level: kept[address] })
+    })
+    if (Object.keys(kept).length !== Object.keys(tileVolumes).length) tileVolumes = kept
+  }
+
+  // Sends a command for a tile's tab to its extension, if that extension
+  // can do `feature`. Returns "" once sent, else why not.
+  function tileCommand(address, feature, message) {
+    var entry = tileAudio[address]
+    if (!entry) return extensionState === "connected" ? "The browser extension has not found this tile" : "This needs the browser extension; see the Audio tab"
+    var bridge = bridges[entry.bridge]
+    if (!bridge || !Model.bridgeHas(bridge, feature))
+      return "Restart the browser to load the updated extension (B on the Audio tab)"
+    var sent = Object.assign({ type: feature, tab: entry.tab }, message)
+    return sendBridge(entry.bridge, sent) ? "" : "The browser extension is not connected"
+  }
+
+  // Sets a tile's volume, from 0 to 1 in whole percent; 1 hands it back
+  // to the site.
+  function setTileVolume(address, level) {
+    var clamped = Math.max(0, Math.min(1, Math.round(Number(level) * 100) / 100))
+    var error = tileCommand(address, "volume", { level: clamped })
+    if (error) return error
+    // 1 is kept too, so the panel shows it at once instead of a report
+    // that is still on its way.
+    var next = Object.assign({}, tileVolumes)
+    next[address] = clamped
+    tileVolumes = next
+    return ""
+  }
+
+  function tileVolume(address) {
+    return tileVolumes[address] !== undefined ? tileVolumes[address] : 1
+  }
+
+  function stepTileVolume(address, delta) {
+    return setTileVolume(address, Model.stepVolume(tileVolume(address), delta))
   }
 
   function helloSockets() {
@@ -758,12 +814,7 @@ Scope {
   // Mutes or unmutes a tile (its address); "" once sent, else why not.
   // The tile's new state arrives with the extension's next windows report.
   function setTileMuted(address, muted) {
-    var entry = tileAudio[address]
-    if (!entry) return extensionState === "connected" ? "The browser extension has not found this tile" : "Audio control needs the browser extension; see the Audio tab"
-    var bridge = bridges[entry.bridge]
-    if (bridge && !Model.canMute(bridge))
-      return "Restart the browser to load the updated extension (B on the Audio tab)"
-    return sendBridge(entry.bridge, { type: "mute", tab: entry.tab, muted: muted === true }) ? "" : "The browser extension is not connected"
+    return tileCommand(address, "mute", { muted: muted === true })
   }
 
   function toggleTileMute(address) {
@@ -798,7 +849,8 @@ Scope {
       error: extensionError,
       setup: extensionSetup,
       bridges: bridges.map(function(bridge) {
-        return { browser: Model.browserLabel(bridge.browser), extension: bridge.extension, script: bridge.script, windows: bridge.windows.length }
+        return { browser: Model.browserLabel(bridge.browser), extension: bridge.extension, script: bridge.script,
+          features: bridge.features, windows: bridge.windows.length }
       }),
       check: extensionCheck,
       audio: tileAudio,
@@ -879,6 +931,30 @@ Scope {
     function extensionEnable(): string { return root.enableExtension() || "started" }
     function extensionDisable(): string { return root.disableExtension() || "started" }
     // Mutes TILE (a list number or address): "on", "off", or "toggle".
+    // Sets TILE's volume: a percentage ("40"), or a step ("+10", "-10").
+    function volume(tile: string, level: string): string {
+      var found = Model.findTile(Model.listTiles(root.list), tile)
+      if (!found) return "error: No tile " + tile
+      var parsed = Model.parseVolume(level, root.tileVolume(found.address))
+      if (parsed === null) return "error: Use a percentage such as 40, or a step such as +10"
+      var error = root.setTileVolume(found.address, parsed)
+      return error ? "error: " + error : Math.round(parsed * 100) + "%"
+    }
+    // Plays or pauses TILE's media: "play", "pause", or "toggle".
+    function media(tile: string, action: string): string {
+      var found = Model.findTile(Model.listTiles(root.list), tile)
+      if (!found) return "error: No tile " + tile
+      if (action !== "play" && action !== "pause" && action !== "toggle") return "error: Use play, pause, or toggle"
+      var error = root.tileCommand(found.address, "media", { action: action })
+      return error ? "error: " + error : "ok"
+    }
+    // Reloads TILE's page in place.
+    function reloadTile(tile: string): string {
+      var found = Model.findTile(Model.listTiles(root.list), tile)
+      if (!found) return "error: No tile " + tile
+      var error = root.tileCommand(found.address, "reload", {})
+      return error ? "error: " + error : "ok"
+    }
     function mute(tile: string, state: string): string {
       var found = Model.findTile(Model.listTiles(root.list), tile)
       if (!found) return "error: No tile " + tile

@@ -195,6 +195,34 @@ Panel {
     runService(function(engine) { return engine.toggleTileMute(tile.address) })
   }
 
+  // Slider drags arrive many times a second; send the latest level at most
+  // every 80 ms.
+  property var pendingVolume: null
+
+  // `now` sends at once, as on release, so the last position never waits.
+  function dragVolume(tile, level, now) {
+    if (!tile) return
+    pendingVolume = { address: tile.address, level: level }
+    if (now) {
+      volumeThrottle.stop()
+      sendPendingVolume()
+    } else if (!volumeThrottle.running) {
+      sendPendingVolume()
+      volumeThrottle.start()
+    }
+  }
+
+  function sendPendingVolume() {
+    var pending = pendingVolume
+    pendingVolume = null
+    if (pending) runService(function(engine) { return engine.setTileVolume(pending.address, pending.level) })
+  }
+
+  function stepVolume(tile, delta) {
+    if (!tile) return
+    runService(function(engine) { return engine.stepTileVolume(tile.address, delta) })
+  }
+
   function toggleAudioFocus() {
     saveSetting("audioFollowsFocus", !audioFollowsFocus)
   }
@@ -328,6 +356,12 @@ Panel {
   }
 
   Timer {
+    id: volumeThrottle
+    interval: 80
+    onTriggered: root.sendPendingVolume()
+  }
+
+  Timer {
     id: restartConfirmTimer
     interval: 4000
     onTriggered: root.confirmRestart = false
@@ -404,6 +438,8 @@ Panel {
         else if (t === "c" || t === "C") root.contain()
         else if ((t === "s" || t === "S") && root.cursorActive) root.startSwap(root.selectedTile)
         else if ((t === "m" || t === "M") && root.cursorActive) root.toggleMute(root.selectedTile)
+        else if (t === "-" && root.cursorActive) root.stepVolume(root.selectedTile, -0.1)
+        else if ((t === "+" || t === "=") && root.cursorActive) root.stepVolume(root.selectedTile, 0.1)
         else if (t >= "1" && t <= "9") root.addWebapp(root.shownWebapps[Number(t) - 1])
       }
 
@@ -779,7 +815,7 @@ Panel {
               ? "↑↓ select  ·  Enter show again  ·  H/L tabs  ·  R refresh"
               : root.swapTile
                 ? "1–9 or A pick the replacement  ·  Esc cancel"
-                : "↑↓ select  ·  Enter focus  ·  S swap  ·  M mute  ·  X remove  ·  ⇧D close session  ·  H/L tabs  ·  R refresh"
+                : "↑↓ select  ·  Enter focus  ·  S swap  ·  M mute  ·  −/+ volume  ·  X remove  ·  ⇧D close session  ·  H/L tabs  ·  R refresh"
             color: root.dim
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
@@ -1002,9 +1038,16 @@ Panel {
     id: row
     property var tile: null
     readonly property bool swapping: root.swapTile !== null && tile !== null && root.swapTile.address === tile.address
+    readonly property var audio: tile ? root.tileAudio[tile.address] : undefined
+    // The level the user set, which the slider shows right away; the
+    // browser's report of it arrives a moment later.
+    readonly property real volume: {
+      var set = root.service && tile ? root.service.tileVolumes[tile.address] : undefined
+      return set !== undefined ? set : (audio ? audio.volume : 1)
+    }
     hasCursor: swapping || (root.cursorActive && tile !== null && root.cursor === tile.position)
     foreground: root.foreground
-    implicitHeight: content.implicitHeight + Style.spacing.rowPaddingX
+    implicitHeight: rowColumn.implicitHeight + Style.spacing.rowPaddingX
 
     MouseArea {
       anchors.fill: parent
@@ -1013,64 +1056,108 @@ Panel {
       onClicked: root.focusTile(row.tile)
     }
 
-    RowLayout {
+    ColumnLayout {
+      id: rowColumn
       anchors.left: parent.left
       anchors.right: parent.right
       anchors.verticalCenter: parent.verticalCenter
       anchors.leftMargin: Style.space(10)
       anchors.rightMargin: Style.space(6)
-      spacing: Style.space(8)
+      spacing: Style.space(4)
 
-      ColumnLayout {
-        id: content
+      RowLayout {
         Layout.fillWidth: true
-        spacing: Style.space(1)
-        Text {
+        spacing: Style.space(8)
+
+        ColumnLayout {
+          id: content
           Layout.fillWidth: true
-          textFormat: Text.PlainText
-          text: row.tile ? (row.swapping ? "󰓡  " : "") + Model.tileLabel(row.tile) : ""
-          color: root.foreground
-          font.family: root.fontFamily
-          font.pixelSize: Style.font.body
-          elide: Text.ElideRight
+          spacing: Style.space(1)
+          Text {
+            Layout.fillWidth: true
+            textFormat: Text.PlainText
+            text: row.tile ? (row.swapping ? "󰓡  " : "") + Model.tileLabel(row.tile) : ""
+            color: root.foreground
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.body
+            elide: Text.ElideRight
+          }
+          Text {
+            Layout.fillWidth: true
+            textFormat: Text.PlainText
+            text: row.tile ? Model.tileMeta(row.tile) : ""
+            color: row.tile && row.tile.state === "uncontained" ? root.urgent : root.dim
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+            elide: Text.ElideRight
+          }
+        }
+
+        PanelActionButton {
+          readonly property var audio: row.audio
+          visible: audio !== undefined
+          iconText: Model.audioIcon(audio)
+          tooltipText: !audio ? "" : (audio.muted ? "Muted; unmute · M" : (audio.audible ? "Playing; mute · M" : "Silent; mute · M"))
+            + "  ·  scroll or −/+ for volume"
+          foreground: root.foreground
+          onClicked: root.toggleMute(row.tile)
+          WheelHandler {
+            acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+            onWheel: function(event) {
+              if (event.angleDelta.y !== 0) root.stepVolume(row.tile, event.angleDelta.y > 0 ? 0.05 : -0.05)
+            }
+          }
+        }
+
+        PanelActionButton {
+          iconText: "󰓡"
+          tooltipText: "Swap this tile's web app · S"
+            + (root.service && root.service.boundSwapKey !== "" ? " here, " + root.service.boundSwapKey + " on the tile" : "")
+          foreground: root.foreground
+          onClicked: {
+            if (row.swapping) root.swapTile = null
+            else root.startSwap(row.tile)
+          }
+        }
+
+        PanelActionButton {
+          iconText: "󰅖"
+          tooltipText: "Remove this tile · X or D"
+          foreground: root.foreground
+          hoverColor: root.urgent
+          onClicked: root.removeTile(row.tile)
+        }
+      }
+
+      // The tile's own volume, as the built-in audio panel shows app
+      // streams: right-click mutes, and a muted tile's slider is dimmed.
+      RowLayout {
+        visible: row.audio !== undefined
+        Layout.fillWidth: true
+        spacing: Style.space(8)
+        PanelSlider {
+          bar: root.bar
+          Layout.fillWidth: true
+          minimum: 0
+          maximum: 1
+          step: 0.05
+          value: row.volume
+          opacity: row.audio && row.audio.muted ? 0.5 : 1.0
+          onMoved: function(v) { root.dragVolume(row.tile, v, false) }
+          onReleased: function(v) { root.dragVolume(row.tile, v, true) }
+          onRightClicked: root.toggleMute(row.tile)
         }
         Text {
-          Layout.fillWidth: true
           textFormat: Text.PlainText
-          text: row.tile ? Model.tileMeta(row.tile) : ""
-          color: row.tile && row.tile.state === "uncontained" ? root.urgent : root.dim
+          text: row.audio ? Math.round(row.volume * 100) + "%" : ""
+          color: root.dim
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption
-          elide: Text.ElideRight
+          font.bold: true
+          Layout.preferredWidth: Style.space(36)
+          horizontalAlignment: Text.AlignRight
+          opacity: row.audio && row.audio.muted ? 0.5 : 1.0
         }
-      }
-
-      PanelActionButton {
-        readonly property var audio: row.tile ? root.tileAudio[row.tile.address] : undefined
-        visible: audio !== undefined
-        iconText: Model.audioIcon(audio)
-        tooltipText: !audio ? "" : (audio.muted ? "Muted; unmute · M" : (audio.audible ? "Playing; mute · M" : "Silent; mute · M"))
-        foreground: root.foreground
-        onClicked: root.toggleMute(row.tile)
-      }
-
-      PanelActionButton {
-        iconText: "󰓡"
-        tooltipText: "Swap this tile's web app · S"
-          + (root.service && root.service.boundSwapKey !== "" ? " here, " + root.service.boundSwapKey + " on the tile" : "")
-        foreground: root.foreground
-        onClicked: {
-          if (row.swapping) root.swapTile = null
-          else root.startSwap(row.tile)
-        }
-      }
-
-      PanelActionButton {
-        iconText: "󰅖"
-        tooltipText: "Remove this tile · X or D"
-        foreground: root.foreground
-        hoverColor: root.urgent
-        onClicked: root.removeTile(row.tile)
       }
     }
   }
