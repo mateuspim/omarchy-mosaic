@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **Layouts per workspace, and your own**: layouts now belong to
+  workspaces (workspace 8 on Grid, 9 on a layout of yours), set from the
+  panel's new **Layouts** tab (a dropdown per workspace) or a session's
+  header. Design layouts there with the mouse, like PowerToys FancyZones:
+  start from a preset, drag the lines between zones, split a zone beside or
+  below, remove one, and pick the main zone that fills first (say 25 / 50
+  / 25 with the middle one main). `mosaic layout --workspace
+  N LAYOUT`; new IPC `sessionLayout`, `layoutSave`, `layoutDelete`.
+  `layouts.json` is version 2; session layouts from version 1 move to
+  their workspaces.
+
 - **Volume follows the site**: a tile's volume changed with the page's own
   control (YouTube's slider, arrow keys) is now kept and shown on the
   panel's slider, instead of being reset to the level last set in Mosaic
@@ -10,14 +21,11 @@
   Extension tab), which also keeps levels when the browser stops its
   worker.
 
-- **Layouts**: Grid, Stack, Main + small, and 16:9 fit, per session. Click
-  the grid button on a session header or press G to cycle; `mosaic layout
-  --session NAME LAYOUT` from scripts. They are Hyprland Lua tiling layouts
-  (`layouts.lua`), so tiles stay tiled and swappable, and they follow
-  portrait monitors. The choice is saved in `layouts.json` next to
-  `tiles.json` and applied again after a config reload or a move to
-  another workspace, with each tile's fullscreen containment kept. New IPC:
-  `layout`, `layouts`.
+- **Layouts**: Grid, Stack, Main + small, and 16:9 fit. They are Hyprland
+  Lua tiling layouts (`layouts.lua`), so tiles stay tiled and swappable,
+  and they follow portrait monitors. The choice is saved in `layouts.json`
+  next to `tiles.json` and applied again after a config reload, with each
+  tile's fullscreen containment kept. New IPC: `layout`, `layouts`.
 
 - **Audio on the Tiles tab**: "Only the focused tile plays" (F) sits above
   the sessions, next to each tile's own slider and mute button. The setup

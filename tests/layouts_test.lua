@@ -74,6 +74,36 @@ local f3 = L.arrange("fit", portrait, 3)
 check("fit portrait stacks 16:9 tiles", f3[1].w == 1000 and f3[1].h == 563 and f3[1].x == 10)
 check("fit portrait centers vertically", f3[1].y > 20)
 
+-- Custom zones: 25/50/25 columns with the middle one filled first.
+local three = { { x = 0.25, y = 0, w = 0.5, h = 1 }, { x = 0, y = 0, w = 0.25, h = 1 }, { x = 0.75, y = 0, w = 0.25, h = 1 } }
+local c1 = L.arrange(three, landscape, 1)
+check("custom one window takes the main zone", #c1 == 1 and same(c1[1], { x = 500, y = 0, w = 1000, h = 1000 }))
+local c3 = L.arrange(three, landscape, 3)
+check("custom three windows fill all zones", same(c3[2], { x = 0, y = 0, w = 500, h = 1000 }) and same(c3[3], { x = 1500, y = 0, w = 500, h = 1000 }))
+local c5 = L.arrange(three, landscape, 5)
+check("custom extra windows share the last zone", #c5 == 5 and same(c5[3], { x = 1500, y = 0, w = 500, h = 333 }) and same(c5[5], { x = 1500, y = 667, w = 500, h = 333 }))
+check("custom stays tidy", tidy(landscape, c5) and tidy(portrait, L.arrange(three, portrait, 7)))
+check("no zones is a grid", #L.arrange({}, landscape, 4) == 4)
+
+-- Registration, with a stand-in for Hyprland's `hl`: each name once, even
+-- across loads, and custom zones changed in place.
+local registered = {}
+hl = { layout = { register = function(name, provider)
+  registered[#registered + 1] = name
+  registered[name] = provider
+end } }
+dofile("layouts.lua")
+dofile("layouts.lua")
+MosaicLayouts.define("three", three)
+MosaicLayouts.define("three", { { x = 0, y = 0, w = 1, h = 1 } })
+check("each name registered once", #registered == 5 and registered[5] == "mosaic-c-three")
+local placed = {}
+local ctx = { area = landscape, targets = {} }
+for i = 1, 2 do ctx.targets[i] = { place = function(_, b) placed[i] = b end } end
+registered["mosaic-c-three"].recalculate(ctx)
+check("custom provider uses the latest zones", same(placed[1], { x = 0, y = 0, w = 1000, h = 1000 }))
+hl, MosaicLayouts, MosaicCustom, MosaicRegistered = nil, nil, nil, nil
+
 if failures > 0 then
   print(failures .. " failure(s)")
   os.exit(1)

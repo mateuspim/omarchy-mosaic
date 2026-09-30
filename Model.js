@@ -514,28 +514,57 @@ function restoreAfterMove(list, eventData) {
   return ""
 }
 
-// Layouts (layouts.lua): Hyprland Lua tiling layouts set per workspace.
-// "default" hands the workspace back to the layout it had before.
+// Layouts (layouts.lua): Hyprland Lua tiling layouts, set per workspace. A
+// choice is "default" (the workspace's own layout again), a built-in name,
+// or "custom:<slug>" for a layout designed on the panel's Layouts tab.
 var LAYOUTS = ["grid", "stack", "main", "fit"]
-var LAYOUT_CHOICES = ["default"].concat(LAYOUTS)
 var LAYOUT_LABELS = { "default": "Hyprland", grid: "Grid", stack: "Stack", main: "Main + small", fit: "16:9 fit" }
+var CUSTOM_PREFIX = "custom:"
+// Limits for custom layouts: zones in all, zones per split, splits
+// inside splits, and the smallest share of a split, in percent.
+var MAX_ZONES = 16
+var MAX_CHILDREN = 6
+var MAX_DEPTH = 4
+var MIN_ZONE = 5
+var SIZE_STEP = 5
 
-function layoutLabel(name) {
+function customSlug(choice) {
+  var text = String(choice || "")
+  return text.indexOf(CUSTOM_PREFIX) === 0 ? text.slice(CUSTOM_PREFIX.length) : ""
+}
+
+// Every choice, in the order the panel cycles them: default, the
+// built-ins, then custom layouts by name.
+function layoutChoices(custom) {
+  var slugs = Object.keys(custom || {}).sort(function(a, b) { return compareText(custom[a].name.toLowerCase(), custom[b].name.toLowerCase()) })
+  return ["default"].concat(LAYOUTS, slugs.map(function(slug) { return CUSTOM_PREFIX + slug }))
+}
+
+function layoutLabel(name, custom) {
+  var slug = customSlug(name)
+  if (slug !== "") return custom && custom[slug] ? custom[slug].name : "Missing layout"
   return LAYOUT_LABELS[name] || LAYOUT_LABELS["default"]
 }
 
 // The choice after `name` in the panel's cycle.
-function nextLayout(name) {
-  var at = LAYOUT_CHOICES.indexOf(name)
-  return LAYOUT_CHOICES[(at + 1) % LAYOUT_CHOICES.length]
+function nextLayout(name, custom) {
+  var choices = layoutChoices(custom)
+  return choices[(choices.indexOf(name) + 1) % choices.length]
 }
 
-// A layout choice from user text ("Grid", "16:9", "main"), or "".
-function parseLayoutName(text) {
+// A choice from user text ("Grid", "16:9", "main", a custom layout's name
+// or slug), or "".
+function parseLayoutName(text, custom) {
   var name = String(text || "").trim().toLowerCase()
   if (name === "16:9" || name === "16x9") return "fit"
-  if (name === "hyprland" || name === "none" || name === "off") return "default"
-  return LAYOUT_CHOICES.indexOf(name) === -1 ? "" : name
+  if (name === "hyprland" || name === "none" || name === "off" || name === "default") return "default"
+  if (LAYOUTS.indexOf(name) !== -1) return name
+  var slugs = Object.keys(custom || {})
+  var slug = customSlug(name) || layoutSlug(name)
+  for (var i = 0; i < slugs.length; i++) {
+    if (slugs[i] === slug || custom[slugs[i]].name.toLowerCase() === name) return CUSTOM_PREFIX + slugs[i]
+  }
+  return ""
 }
 
 // A layout Hyprland reports in `tiledLayout`, safe to put back in a rule.
@@ -543,32 +572,368 @@ function validHyprLayout(name) {
   return /^[a-z][a-z0-9_:-]{0,39}$/.test(String(name || ""))
 }
 
-// layouts.json: `{ version: 1, sessions: { NAME: { layout, before } } }`,
-// where `before` is the workspace's layout before Mosaic changed it. An
-// unreadable file has no layouts.
+// The name Hyprland knows a choice by, or "" when invalid. A Hyprland
+// layout name (from `before`) passes through.
+function hyprLayoutName(choice) {
+  if (LAYOUTS.indexOf(choice) !== -1) return "lua:mosaic-" + choice
+  var slug = customSlug(choice)
+  if (slug !== "") return sessionName(slug) === slug ? "lua:mosaic-c-" + slug : ""
+  return validHyprLayout(choice) ? String(choice) : ""
+}
+
+// A custom layout's slug from its name: lowercase letters, digits, - and _.
+function layoutSlug(name) {
+  return String(name || "").toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 32)
+}
+
+// Equal percent sizes for `count` zones, the remainder on the first ones.
+function equalSizes(count) {
+  var sizes = []
+  for (var i = 0; i < count; i++) sizes.push(Math.floor(100 / count) + (i < 100 % count ? 1 : 0))
+  return sizes
+}
+
+// A custom layout is { name, tree, main }. The tree is a zone (`{}`) or a
+// split: { split: "row" (side by side) or "column" (stacked), sizes
+// (percent, at least MIN_ZONE each, adding up to 100), children }. `main`
+// is the 1-based zone, counting zones depth first (left to right, top to
+// bottom), that the first window takes.
+function splitNode(direction, sizes, children) {
+  return { split: direction, sizes: sizes, children: children }
+}
+
+function isSplit(node) {
+  return !!node && (node.split === "row" || node.split === "column")
+}
+
+// A checked copy of a tree, with one-child splits collapsed, or null.
+function cleanTree(node, depth) {
+  if (!node || typeof node !== "object" || depth > MAX_DEPTH) return null
+  if (node.split === undefined) return {}
+  if (!isSplit(node) || !Array.isArray(node.children) || !Array.isArray(node.sizes)
+      || node.children.length !== node.sizes.length || node.children.length < 1 || node.children.length > MAX_CHILDREN) return null
+  var sum = 0
+  for (var i = 0; i < node.sizes.length; i++) {
+    var size = Number(node.sizes[i])
+    if (!(size >= MIN_ZONE) || size % 1) return null
+    sum += size
+  }
+  if (sum !== 100) return null
+  if (node.children.length === 1) return cleanTree(node.children[0], depth)
+  var children = []
+  for (var c = 0; c < node.children.length; c++) {
+    var child = cleanTree(node.children[c], depth + 1)
+    if (!child) return null
+    children.push(child)
+  }
+  return splitNode(node.split, node.sizes.map(Number), children)
+}
+
+function countZones(node) {
+  if (!isSplit(node)) return 1
+  return node.children.reduce(function(total, child) { return total + countZones(child) }, 0)
+}
+
+// The tree the earlier columns, rows, and grid definitions describe.
+function templateTree(def) {
+  if (def.template === "grid") {
+    var cols = Number(def.cols), rows = Number(def.rows)
+    if (!(cols >= 1 && cols <= 4 && rows >= 1 && rows <= 4) || cols % 1 || rows % 1) return null
+    var row = function() {
+      return cols === 1 ? {} : splitNode("row", equalSizes(cols), Array.apply(null, Array(cols)).map(function() { return {} }))
+    }
+    if (rows === 1) return row()
+    return splitNode("column", equalSizes(rows), Array.apply(null, Array(rows)).map(row))
+  }
+  if ((def.template !== "columns" && def.template !== "rows") || !Array.isArray(def.sizes)) return null
+  return { split: def.template === "columns" ? "row" : "column", sizes: def.sizes, children: def.sizes.map(function() { return {} }) }
+}
+
+// A custom layout definition, checked and tidied, or null. The earlier
+// { template, sizes | cols, rows } form is read as a tree.
+function normalizeCustom(def) {
+  if (!def || typeof def !== "object") return null
+  var name = String(def.name || "").trim().slice(0, 40)
+  if (layoutSlug(name) === "") return null
+  var tree = cleanTree(def.tree !== undefined ? def.tree : templateTree(def), 0)
+  if (!tree) return null
+  var count = countZones(tree)
+  if (count > MAX_ZONES) return null
+  var main = Number(def.main)
+  return { name: name, tree: tree, main: main >= 1 && main <= count && main % 1 === 0 ? main : 1 }
+}
+
+// Starting points for a new layout.
+var PRESETS = ["columns", "rows", "grid", "side"]
+var PRESET_LABELS = { columns: "Columns", rows: "Rows", grid: "Grid", side: "Main + side" }
+
+function presetTree(preset) {
+  if (preset === "rows") return { tree: splitNode("column", [34, 33, 33], [{}, {}, {}]), main: 1 }
+  if (preset === "grid") return { tree: splitNode("column", [50, 50], [splitNode("row", [50, 50], [{}, {}]), splitNode("row", [50, 50], [{}, {}])]), main: 1 }
+  if (preset === "side") return { tree: splitNode("row", [70, 30], [{}, splitNode("column", [50, 50], [{}, {}])]), main: 1 }
+  return { tree: splitNode("row", [25, 50, 25], [{}, {}, {}]), main: 2 }
+}
+
+// A new layout from a preset: Columns 25 / 50 / 25 with the middle main.
+function newCustom(name, preset) {
+  var start = presetTree(preset)
+  return { name: name, tree: start.tree, main: start.main }
+}
+
+function withPreset(def, preset) {
+  var next = newCustom(def.name, preset)
+  return next
+}
+
+function zoneCount(def) {
+  return countZones(def.tree)
+}
+
+function copyDef(def) {
+  return JSON.parse(JSON.stringify(def))
+}
+
+// Zones in visual order as fractions: [{ x, y, w, h, main, fill, path }],
+// where `fill` is the 1-based order windows take them in (the main zone
+// first, then the rest in visual order) and `path` the child indexes that
+// lead to the zone in the tree.
+function visualZones(def) {
+  var zones = []
+  function walk(node, x, y, w, h, path) {
+    if (!isSplit(node)) {
+      zones.push({ x: x, y: y, w: w, h: h, path: path })
+      return
+    }
+    var at = 0
+    for (var i = 0; i < node.children.length; i++) {
+      var part = node.sizes[i] / 100
+      if (node.split === "row") walk(node.children[i], x + at * w, y, part * w, h, path.concat([i]))
+      else walk(node.children[i], x, y + at * h, w, part * h, path.concat([i]))
+      at += part
+    }
+  }
+  walk(def.tree, 0, 0, 1, 1, [])
+  var fill = 2
+  for (var z = 0; z < zones.length; z++) {
+    zones[z].main = z + 1 === def.main
+    zones[z].fill = zones[z].main ? 1 : fill++
+  }
+  return zones
+}
+
+// Zones in the order windows fill them.
+function fillZones(def) {
+  return visualZones(def).slice().sort(function(a, b) { return a.fill - b.fill })
+}
+
+function luaNumber(value) {
+  return String(Math.round(value * 10000) / 10000)
+}
+
+// The Lua that gives Hyprland a custom layout's zones, or "".
+function defineLua(slug, def) {
+  if (sessionName(slug) !== slug || !def) return ""
+  var zones = fillZones(def).map(function(z) {
+    return "{ x = " + luaNumber(z.x) + ", y = " + luaNumber(z.y) + ", w = " + luaNumber(z.w) + ", h = " + luaNumber(z.h) + " }"
+  })
+  return 'MosaicLayouts.define("' + slug + '", { ' + zones.join(", ") + " })"
+}
+
+// The lines between zones, for dragging: [{ path, index, vertical, x, y,
+// length, from, span }], all fractions of the whole. `path` leads to the
+// split, `index` is the line after child `index`; `vertical` lines sit at
+// `x` and run down from `y` for `length`. `from` and `span` are the
+// split's own extent along its direction, to turn a pointer position into
+// a size.
+function zoneDividers(def) {
+  var lines = []
+  function walk(node, x, y, w, h, path) {
+    if (!isSplit(node)) return
+    var at = 0
+    for (var i = 0; i < node.children.length; i++) {
+      var part = node.sizes[i] / 100
+      if (node.split === "row") walk(node.children[i], x + at * w, y, part * w, h, path.concat([i]))
+      else walk(node.children[i], x, y + at * h, w, part * h, path.concat([i]))
+      at += part
+      if (i === node.children.length - 1) continue
+      if (node.split === "row") lines.push({ path: path, index: i, vertical: true, x: x + at * w, y: y, length: h, from: x, span: w })
+      else lines.push({ path: path, index: i, vertical: false, x: x, y: y + at * h, length: w, from: y, span: h })
+    }
+  }
+  walk(def.tree, 0, 0, 1, 1, [])
+  return lines
+}
+
+function nodeAt(tree, path) {
+  var node = tree
+  for (var i = 0; i < path.length; i++) node = node.children[path[i]]
+  return node
+}
+
+// Moves line `index` of the split at `path` to `position` (a fraction of
+// the whole, along the split), keeping both zones at least MIN_ZONE.
+function withDivider(def, path, index, position, from, span) {
+  var next = copyDef(def)
+  var node = nodeAt(next.tree, path)
+  if (!isSplit(node) || index < 0 || index >= node.sizes.length - 1 || !(span > 0)) return def
+  var before = 0
+  for (var i = 0; i < index; i++) before += node.sizes[i]
+  var pair = node.sizes[index] + node.sizes[index + 1]
+  var wanted = Math.round((position - from) / span * 100) - before
+  var size = Math.max(MIN_ZONE, Math.min(pair - MIN_ZONE, wanted))
+  node.sizes[index] = size
+  node.sizes[index + 1] = pair - size
+  return next
+}
+
+// Splits zone `zone` (0-based, visual order) in two: "row" puts the new
+// zone beside it, "column" below it. The zone keeps its share and the new
+// one takes half; within a split of the same direction it becomes a
+// sibling. Returns the definition unchanged when the zone is too small or
+// the layout is full.
+function withSplit(def, zone, direction) {
+  var zones = visualZones(def)
+  if (zone < 0 || zone >= zones.length || zones.length >= MAX_ZONES) return def
+  var next = copyDef(def)
+  var path = zones[zone].path
+  if (path.length > 0) {
+    var parent = nodeAt(next.tree, path.slice(0, -1))
+    var at = path[path.length - 1]
+    if (parent.split === direction) {
+      var size = parent.sizes[at]
+      if (size < MIN_ZONE * 2 || parent.children.length >= MAX_CHILDREN) return def
+      parent.sizes.splice(at, 1, size - Math.floor(size / 2), Math.floor(size / 2))
+      parent.children.splice(at + 1, 0, {})
+    } else {
+      if (path.length >= MAX_DEPTH) return def
+      parent.children[at] = splitNode(direction, [50, 50], [{}, {}])
+    }
+  } else {
+    next.tree = splitNode(direction, [50, 50], [{}, {}])
+  }
+  if (next.main > zone + 1) next.main += 1
+  return next
+}
+
+// Removes zone `zone`; its neighbour (the one before, or else after) takes
+// its share, and a split left with one zone becomes that zone.
+function withoutZone(def, zone) {
+  var zones = visualZones(def)
+  if (zones.length <= 1 || zone < 0 || zone >= zones.length) return def
+  var next = copyDef(def)
+  var path = zones[zone].path
+  var parentPath = path.slice(0, -1)
+  var parent = nodeAt(next.tree, parentPath)
+  var at = path[path.length - 1]
+  parent.sizes[at > 0 ? at - 1 : at + 1] += parent.sizes[at]
+  parent.sizes.splice(at, 1)
+  parent.children.splice(at, 1)
+  if (parent.children.length === 1) {
+    if (parentPath.length === 0) next.tree = parent.children[0]
+    else nodeAt(next.tree, parentPath.slice(0, -1)).children[parentPath[parentPath.length - 1]] = parent.children[0]
+  }
+  if (next.main === zone + 1) next.main = 1
+  else if (next.main > zone + 1) next.main -= 1
+  return next
+}
+
+// Grows zone `zone` by `delta` percent of its split, taken from the next
+// zone there (the one before, for the last), keeping both at least
+// MIN_ZONE.
+function withZoneSize(def, zone, delta) {
+  var zones = visualZones(def)
+  if (zone < 0 || zone >= zones.length || zones[zone].path.length === 0) return def
+  var next = copyDef(def)
+  var path = zones[zone].path
+  var parent = nodeAt(next.tree, path.slice(0, -1))
+  var at = path[path.length - 1]
+  var other = at + 1 < parent.sizes.length ? at + 1 : at - 1
+  var change = Math.max(MIN_ZONE - parent.sizes[at], Math.min(delta, parent.sizes[other] - MIN_ZONE))
+  parent.sizes[at] += change
+  parent.sizes[other] -= change
+  return next
+}
+
+function withMain(def, zone) {
+  if (zone < 0 || zone >= zoneCount(def)) return def
+  var next = copyDef(def)
+  next.main = zone + 1
+  return next
+}
+
+function withName(def, name) {
+  var next = copyDef(def)
+  next.name = String(name || "")
+  return next
+}
+
+// "2nd", "3rd", "4th", …
+function ordinal(n) {
+  var tens = n % 100
+  var suffix = tens >= 11 && tens <= 13 ? "th" : ["th", "st", "nd", "rd"][n % 10] || "th"
+  return n + suffix
+}
+
+// A zone's size as the percent of the whole it covers.
+function zonePercent(zone) {
+  return Math.round(zone.w * zone.h * 100)
+}
+
+// One line about a custom layout: "3 zones  ·  main 50%".
+function customSummary(def) {
+  var zones = visualZones(def)
+  var main = zones[def.main - 1]
+  return zones.length + (zones.length === 1 ? " zone" : " zones") + "  ·  main " + zonePercent(main) + "%"
+}
+
+// layouts.json: `{ version: 2, workspaces: { "8": { layout, before } },
+// custom: { SLUG: definition } }`, where `before` is the workspace's
+// layout before Mosaic changed it. Version 1 kept layouts per session;
+// those come back as `legacy` ({ SESSION: layout }) for the service to
+// move to the sessions' workspaces. An unreadable file has no layouts.
 function parseLayouts(text) {
   var parsed
   try {
     parsed = JSON.parse(String(text || ""))
   } catch (error) {
-    return {}
+    parsed = null
   }
-  var source = parsed && parsed.sessions && typeof parsed.sessions === "object" ? parsed.sessions : {}
-  var layouts = {}
-  Object.keys(source).forEach(function(session) {
-    var entry = source[session]
-    if (sessionName(session) !== session || !entry || LAYOUTS.indexOf(entry.layout) === -1) return
-    layouts[session] = { layout: entry.layout, before: validHyprLayout(entry.before) ? entry.before : "" }
+  var state = { workspaces: {}, custom: {}, legacy: {} }
+  if (!parsed || typeof parsed !== "object") return state
+  var custom = parsed.custom && typeof parsed.custom === "object" ? parsed.custom : {}
+  Object.keys(custom).forEach(function(slug) {
+    var def = normalizeCustom(custom[slug])
+    if (def && sessionName(slug) === slug) state.custom[slug] = def
   })
-  return layouts
+  var workspaces = parsed.workspaces && typeof parsed.workspaces === "object" ? parsed.workspaces : {}
+  Object.keys(workspaces).forEach(function(id) {
+    var entry = workspaces[id]
+    if (!/^[1-9]\d{0,3}$/.test(id) || !entry) return
+    var layout = String(entry.layout || "")
+    if (LAYOUTS.indexOf(layout) === -1 && !state.custom[customSlug(layout)]) return
+    state.workspaces[id] = { layout: layout, before: validHyprLayout(entry.before) ? entry.before : "" }
+  })
+  var sessions = parsed.version === 1 && parsed.sessions && typeof parsed.sessions === "object" ? parsed.sessions : {}
+  Object.keys(sessions).forEach(function(session) {
+    var entry = sessions[session]
+    if (sessionName(session) === session && entry && LAYOUTS.indexOf(entry.layout) !== -1)
+      state.legacy[session] = { layout: entry.layout, before: validHyprLayout(entry.before) ? entry.before : "" }
+  })
+  return state
 }
 
-function serializeLayouts(layouts) {
-  var sessions = {}
-  Object.keys(layouts).sort().forEach(function(session) {
-    sessions[session] = { layout: layouts[session].layout, before: layouts[session].before }
+function serializeLayouts(state) {
+  var workspaces = {}
+  Object.keys(state.workspaces).sort(function(a, b) { return Number(a) - Number(b) }).forEach(function(id) {
+    workspaces[id] = { layout: state.workspaces[id].layout, before: state.workspaces[id].before }
   })
-  return JSON.stringify({ version: 1, sessions: sessions }, null, 2) + "\n"
+  var custom = {}
+  Object.keys(state.custom).sort().forEach(function(slug) { custom[slug] = state.custom[slug] })
+  return JSON.stringify({ version: 2, workspaces: workspaces, custom: custom }, null, 2) + "\n"
+}
+
+function copyState(state) {
+  return { workspaces: JSON.parse(JSON.stringify(state.workspaces)), custom: JSON.parse(JSON.stringify(state.custom)), legacy: {} }
 }
 
 // The Lua that loads layouts.lua into Hyprland, or "" for a path that can't
@@ -587,76 +952,21 @@ function layoutsLoaded(reply) {
   return lines.length > 0 && lines.every(function(line) { return /is already registered/.test(line) || line.trim() === "ok" })
 }
 
-// The Lua that sets workspace `workspace`'s tiled layout: a Mosaic layout
-// name, or a Hyprland one (`dwindle`) to hand it back. "" when invalid.
+// The Lua that sets workspace `workspace`'s tiled layout to a choice or a
+// Hyprland layout name. "" when invalid.
 function layoutRuleLua(workspace, layout) {
-  if (typeof workspace !== "number" || Math.floor(workspace) !== workspace || workspace < 1) return ""
-  var value = LAYOUTS.indexOf(layout) !== -1 ? "lua:mosaic-" + layout : layout
-  if (!validHyprLayout(value)) return ""
-  return 'hl.workspace_rule({ workspace = "' + workspace + '", layout = "' + value + '" })'
+  var id = Number(workspace)
+  if (!(id >= 1) || Math.floor(id) !== id) return ""
+  var value = hyprLayoutName(layout)
+  if (value === "") return ""
+  return 'hl.workspace_rule({ workspace = "' + id + '", layout = "' + value + '" })'
 }
 
-// The workspace a session's layout applies to: its first tiled tile's, or
-// null when every tile floats or the session is gone.
+// The workspace a session's tiles are on: its first tiled tile's, or null
+// when every tile floats or the session is gone.
 function sessionWorkspace(list, session) {
   var tiles = listTiles(list).filter(function(tile) { return tile.session === session && tile.state !== "floating" })
   return tiles.length > 0 ? tiles[0].workspace : null
-}
-
-// The steps that give each workspace its layout, then put back the
-// fullscreen state of every tile on it, since switching a workspace's
-// layout resets Hyprland's record of it (contained tiles read 0 again).
-// `changes` is [{ workspace, layout }], where layout is a Mosaic name or a
-// Hyprland one. Steps are { eval } for `hyprctl eval` and plain strings for
-// dispatches. `states` ({ ADDRESS: state }, optional) overrides the
-// list's state for tiles whose record was reset before the list saw it,
-// as by a config reload. Returns { expressions } or { error }.
-function layoutSteps(list, changes, loadLua, states) {
-  if (changes.length === 0) return { expressions: [] }
-  if (loadLua === "") return { error: "Cannot load the layouts from this plugin's folder" }
-  var steps = [{ eval: loadLua }]
-  var tiles = listTiles(list)
-  for (var i = 0; i < changes.length; i++) {
-    var rule = layoutRuleLua(changes[i].workspace, changes[i].layout)
-    if (rule === "") return { error: "Cannot set layout " + JSON.stringify(String(changes[i].layout)) + " on workspace " + changes[i].workspace }
-    steps.push({ eval: rule })
-    for (var t = 0; t < tiles.length; t++) {
-      if (tiles[t].workspace !== changes[i].workspace) continue
-      var state = states && states[tiles[t].address] ? states[tiles[t].address] : tiles[t].state
-      var action = state === "contained" ? "contain" : state === "uncontained" ? "release" : ""
-      if (action !== "") steps.push(dispatchExpression(action, tiles[t].address))
-    }
-  }
-  return { expressions: steps }
-}
-
-// `mosaic layout SESSION NAME`: the new saved layouts and the steps that
-// apply them. `layouts` is the saved map, `current` the session's
-// workspace's tiledLayout now (for `before`). Returns { layouts,
-// expressions, message } or { error }.
-function planLayout(list, layouts, session, name, current, loadLua) {
-  var error = sessionFilterError(session)
-  if (error || !session) return { error: error || "Name a session" }
-  var choice = parseLayoutName(name)
-  if (choice === "") return { error: "Unknown layout " + JSON.stringify(String(name)) + "; use " + LAYOUT_CHOICES.join(", ") }
-  var workspace = sessionWorkspace(list, session)
-  if (workspace === null) return { error: "Session " + session + " has no tiled tiles" }
-  var saved = layouts[session]
-  var next = {}
-  Object.keys(layouts).forEach(function(name) { next[name] = layouts[name] })
-  var target
-  if (choice === "default") {
-    delete next[session]
-    target = saved && saved.before ? saved.before : "dwindle"
-  } else {
-    var mosaicNow = String(current || "").indexOf("lua:") === 0
-    var before = saved ? saved.before : mosaicNow || !validHyprLayout(current) ? "" : String(current)
-    next[session] = { layout: choice, before: before }
-    target = choice
-  }
-  var steps = layoutSteps(list, [{ workspace: workspace, layout: target }], loadLua)
-  if (steps.error) return { error: steps.error }
-  return { layouts: next, expressions: steps.expressions, message: "Layout of " + session + ": " + layoutLabel(choice) + "." }
 }
 
 // Each tile's state by address, to keep across a config reload.
@@ -666,42 +976,182 @@ function tileStates(list) {
   return states
 }
 
-// Where saved layouts need applying again: sessions whose workspace is not
-// the one `applied` ({ SESSION: workspace }) says has their layout, as
-// after a config reload (applied is then empty) or when the tiles moved.
-// A workspace left behind gets its earlier layout back, unless another
-// session with a layout is on it. Returns { changes, applied }.
-function layoutChanges(list, layouts, applied) {
-  var changes = []
-  var next = {}
-  var used = {}
-  Object.keys(layouts).sort().forEach(function(session) {
-    var workspace = sessionWorkspace(list, session)
-    if (workspace === null) return
-    next[session] = workspace
-    used[workspace] = true
-    if (applied[session] !== workspace) changes.push({ workspace: workspace, layout: layouts[session].layout })
-  })
-  Object.keys(applied).forEach(function(session) {
-    var old = applied[session]
-    if (old === next[session] || used[old] || !layouts[session]) return
-    used[old] = true
-    changes.push({ workspace: old, layout: layouts[session].before || "dwindle" })
-  })
-  return { changes: changes, applied: next }
+// The steps that load the layouts, define `slugs`' zones, give each
+// workspace in `changes` ([{ workspace, layout, refresh }]) its layout,
+// and then put back the fullscreen state of every tile there, since
+// switching a workspace's layout resets Hyprland's record of it (contained
+// tiles read 0 again). `refresh` switches away first, because setting a
+// workspace's own layout again doesn't lay it out anew. `states` ({ ADDRESS:
+// state }, optional) overrides the list's state for tiles whose record was
+// reset before the list saw it, as by a config reload. Steps are { eval }
+// for `hyprctl eval` and plain strings for dispatches. Returns {
+// expressions } or { error }.
+function layoutSteps(list, state, changes, slugs, loadLua, states) {
+  if (changes.length === 0 && slugs.length === 0) return { expressions: [] }
+  if (loadLua === "") return { error: "Cannot load the layouts from this plugin's folder" }
+  var steps = [{ eval: loadLua }]
+  for (var s = 0; s < slugs.length; s++) {
+    var define = defineLua(slugs[s], state.custom[slugs[s]])
+    if (define === "") return { error: "Cannot define layout " + JSON.stringify(String(slugs[s])) }
+    steps.push({ eval: define })
+  }
+  var tiles = listTiles(list)
+  for (var i = 0; i < changes.length; i++) {
+    var rule = layoutRuleLua(changes[i].workspace, changes[i].layout)
+    if (rule === "") return { error: "Cannot set layout " + JSON.stringify(String(changes[i].layout)) + " on workspace " + changes[i].workspace }
+    if (changes[i].refresh) steps.push({ eval: layoutRuleLua(changes[i].workspace, "dwindle") })
+    steps.push({ eval: rule })
+    for (var t = 0; t < tiles.length; t++) {
+      if (tiles[t].workspace !== Number(changes[i].workspace)) continue
+      var tileState = states && states[tiles[t].address] ? states[tiles[t].address] : tiles[t].state
+      var action = tileState === "contained" ? "contain" : tileState === "uncontained" ? "release" : ""
+      if (action !== "") steps.push(dispatchExpression(action, tiles[t].address))
+    }
+  }
+  return { expressions: steps }
 }
 
-// `mosaic layout`: each open session and its layout.
-function layoutsText(list, layouts) {
-  var sessions = list && Array.isArray(list.sessions) ? list.sessions : []
-  if (sessions.length === 0) return "No mosaic tiles are open."
-  var width = 0
-  sessions.forEach(function(session) { width = Math.max(width, session.name.length) })
-  return sessions.map(function(session) {
-    var name = session.name
-    while (name.length < width) name += " "
-    return name + "  " + layoutLabel(layouts[session.name] ? layouts[session.name].layout : "default")
-  }).join("\n")
+// Custom layouts a set of changes uses.
+function usedSlugs(changes) {
+  var slugs = []
+  changes.forEach(function(change) {
+    var slug = customSlug(change.layout)
+    if (slug !== "" && slugs.indexOf(slug) === -1) slugs.push(slug)
+  })
+  return slugs
+}
+
+// `mosaic layout --workspace N NAME`: the new state and the steps.
+// `current` is the workspace's tiledLayout now (for `before`). Returns {
+// state, expressions, message } or { error }.
+function planWorkspaceLayout(list, state, workspace, name, current, loadLua) {
+  var id = Number(workspace)
+  if (!(id >= 1 && id <= 9999) || Math.floor(id) !== id) return { error: "Unexpected workspace " + JSON.stringify(String(workspace)) }
+  var choice = parseLayoutName(name, state.custom)
+  if (choice === "") return { error: "Unknown layout " + JSON.stringify(String(name)) + "; use " + layoutChoices(state.custom).map(function(c) { return layoutLabel(c, state.custom) }).join(", ") }
+  var next = copyState(state)
+  var saved = state.workspaces[id]
+  var target
+  if (choice === "default") {
+    delete next.workspaces[id]
+    target = saved && saved.before ? saved.before : "dwindle"
+  } else {
+    var mosaicNow = String(current || "").indexOf("lua:") === 0
+    var before = saved ? saved.before : mosaicNow || !validHyprLayout(current) ? "" : String(current)
+    next.workspaces[id] = { layout: choice, before: before }
+    target = choice
+  }
+  var changes = [{ workspace: id, layout: target }]
+  var steps = layoutSteps(list, next, changes, usedSlugs(changes), loadLua)
+  if (steps.error) return { error: steps.error }
+  return { state: next, expressions: steps.expressions, message: "Workspace " + id + ": " + layoutLabel(choice, state.custom) + "." }
+}
+
+// Everything saved, applied again: after a start or a config reload, which
+// drops runtime layouts and rules. Version 1's session layouts move to
+// their sessions' workspaces first. Returns { state, expressions } or {
+// error }.
+function planSyncLayouts(list, state, loadLua, states) {
+  var next = copyState(state)
+  Object.keys(state.legacy || {}).forEach(function(session) {
+    var workspace = sessionWorkspace(list, session)
+    if (workspace !== null && !next.workspaces[workspace]) next.workspaces[workspace] = state.legacy[session]
+  })
+  var changes = Object.keys(next.workspaces).map(function(id) { return { workspace: Number(id), layout: next.workspaces[id].layout } })
+  var steps = layoutSteps(list, next, changes, Object.keys(next.custom).sort(), loadLua, states)
+  if (steps.error) return { error: steps.error }
+  return { state: next, expressions: steps.expressions }
+}
+
+// Saves a custom layout (new, or replacing `oldSlug`), and lays out again
+// the workspaces that use it. Returns { state, slug, expressions, message }
+// or { error }.
+function planSaveCustom(list, state, oldSlug, def, loadLua) {
+  var clean = normalizeCustom(def)
+  if (!clean) return { error: "Give the layout a name, and zones of at least " + MIN_ZONE + "% that add up to 100%" }
+  var slug = layoutSlug(clean.name)
+  if (slug !== oldSlug && state.custom[slug]) return { error: "There is already a layout called " + state.custom[slug].name }
+  if (oldSlug && !state.custom[oldSlug]) return { error: "No custom layout " + JSON.stringify(String(oldSlug)) }
+  var next = copyState(state)
+  if (oldSlug && oldSlug !== slug) delete next.custom[oldSlug]
+  next.custom[slug] = clean
+  var changes = []
+  Object.keys(next.workspaces).forEach(function(id) {
+    var slugNow = customSlug(next.workspaces[id].layout)
+    if (oldSlug && slugNow === oldSlug) {
+      next.workspaces[id].layout = CUSTOM_PREFIX + slug
+      changes.push({ workspace: Number(id), layout: CUSTOM_PREFIX + slug, refresh: slug === oldSlug })
+    }
+  })
+  var steps = layoutSteps(list, next, changes, [slug], loadLua)
+  if (steps.error) return { error: steps.error }
+  return { state: next, slug: slug, expressions: steps.expressions, message: "Saved layout " + clean.name + "." }
+}
+
+// Deletes a custom layout; workspaces using it get their earlier layout
+// back. Returns { state, expressions, message } or { error }.
+function planDeleteCustom(list, state, slug, loadLua) {
+  if (!state.custom[slug]) return { error: "No custom layout " + JSON.stringify(String(slug)) }
+  var next = copyState(state)
+  var name = next.custom[slug].name
+  delete next.custom[slug]
+  var changes = []
+  Object.keys(next.workspaces).forEach(function(id) {
+    if (customSlug(next.workspaces[id].layout) !== slug) return
+    changes.push({ workspace: Number(id), layout: next.workspaces[id].before || "dwindle" })
+    delete next.workspaces[id]
+  })
+  var steps = layoutSteps(list, next, changes, [], loadLua)
+  if (steps.error) return { error: steps.error }
+  return { state: next, expressions: steps.expressions, message: "Deleted layout " + name + "." }
+}
+
+// The layout choice of a workspace: its saved one, or "default".
+function workspaceChoice(state, workspace) {
+  var entry = state.workspaces[Number(workspace)]
+  return entry ? entry.layout : "default"
+}
+
+// The Layouts tab's workspaces: the ones Hyprland has ([{ id, monitor }],
+// special ones left out) and any with a saved layout, by number, each with
+// its choice: [{ id, monitor, choice }].
+function layoutWorkspaceRows(workspaces, state) {
+  var rows = {}
+  ;(workspaces || []).forEach(function(workspace) {
+    if (workspace.id >= 1) rows[workspace.id] = { id: workspace.id, monitor: String(workspace.monitor || "") }
+  })
+  Object.keys(state.workspaces).forEach(function(id) {
+    if (!rows[id]) rows[id] = { id: Number(id), monitor: "" }
+  })
+  return Object.keys(rows).map(function(id) {
+    return { id: rows[id].id, monitor: rows[id].monitor, choice: workspaceChoice(state, id) }
+  }).sort(function(a, b) { return a.id - b.id })
+}
+
+// Custom layouts by name: [{ slug, def }].
+function customRows(custom) {
+  return Object.keys(custom || {}).map(function(slug) { return { slug: slug, def: custom[slug] } })
+    .sort(function(a, b) { return compareText(a.def.name.toLowerCase(), b.def.name.toLowerCase()) })
+}
+
+// A name for a new custom layout: "Layout 1", or the next free number.
+function freeLayoutName(custom) {
+  for (var n = 1; ; n++) {
+    if (!(custom || {})[layoutSlug("Layout " + n)]) return "Layout " + n
+  }
+}
+
+// `mosaic layout`: workspaces with a layout, then custom layouts.
+function layoutsText(state) {
+  var ids = Object.keys(state.workspaces).sort(function(a, b) { return Number(a) - Number(b) })
+  var lines = ids.length === 0 ? ["No workspace has a Mosaic layout."]
+    : ids.map(function(id) { return "workspace " + id + "  " + layoutLabel(state.workspaces[id].layout, state.custom) })
+  var slugs = Object.keys(state.custom).sort()
+  if (slugs.length > 0) {
+    lines.push("", "Custom layouts:")
+    slugs.forEach(function(slug) { lines.push("  " + state.custom[slug].name + "  (" + customSummary(state.custom[slug]) + ")") })
+  }
+  return lines.join("\n")
 }
 
 // How long `add` waits for a launched browser's app window.

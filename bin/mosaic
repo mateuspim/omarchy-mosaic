@@ -14,7 +14,7 @@ Usage: mosaic [add] [--session NAME] [--monitor NAME] [--browser CMD] URL|WEBAPP
        mosaic focus TILE
        mosaic close [--session NAME]
        mosaic contain [--session NAME]
-       mosaic layout [--session NAME] [grid|stack|main|fit|default]
+       mosaic layout [--workspace N | --session NAME] [LAYOUT]
        mosaic webapps [--json]
        mosaic monitors
        mosaic --version
@@ -28,8 +28,9 @@ Usage: mosaic [add] [--session NAME] [--monitor NAME] [--browser CMD] URL|WEBAPP
   focus     Focus a tile, switching to its workspace
   close     Close a session, or every mosaic tile
   contain   Turn tile-contained fullscreen back on for tiled windows
-  layout    Show each session's layout, or set one: a balanced grid, a stack,
-            one main tile plus small ones, 16:9 fit, or default (Hyprland's)
+  layout    Show the workspaces' layouts and the custom ones, or set a
+            workspace's (or a session's workspace's): grid, stack, main, fit,
+            a custom layout's name, or default (Hyprland's own)
   webapps   List installed web apps, such as Omarchy's, and their URLs
   monitors  List active monitors
 
@@ -88,7 +89,7 @@ case ${1:-} in
     ;;
 esac
 
-session="" monitor="" browser="" json=false given=()
+session="" monitor="" browser="" workspace="" json=false given=()
 targets=()
 while (($#)); do
   arg=$1
@@ -96,7 +97,7 @@ while (($#)); do
   case $arg in
     -h | --help) usage; exit 0 ;;
     -V | --version) call version; echo; exit 0 ;;
-    --session | --monitor | --browser)
+    --session | --monitor | --browser | --workspace)
       (($#)) || fail "$arg needs a value"
       value=$1
       shift
@@ -105,6 +106,7 @@ while (($#)); do
         --session) session=$value ;;
         --monitor) monitor=$value ;;
         --browser) browser=$value ;;
+        --workspace) workspace=$value ;;
       esac
       ;;
     --json) json=true; given+=(json) ;;
@@ -116,7 +118,8 @@ done
 case $command in
   add) allowed=" session monitor browser " ;;
   list | webapps) allowed=" json " ;;
-  close | contain | layout) allowed=" session " ;;
+  close | contain) allowed=" session " ;;
+  layout) allowed=" session workspace " ;;
   *) allowed=" " ;;
 esac
 for name in "${given[@]}"; do
@@ -149,10 +152,15 @@ case $command in
   contain) run contain "$session" ;;
   layout)
     if ((count == 0)); then
-      [[ -z $session ]] || fail "Pass the layout for $session" usage
+      [[ -z $session && -z $workspace ]] || fail "Pass the layout to set" usage
       call layouts; echo
+    elif [[ -n $session && -n $workspace ]]; then
+      fail "Pass --workspace or --session, not both"
+    elif [[ -n $workspace ]]; then
+      [[ $workspace =~ ^[1-9][0-9]{0,3}$ ]] || fail "Invalid workspace \"$workspace\""
+      run layout "$workspace" "${targets[0]}"
     else
-      run layout "${session:-default}" "${targets[0]}"
+      run sessionLayout "${session:-default}" "${targets[0]}"
     fi
     ;;
   list) if $json; then call list; else call listText; fi; echo ;;

@@ -3,6 +3,8 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import Quickshell
 import Quickshell.Io
+import Quickshell.Hyprland
+import Quickshell.Wayland
 import qs.Commons
 import qs.Ui
 import "Model.js" as Model
@@ -30,7 +32,21 @@ Panel {
   // The panel's tab: "tiles", "hidden" for the hidden web apps, or
   // "extension" for the browser extension's setup and health.
   property string view: "tiles"
-  readonly property var views: ["tiles", "hidden", "extension"]
+  readonly property var views: ["tiles", "hidden", "layouts", "extension"]
+  // The Layouts tab: workspaces and custom layouts from the service, and
+  // the editor (see openEditor), or null.
+  readonly property var layoutCustom: service ? service.layoutState.custom : ({})
+  readonly property var workspaceRows: service ? service.layoutWorkspaces : []
+  readonly property var customRows: Model.customRows(layoutCustom)
+  property var layoutEditor: null
+  // The custom layout the next D deletes, and the save the editor waits for.
+  property string confirmDelete: ""
+  property string savingLayout: ""
+  property int editorPresetAt: 0
+  property bool largeEditor: false
+  property bool returningFromLarge: false
+  // A layout dropdown's list is open, and takes the keys.
+  property bool dropdownOpen: false
   // The browser extension, which audio control needs.
   readonly property string extensionState: service ? service.extensionState : "unknown"
   readonly property bool extensionMissing: extensionState === "off" || extensionState === "restart"
@@ -71,10 +87,14 @@ Panel {
   }
   // The swapKey setting, which the service binds in Hyprland.
   readonly property string swapKey: String(setting("swapKey", Model.DEFAULT_SWAP_KEY))
-  readonly property int cursorCount: view === "tiles" ? tiles.length : hiddenRows.length
+  readonly property int cursorCount: view === "tiles" ? tiles.length : view === "hidden" ? hiddenRows.length
+    : view === "layouts" && !layoutEditor ? workspaceRows.length + customRows.length : 0
   readonly property var selectedTile: view === "tiles" && cursor >= 0 && cursor < tiles.length ? tiles[cursor] : null
   readonly property var selectedHidden: view === "hidden" && cursor >= 0 && cursor < hiddenRows.length ? hiddenRows[cursor] : null
-  readonly property bool editing: urlField.activeFocus || sessionField.activeFocus
+  readonly property var selectedWorkspace: view === "layouts" && !layoutEditor && cursor >= 0 && cursor < workspaceRows.length ? workspaceRows[cursor] : null
+  readonly property var selectedCustom: view === "layouts" && !layoutEditor && cursor >= workspaceRows.length
+    && cursor < workspaceRows.length + customRows.length ? customRows[cursor - workspaceRows.length] : null
+  readonly property bool editing: urlField.activeFocus || sessionField.activeFocus || layoutNameField.activeFocus || dropdownOpen
 
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
@@ -84,10 +104,16 @@ Panel {
   onCursorCountChanged: cursor = Math.max(0, Math.min(cursor, cursorCount - 1))
   onOpenedChanged: {
     if (opened) {
-      status = ""
+      // Back from the large editor, the panel's editor carries on.
+      var back = returningFromLarge
+      returningFromLarge = false
+      if (!back) status = ""
       confirmRestart = false
       swapTile = null
-      view = "tiles"
+      if (!back) layoutEditor = null
+      confirmDelete = ""
+      view = back ? "layouts" : "tiles"
+      if (back && layoutEditor) layoutNameField.text = layoutEditor.def.name
       cursor = 0
       cursorActive = false
       refresh()
@@ -243,6 +269,8 @@ Panel {
   function setView(name) {
     if (view === name) return
     if (name !== "tiles") swapTile = null
+    layoutEditor = null
+    confirmDelete = ""
     view = name
     cursor = 0
     cursorActive = false
@@ -315,15 +343,163 @@ Panel {
   }
 
   // Gives a session the next layout in Model.LAYOUT_CHOICES.
+  // Gives the workspace a session is on the next layout in
+  // Model.layoutChoices.
   function cycleLayout(name) {
     runService(function(engine) {
-      var next = Model.nextLayout(engine.layoutOf(name))
-      return engine.setLayout(name, next, "Layout of " + name + ": " + Model.layoutLabel(next))
+      var next = Model.nextLayout(engine.sessionChoice(name), root.layoutCustom)
+      return engine.setSessionLayout(name, next, "Layout of " + name + ": " + Model.layoutLabel(next, root.layoutCustom))
     })
   }
 
   function layoutOf(name) {
-    return service ? service.layoutOf(name) : "default"
+    return service ? service.sessionChoice(name) : "default"
+  }
+
+  function setWorkspaceLayout(row, choice) {
+    if (!row) return
+    runService(function(engine) {
+      return engine.setWorkspaceLayout(row.id, choice, "Workspace " + row.id + ": " + Model.layoutLabel(choice, root.layoutCustom))
+    })
+  }
+
+  function cycleWorkspaceLayout(row) {
+    if (row) setWorkspaceLayout(row, Model.nextLayout(row.choice, layoutCustom))
+  }
+
+  // The layout editor: { oldSlug ("" for a new one), def, zone (0-based,
+  // visual order) }.
+  function newLayout() {
+    editorPresetAt = 0
+    openEditor("", Model.newCustom(Model.freeLayoutName(layoutCustom), "columns"), 1)
+  }
+
+  function editLayout(row) {
+    if (row) openEditor(row.slug, JSON.parse(JSON.stringify(row.def)), row.def.main - 1)
+  }
+
+  function openEditor(oldSlug, def, zone) {
+    setView("layouts")
+    confirmDelete = ""
+    status = ""
+    layoutEditor = { oldSlug: oldSlug, def: def, zone: zone }
+    layoutNameField.text = def.name
+  }
+
+  function editorChange(def, zone) {
+    if (!layoutEditor) return
+    var count = Model.zoneCount(def)
+    var at = zone === undefined ? layoutEditor.zone : zone
+    layoutEditor = { oldSlug: layoutEditor.oldSlug, def: def, zone: Math.max(0, Math.min(count - 1, at)) }
+  }
+
+  function editorName(text) {
+    if (layoutEditor && text !== layoutEditor.def.name) editorChange(Model.withName(layoutEditor.def, text))
+  }
+
+  // The large editor: the same editor over the focused monitor, at its
+  // shape, for layouts with small zones. The panel closes meanwhile.
+  function openLargeEditor() {
+    if (!layoutEditor) return
+    largeEditor = true
+    close()
+    largeNameField.text = layoutEditor.def.name
+    Qt.callLater(function() { largeKeys.forceActiveFocus() })
+  }
+
+  // Back to the panel's editor, with the changes so far.
+  function closeLargeEditor() {
+    largeEditor = false
+    returningFromLarge = layoutEditor !== null
+    open()
+  }
+
+  // −/+: grows or shrinks the selected zone within its split.
+  function editorSize(delta) {
+    editorChange(Model.withZoneSize(layoutEditor.def, layoutEditor.zone, delta * Model.SIZE_STEP))
+  }
+
+  // Splits a zone: "row" puts a new zone beside it, "column" below it. The
+  // new zone is selected.
+  function editorSplit(zone, direction) {
+    var def = Model.withSplit(layoutEditor.def, zone, direction)
+    if (def === layoutEditor.def) return showStatus("That zone is too small to split, or the layout is full", true)
+    status = ""
+    editorChange(def, zone + 1)
+  }
+
+  function editorRemove(zone) {
+    if (Model.zoneCount(layoutEditor.def) <= 1) return showStatus("A layout needs at least one zone", true)
+    editorChange(Model.withoutZone(layoutEditor.def, zone), Math.max(0, zone - 1))
+  }
+
+  function editorMain(zone) {
+    editorChange(Model.withMain(layoutEditor.def, zone), zone)
+  }
+
+  // Starts over from a preset (Model.PRESETS); T cycles them.
+  function editorPreset(preset) {
+    editorPresetAt = Model.PRESETS.indexOf(preset)
+    editorChange(Model.withPreset(layoutEditor.def, preset), 0)
+  }
+
+  function editorNextPreset() {
+    editorPreset(Model.PRESETS[(editorPresetAt + 1) % Model.PRESETS.length])
+  }
+
+  // Moves a line between zones (see Model.zoneDividers) to `position`, a
+  // fraction of the preview along the line's split.
+  function editorDivider(line, position) {
+    editorChange(Model.withDivider(layoutEditor.def, line.path, line.index, position, line.from, line.span))
+  }
+
+  function saveLayout() {
+    if (!layoutEditor) return
+    var def = Model.withName(layoutEditor.def, layoutEditor.def.name.trim())
+    if (!Model.normalizeCustom(def)) {
+      showStatus("Give the layout a name", true)
+      return
+    }
+    var label = "Saving layout " + def.name
+    savingLayout = label
+    var editor = layoutEditor
+    runService(function(engine) { return engine.saveCustomLayout(editor.oldSlug, def, label) })
+  }
+
+  function deleteLayout(row) {
+    if (!row) return
+    if (confirmDelete !== row.slug) {
+      confirmDelete = row.slug
+      showStatus("Press D again to delete " + row.def.name + ". Workspaces using it get their own layout back.", false)
+      return
+    }
+    confirmDelete = ""
+    runService(function(engine) { return engine.deleteCustomLayout(row.slug, "Deleting layout " + row.def.name) })
+  }
+
+  // Keys on the Layouts tab; true when handled.
+  function layoutKey(t) {
+    var key = t.toLowerCase()
+    if (layoutEditor) {
+      var zone = layoutEditor.zone
+      if (t === "-") editorSize(-1)
+      else if (t === "+" || t === "=") editorSize(1)
+      else if (key === "s") editorSplit(zone, "row")
+      else if (key === "b") editorSplit(zone, "column")
+      else if (key === "m") editorMain(zone)
+      else if (key === "t") editorNextPreset()
+      else if (key === "n") (largeEditor ? largeNameField : layoutNameField).forceActiveFocus()
+      else if (key === "f" && !largeEditor) openLargeEditor()
+      else return false
+      return true
+    }
+    if (key === "n") newLayout()
+    else if (key === "e" && cursorActive) editLayout(selectedCustom)
+    else if (key === "d" && cursorActive) deleteLayout(selectedCustom)
+    else if (key === "g" && cursorActive) cycleWorkspaceLayout(selectedWorkspace)
+    else if (t === "0" && cursorActive) setWorkspaceLayout(selectedWorkspace, "default")
+    else return false
+    return true
   }
 
   function moveCursor(delta) {
@@ -392,6 +568,15 @@ Panel {
     target: root.service
     function onActionFinished(label, error, message) {
       if (error) root.showStatus(error, true)
+      // A saved layout closes the editor; a failed save keeps it open.
+      if (label === root.savingLayout) {
+        root.savingLayout = ""
+        if (!error) {
+          root.layoutEditor = null
+          root.largeEditor = false
+          root.showStatus(message, false)
+        }
+      }
     }
   }
 
@@ -424,21 +609,35 @@ Panel {
       anchors.fill: parent
       blocked: root.editing
       onMoveRequested: function(dx, dy) {
-        if (dx !== 0) root.stepView(dx < 0 ? -1 : 1)
+        // In the layout editor, ←/→ pick a zone and ↑/↓ add or remove one.
+        if (root.layoutEditor) root.editorChange(root.layoutEditor.def, root.layoutEditor.zone + (dx + dy < 0 ? -1 : 1))
+        else if (dx !== 0) root.stepView(dx < 0 ? -1 : 1)
         else root.moveCursor(dy)
       }
       onActivateRequested: {
+        if (root.layoutEditor) return root.saveLayout()
         if (!root.cursorActive) return
         if (root.view === "hidden") root.showHidden(root.selectedHidden)
+        else if (root.view === "layouts") {
+          if (root.selectedWorkspace) root.cycleWorkspaceLayout(root.selectedWorkspace)
+          else root.editLayout(root.selectedCustom)
+        }
         else root.focusTile(root.selectedTile)
       }
-      onDeleteRequested: if (root.cursorActive) root.removeTile(root.selectedTile)
+      onDeleteRequested: {
+        if (root.layoutEditor) return root.editorRemove(root.layoutEditor.zone)
+        if (!root.cursorActive) return
+        if (root.view === "layouts") root.deleteLayout(root.selectedCustom)
+        else if (root.view === "tiles") root.removeTile(root.selectedTile)
+      }
       onCloseRequested: {
-        if (root.swapTile) root.swapTile = null
+        if (root.layoutEditor) root.layoutEditor = null
+        else if (root.swapTile) root.swapTile = null
         else root.close()
       }
       onTabRequested: function(direction) { root.switchPanel(direction) }
       onTextKey: function(t) {
+        if (root.view === "layouts" && root.layoutKey(t)) return
         if (t === "a" || t === "A") root.startAdding()
         else if (t === "d" && root.cursorActive) root.removeTile(root.selectedTile)
         else if (t === "D" && root.cursorActive && root.selectedTile) root.closeSession(root.selectedTile.session)
@@ -502,6 +701,7 @@ Panel {
             options: [
               { value: "tiles", label: "Tiles", tooltip: "H/L or ←/→" },
               { value: "hidden", label: "Hidden" + (root.hiddenRows.length > 0 ? "  ·  " + root.hiddenRows.length : ""), tooltip: "Hidden web apps · H/L or ←/→" },
+              { value: "layouts", label: "Layouts", tooltip: "Workspace layouts and your own · H/L or ←/→" },
               { value: "extension", label: "Extension" + (root.extensionMissing || (root.service !== null && root.service.extensionOutdated) ? "  ·  !" : ""), tooltip: "The browser extension that audio control needs · H/L or ←/→" }
             ]
             onChanged: function(value) { root.setView(value) }
@@ -604,15 +804,15 @@ Panel {
                   width: parent.width
                   PanelSectionHeader {
                     text: sessionColumn.modelData.name.toUpperCase() + "  ·  " + sessionColumn.modelData.tiles.length
-                      + "  ·  " + Model.layoutLabel(root.layoutOf(sessionColumn.modelData.name)).toUpperCase()
+                      + "  ·  " + Model.layoutLabel(root.layoutOf(sessionColumn.modelData.name), root.layoutCustom).toUpperCase()
                     foreground: root.foreground
                     fontFamily: root.fontFamily
                     Layout.fillWidth: true
                   }
                   PanelActionButton {
                     iconText: "󰕰"
-                    tooltipText: "Layout: " + Model.layoutLabel(root.layoutOf(sessionColumn.modelData.name))
-                      + ". Click for " + Model.layoutLabel(Model.nextLayout(root.layoutOf(sessionColumn.modelData.name))) + " · G"
+                    tooltipText: "Layout of this session's workspace: " + Model.layoutLabel(root.layoutOf(sessionColumn.modelData.name), root.layoutCustom)
+                      + ". Click for " + Model.layoutLabel(Model.nextLayout(root.layoutOf(sessionColumn.modelData.name), root.layoutCustom), root.layoutCustom) + " · G"
                     foreground: root.foreground
                     onClicked: root.cycleLayout(sessionColumn.modelData.name)
                   }
@@ -744,6 +944,154 @@ Panel {
           }
 
           Column {
+            visible: root.view === "layouts" && root.layoutEditor === null
+            width: parent.width
+            spacing: Style.space(6)
+
+            Notice {
+              visible: root.service !== null && root.service.layoutError !== ""
+              text: root.service ? "Layouts: " + root.service.layoutError : ""
+              warning: true
+            }
+
+            PanelSectionHeader {
+              text: "WORKSPACES"
+              foreground: root.foreground
+              fontFamily: root.fontFamily
+            }
+
+            Repeater {
+              model: root.workspaceRows
+              WorkspaceRow {
+                required property var modelData
+                required property int index
+                width: parent.width
+                entry: modelData
+                position: index
+              }
+            }
+
+            PanelSectionHeader {
+              text: "YOUR LAYOUTS  ·  " + root.customRows.length
+              foreground: root.foreground
+              fontFamily: root.fontFamily
+            }
+
+            Text {
+              visible: root.customRows.length === 0
+              width: parent.width
+              text: "Design your own: columns, rows, or a grid, with the zone sizes you want and a main zone that the first window takes. Then pick it for a workspace above."
+              color: root.dim
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+              wrapMode: Text.WordWrap
+            }
+
+            Repeater {
+              model: root.customRows
+              CustomLayoutRow {
+                required property var modelData
+                required property int index
+                width: parent.width
+                entry: modelData
+                position: root.workspaceRows.length + index
+              }
+            }
+
+            Button {
+              width: parent.width
+              text: "New layout  N"
+              iconText: "󰐕"
+              foreground: root.foreground
+              onClicked: root.newLayout()
+            }
+          }
+
+          Column {
+            visible: root.view === "layouts" && root.layoutEditor !== null
+            width: parent.width
+            spacing: Style.space(8)
+
+            PanelSectionHeader {
+              text: root.layoutEditor && root.layoutEditor.oldSlug !== "" ? "EDIT LAYOUT" : "NEW LAYOUT"
+              foreground: root.foreground
+              fontFamily: root.fontFamily
+            }
+
+            TextField {
+              id: layoutNameField
+              width: parent.width
+              placeholderText: "Layout name"
+              foreground: root.foreground
+              font.family: root.fontFamily
+              onTextChanged: root.editorName(text)
+              onAccepted: keyCatcher.forceActiveFocus()
+              Keys.onEscapePressed: keyCatcher.forceActiveFocus()
+            }
+
+            ButtonGroup {
+              focusable: false
+              foreground: root.foreground
+              fontFamily: root.fontFamily
+              fontSize: Style.font.caption
+              // Presets start over; none stays selected.
+              value: ""
+              options: Model.PRESETS.map(function(preset) {
+                return { value: preset, label: Model.PRESET_LABELS[preset], tooltip: "Start over from " + Model.PRESET_LABELS[preset] + " · T" }
+              })
+              onChanged: function(value) { root.editorPreset(value) }
+            }
+
+            ZonePreview {
+              width: parent.width
+              height: Math.round(width * 9 / 16)
+              def: root.layoutEditor ? root.layoutEditor.def : null
+              selected: root.layoutEditor ? root.layoutEditor.zone : -1
+              editable: true
+            }
+
+            EditorToolbar {
+              width: parent.width
+            }
+
+            Text {
+              width: parent.width
+              text: "Drag the lines between zones to resize them. Click a zone to select it; the buttons on it, or here, split it beside or below, make it the main zone, or remove it."
+              color: root.dim
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+              wrapMode: Text.WordWrap
+            }
+
+            RowLayout {
+              width: parent.width
+              spacing: Style.space(6)
+              Button {
+                Layout.fillWidth: true
+                text: "Save"
+                iconText: "󰆓"
+                foreground: root.foreground
+                enabled: root.activity === ""
+                onClicked: root.saveLayout()
+              }
+              Button {
+                Layout.fillWidth: true
+                text: "Large"
+                iconText: "󰊓"
+                foreground: root.foreground
+                onClicked: root.openLargeEditor()
+              }
+              Button {
+                Layout.fillWidth: true
+                text: "Cancel"
+                iconText: "󰅖"
+                foreground: root.foreground
+                onClicked: root.layoutEditor = null
+              }
+            }
+          }
+
+          Column {
             visible: root.view === "extension"
             width: parent.width
             spacing: Style.space(6)
@@ -858,6 +1206,10 @@ Panel {
                 : root.extensionState === "connected" ? "V verify  ·  H/L tabs" : "E enable  ·  V verify  ·  H/L tabs")
               : root.view === "hidden"
               ? "↑↓ select  ·  Enter show again  ·  H/L tabs  ·  R refresh"
+              : root.view === "layouts"
+              ? (root.layoutEditor
+                ? "←→ zone  ·  −/+ size  ·  S split beside  ·  B below  ·  X remove  ·  M main  ·  T preset  ·  N name  ·  F large  ·  Enter save  ·  Esc cancel"
+                : "↑↓ select  ·  Enter or G next layout  ·  0 Hyprland's  ·  N new  ·  E edit  ·  D delete  ·  H/L tabs")
               : root.swapTile
                 ? "1–9 or A pick the replacement  ·  Esc cancel"
                 : "↑↓ select  ·  Enter focus  ·  S swap  ·  G layout  ·  M mute  ·  −/+ volume  ·  F focused only  ·  X remove  ·  ⇧D close session  ·  H/L tabs  ·  R refresh"
@@ -1010,6 +1362,525 @@ Panel {
     PanelToolTip {
       visible: webappMouse.containsMouse
       text: webappButton.app ? webappButton.app.url + "  ·  right-click to hide" : ""
+    }
+  }
+
+  // A workspace on the Layouts tab: pick its layout from the dropdown, or
+  // Enter for the next one.
+  component WorkspaceRow: CursorSurface {
+    id: workspaceRow
+    property var entry: null
+    property int position: 0
+    hasCursor: root.cursorActive && root.view === "layouts" && root.cursor === position
+    foreground: root.foreground
+    implicitHeight: Math.max(workspaceContent.implicitHeight, Style.spacing.controlHeight) + Style.spacing.rowPaddingX
+
+    MouseArea {
+      anchors.fill: parent
+      hoverEnabled: true
+      onContainsMouseChanged: if (containsMouse) { root.cursorActive = true; root.cursor = workspaceRow.position }
+    }
+
+    RowLayout {
+      anchors.left: parent.left
+      anchors.right: parent.right
+      anchors.verticalCenter: parent.verticalCenter
+      anchors.leftMargin: Style.space(10)
+      anchors.rightMargin: Style.space(6)
+      spacing: Style.space(8)
+
+      ColumnLayout {
+        id: workspaceContent
+        Layout.fillWidth: true
+        spacing: Style.space(1)
+        Text {
+          Layout.fillWidth: true
+          text: workspaceRow.entry ? "Workspace " + workspaceRow.entry.id : ""
+          color: root.foreground
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.body
+          elide: Text.ElideRight
+        }
+        Text {
+          Layout.fillWidth: true
+          text: !workspaceRow.entry ? "" : workspaceRow.entry.monitor !== "" ? workspaceRow.entry.monitor : "Not open"
+          color: root.dim
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
+          elide: Text.ElideRight
+        }
+      }
+
+      Dropdown {
+        Layout.preferredWidth: Style.space(150)
+        showLabel: false
+        foreground: root.foreground
+        fontFamily: root.fontFamily
+        value: workspaceRow.entry ? workspaceRow.entry.choice : "default"
+        options: Model.layoutChoices(root.layoutCustom).map(function(choice) {
+          return { value: choice, label: Model.layoutLabel(choice, root.layoutCustom) }
+        })
+        onChanged: function(choice) {
+          if (workspaceRow.entry && choice !== workspaceRow.entry.choice) root.setWorkspaceLayout(workspaceRow.entry, choice)
+        }
+        onPopupOpenChanged: root.dropdownOpen = popupOpen
+      }
+    }
+  }
+
+  // A custom layout on the Layouts tab, with a small preview.
+  component CustomLayoutRow: CursorSurface {
+    id: customRow
+    property var entry: null
+    property int position: 0
+    hasCursor: root.cursorActive && root.view === "layouts" && root.cursor === position
+    foreground: root.foreground
+    implicitHeight: Math.max(customContent.implicitHeight, Style.space(27)) + Style.spacing.rowPaddingX
+
+    MouseArea {
+      anchors.fill: parent
+      hoverEnabled: true
+      onContainsMouseChanged: if (containsMouse) { root.cursorActive = true; root.cursor = customRow.position }
+      onClicked: root.editLayout(customRow.entry)
+    }
+
+    RowLayout {
+      anchors.left: parent.left
+      anchors.right: parent.right
+      anchors.verticalCenter: parent.verticalCenter
+      anchors.leftMargin: Style.space(10)
+      anchors.rightMargin: Style.space(6)
+      spacing: Style.space(10)
+
+      ZonePreview {
+        Layout.preferredWidth: Style.space(48)
+        Layout.preferredHeight: Style.space(27)
+        def: customRow.entry ? customRow.entry.def : null
+        compact: true
+      }
+
+      ColumnLayout {
+        id: customContent
+        Layout.fillWidth: true
+        spacing: Style.space(1)
+        Text {
+          Layout.fillWidth: true
+          textFormat: Text.PlainText
+          text: customRow.entry ? customRow.entry.def.name : ""
+          color: root.foreground
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.body
+          elide: Text.ElideRight
+        }
+        Text {
+          Layout.fillWidth: true
+          text: customRow.entry ? Model.customSummary(customRow.entry.def) : ""
+          color: root.dim
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
+          elide: Text.ElideRight
+        }
+      }
+
+      PanelActionButton {
+        iconText: "󰏫"
+        tooltipText: "Edit · E or Enter"
+        foreground: root.foreground
+        onClicked: root.editLayout(customRow.entry)
+      }
+      PanelActionButton {
+        iconText: "󰆴"
+        tooltipText: root.confirmDelete === (customRow.entry ? customRow.entry.slug : "") ? "Click again to delete" : "Delete · D"
+        foreground: root.foreground
+        hoverColor: root.urgent
+        onClicked: root.deleteLayout(customRow.entry)
+      }
+    }
+  }
+
+  // A custom layout's zones, numbered in the order windows fill them. The
+  // editor's (`editable`) marks the selected zone, takes clicks, shows
+  // split, main, and remove buttons on the zone under the pointer, and
+  // lets the lines between zones be dragged. Repeaters count zones and
+  // lines instead of taking the arrays, so a drag that changes sizes
+  // keeps the handle being dragged.
+  component ZonePreview: Item {
+    id: preview
+    property var def: null
+    property int selected: -1
+    property bool compact: false
+    property bool editable: false
+    property real toolSize: Style.space(22)
+    property int hovered: -1
+    readonly property var zones: def ? Model.visualZones(def) : []
+    readonly property var lines: def && editable ? Model.zoneDividers(def) : []
+    readonly property real gap: compact ? 1 : Style.space(3)
+
+    Repeater {
+      model: preview.zones.length
+      Rectangle {
+        id: zoneBox
+        required property int index
+        readonly property var zone: preview.zones[index] || ({ x: 0, y: 0, w: 0, h: 0, fill: 0, main: false })
+        readonly property bool active: preview.editable && (index === preview.hovered || index === preview.selected)
+        x: zone.x * preview.width + preview.gap / 2
+        y: zone.y * preview.height + preview.gap / 2
+        width: Math.max(0, zone.w * preview.width - preview.gap)
+        height: Math.max(0, zone.h * preview.height - preview.gap)
+        radius: preview.compact ? 1 : Style.cornerRadius
+        color: zone.main ? Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, preview.compact ? 0.55 : 0.28) : Style.hoverFillFor(root.foreground, Color.accent)
+        border.width: index === preview.selected ? 2 : preview.compact ? 0 : 1
+        border.color: index === preview.selected ? Color.accent : Qt.darker(root.foreground, 2.2)
+
+        // Hover counts over the zone's buttons too.
+        HoverHandler {
+          enabled: preview.editable
+          onHoveredChanged: {
+            if (hovered) preview.hovered = zoneBox.index
+            else if (preview.hovered === zoneBox.index) preview.hovered = -1
+          }
+        }
+        MouseArea {
+          anchors.fill: parent
+          enabled: preview.editable
+          onClicked: root.editorChange(root.layoutEditor.def, zoneBox.index)
+        }
+
+        Text {
+          visible: !preview.compact && !(zoneBox.active && zoneTools.fits)
+          anchors.centerIn: parent
+          text: zoneBox.zone.main ? zoneBox.zone.fill + "  ★" : String(zoneBox.zone.fill)
+          color: root.foreground
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
+        }
+
+        // Split beside, split below, main, remove: in a row, or two by two
+        // on a narrow zone. Too small for either, the toolbar under the
+        // preview does the same for the selected zone.
+        Grid {
+          id: zoneTools
+          readonly property real tool: preview.toolSize
+          readonly property real room: Style.space(6)
+          readonly property bool wide: zoneBox.width >= tool * 4 + spacing * 3 + room && zoneBox.height >= tool + room
+          readonly property bool fits: wide || (zoneBox.width >= tool * 2 + spacing + room && zoneBox.height >= tool * 2 + spacing + room)
+          visible: zoneBox.active && fits
+          anchors.centerIn: parent
+          columns: wide ? 4 : 2
+          spacing: Style.space(2)
+          ZoneTool {
+            size: preview.toolSize
+            kind: "beside"
+            tip: "Split: a new zone beside this one · S"
+            onClicked: root.editorSplit(zoneBox.index, "row")
+          }
+          ZoneTool {
+            size: preview.toolSize
+            kind: "below"
+            tip: "Split: a new zone below this one · B"
+            onClicked: root.editorSplit(zoneBox.index, "column")
+          }
+          ZoneTool {
+            size: preview.toolSize
+            kind: "main"
+            tip: "Main zone: the first window goes here · M"
+            on: zoneBox.zone.main
+            onClicked: root.editorMain(zoneBox.index)
+          }
+          ZoneTool {
+            size: preview.toolSize
+            kind: "remove"
+            tip: "Remove this zone · X"
+            onClicked: root.editorRemove(zoneBox.index)
+          }
+        }
+      }
+    }
+
+    // The lines between zones: drag to resize.
+    Repeater {
+      model: preview.lines.length
+      Item {
+        id: handle
+        required property int index
+        readonly property var line: preview.lines[index] || ({ vertical: true, x: 0, y: 0, length: 0, from: 0, span: 1 })
+        readonly property real thickness: Style.space(10)
+        x: line.vertical ? line.x * preview.width - thickness / 2 : line.x * preview.width
+        y: line.vertical ? line.y * preview.height : line.y * preview.height - thickness / 2
+        width: line.vertical ? thickness : line.length * preview.width
+        height: line.vertical ? line.length * preview.height : thickness
+        z: 2
+
+        Rectangle {
+          anchors.centerIn: parent
+          width: handle.line.vertical ? Style.space(3) : parent.width - Style.space(8)
+          height: handle.line.vertical ? parent.height - Style.space(8) : Style.space(3)
+          radius: Style.space(2)
+          color: Color.accent
+          visible: dragArea.containsMouse || dragArea.pressed
+        }
+
+        MouseArea {
+          id: dragArea
+          anchors.fill: parent
+          hoverEnabled: true
+          preventStealing: true
+          cursorShape: handle.line.vertical ? Qt.SplitHCursor : Qt.SplitVCursor
+          onPositionChanged: function(mouse) {
+            if (!pressed) return
+            var point = mapToItem(preview, mouse.x, mouse.y)
+            root.editorDivider(handle.line, handle.line.vertical ? point.x / preview.width : point.y / preview.height)
+          }
+        }
+      }
+    }
+  }
+
+  // The selected zone and its buttons, under the editor's preview, for
+  // zones too small to hold them.
+  component EditorToolbar: RowLayout {
+    spacing: Style.space(2)
+    Text {
+      Layout.fillWidth: true
+      text: {
+        var editor = root.layoutEditor
+        if (!editor) return ""
+        var zone = Model.visualZones(editor.def)[editor.zone]
+        return "Zone " + (editor.zone + 1) + "  ·  " + Model.zonePercent(zone) + "%  ·  "
+          + (zone.main ? "main" : "filled " + Model.ordinal(zone.fill))
+      }
+      color: root.foreground
+      font.family: root.fontFamily
+      font.pixelSize: Style.font.caption
+      elide: Text.ElideRight
+    }
+    ZoneTool {
+      kind: "smaller"
+      tip: "Make this zone smaller · −"
+      onClicked: root.editorSize(-1)
+    }
+    ZoneTool {
+      kind: "bigger"
+      tip: "Make this zone bigger · +"
+      onClicked: root.editorSize(1)
+    }
+    ZoneTool {
+      kind: "beside"
+      tip: "Split: a new zone beside this one · S"
+      onClicked: root.editorSplit(root.layoutEditor.zone, "row")
+    }
+    ZoneTool {
+      kind: "below"
+      tip: "Split: a new zone below this one · B"
+      onClicked: root.editorSplit(root.layoutEditor.zone, "column")
+    }
+    ZoneTool {
+      kind: "main"
+      tip: "Main zone: the first window goes here · M"
+      on: root.layoutEditor !== null && root.layoutEditor.def.main === root.layoutEditor.zone + 1
+      onClicked: root.editorMain(root.layoutEditor.zone)
+    }
+    ZoneTool {
+      kind: "remove"
+      tip: "Remove this zone · X"
+      onClicked: root.editorRemove(root.layoutEditor.zone)
+    }
+  }
+
+  // The large editor, over the focused monitor, drawn at its shape.
+  PanelWindow {
+    id: largeWindow
+    visible: root.largeEditor && root.layoutEditor !== null
+    screen: {
+      var name = Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : ""
+      var screens = Quickshell.screens
+      for (var i = 0; i < screens.length; i++) if (screens[i].name === name) return screens[i]
+      return screens.length > 0 ? screens[0] : null
+    }
+    anchors { top: true; bottom: true; left: true; right: true }
+    color: "transparent"
+    WlrLayershell.namespace: "pym-mosaic-layout-editor"
+    WlrLayershell.layer: WlrLayer.Overlay
+    WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
+    exclusionMode: ExclusionMode.Ignore
+
+    Rectangle {
+      anchors.fill: parent
+      color: Color.menu.scrim
+    }
+
+    BorderSurface {
+      id: largeCard
+      anchors.fill: parent
+      anchors.margins: Style.space(40)
+      radius: Style.cornerRadius
+      // Opaque: the windows behind would show through a translucent theme.
+      color: Qt.rgba(Color.menu.background.r, Color.menu.background.g, Color.menu.background.b, 1)
+      borderSpec: Border.surfaceSpec("menu", "border", Color.menu.border, Math.max(1, Style.space(2)))
+      padding: Style.spacing.panelPadding
+
+      Item {
+        id: largeKeys
+        anchors.fill: parent
+        focus: true
+
+        Keys.onPressed: function(event) {
+          var editor = root.layoutEditor
+          if (!editor) return
+          event.accepted = true
+          if (event.key === Qt.Key_Escape) root.closeLargeEditor()
+          else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) root.saveLayout()
+          else if (event.key === Qt.Key_Left || event.key === Qt.Key_Up || event.text === "h" || event.text === "k")
+            root.editorChange(editor.def, editor.zone - 1)
+          else if (event.key === Qt.Key_Right || event.key === Qt.Key_Down || event.text === "l" || event.text === "j")
+            root.editorChange(editor.def, editor.zone + 1)
+          else if (event.key === Qt.Key_Delete || event.text === "x" || event.text === "X") root.editorRemove(editor.zone)
+          else if (event.text === "" || !root.layoutKey(event.text)) event.accepted = false
+        }
+
+        ColumnLayout {
+          anchors.fill: parent
+          anchors.topMargin: largeCard.contentTopInset
+          anchors.bottomMargin: largeCard.contentBottomInset
+          anchors.leftMargin: largeCard.contentLeftInset
+          anchors.rightMargin: largeCard.contentRightInset
+          spacing: Style.spacing.md
+
+          RowLayout {
+            Layout.fillWidth: true
+            spacing: Style.space(8)
+            TextField {
+              id: largeNameField
+              Layout.preferredWidth: Style.space(260)
+              placeholderText: "Layout name"
+              foreground: root.foreground
+              font.family: root.fontFamily
+              onTextChanged: root.editorName(text)
+              onAccepted: largeKeys.forceActiveFocus()
+              Keys.onEscapePressed: largeKeys.forceActiveFocus()
+            }
+            ButtonGroup {
+              focusable: false
+              foreground: root.foreground
+              fontFamily: root.fontFamily
+              fontSize: Style.font.caption
+              value: ""
+              options: Model.PRESETS.map(function(preset) {
+                return { value: preset, label: Model.PRESET_LABELS[preset], tooltip: "Start over from " + Model.PRESET_LABELS[preset] + " · T" }
+              })
+              onChanged: function(value) { root.editorPreset(value) }
+            }
+            Item { Layout.fillWidth: true }
+            Button {
+              text: "Save"
+              iconText: "󰆓"
+              foreground: root.foreground
+              enabled: root.activity === ""
+              onClicked: root.saveLayout()
+            }
+            Button {
+              text: "Back"
+              iconText: "󰁍"
+              foreground: root.foreground
+              onClicked: root.closeLargeEditor()
+            }
+          }
+
+          // The preview at the monitor's shape, as large as fits.
+          Item {
+            id: largeArea
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            readonly property real aspect: largeWindow.screen && largeWindow.screen.height > 0 ? largeWindow.screen.width / largeWindow.screen.height : 16 / 9
+            ZonePreview {
+              width: Math.min(largeArea.width, largeArea.height * largeArea.aspect)
+              height: width / largeArea.aspect
+              anchors.centerIn: parent
+              def: root.layoutEditor ? root.layoutEditor.def : null
+              selected: root.layoutEditor ? root.layoutEditor.zone : -1
+              editable: true
+              toolSize: Style.space(40)
+            }
+          }
+
+          EditorToolbar {
+            Layout.fillWidth: true
+          }
+
+          Text {
+            Layout.fillWidth: true
+            visible: root.status !== ""
+            text: root.status
+            color: root.statusIsError ? root.urgent : root.foreground
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+            wrapMode: Text.WordWrap
+          }
+
+          Text {
+            Layout.fillWidth: true
+            text: "Drag the lines between zones to resize  ·  ←→ zone  ·  −/+ size  ·  S split beside  ·  B below  ·  X remove  ·  M main  ·  T preset  ·  N name  ·  Enter save  ·  Esc back to the panel"
+            color: root.dim
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+            horizontalAlignment: Text.AlignHCenter
+            wrapMode: Text.WordWrap
+          }
+        }
+      }
+    }
+  }
+
+  // A small button on a zone in the layout editor. The split icons are
+  // drawn, so they don't depend on the font.
+  component ZoneTool: Rectangle {
+    id: tool
+    property real size: Style.space(22)
+    property string kind: ""
+    property string tip: ""
+    property bool on: false
+    signal clicked()
+    width: size
+    height: size
+    radius: Style.cornerRadius
+    color: toolMouse.containsMouse ? Style.hoverFillFor(kind === "remove" ? root.urgent : root.foreground, Color.accent)
+      : Color.popups.background
+    border.width: 1
+    border.color: Qt.darker(root.foreground, 1.8)
+
+    // A zone outline with its split line.
+    Rectangle {
+      visible: tool.kind === "beside" || tool.kind === "below"
+      anchors.centerIn: parent
+      width: tool.size * 0.55
+      height: tool.size * 0.45
+      color: "transparent"
+      border.width: 1
+      border.color: root.foreground
+      Rectangle {
+        anchors.centerIn: parent
+        width: tool.kind === "beside" ? 1 : parent.width
+        height: tool.kind === "beside" ? parent.height : 1
+        color: root.foreground
+      }
+    }
+    Text {
+      visible: tool.kind !== "beside" && tool.kind !== "below"
+      anchors.centerIn: parent
+      text: tool.kind === "main" ? (tool.on ? "★" : "☆") : tool.kind === "remove" ? "×" : tool.kind === "smaller" ? "−" : "+"
+      color: tool.kind === "main" && tool.on ? Color.accent : root.foreground
+      font.family: root.fontFamily
+      font.pixelSize: Math.max(Style.font.body, tool.size * 0.55)
+    }
+    MouseArea {
+      id: toolMouse
+      anchors.fill: parent
+      hoverEnabled: true
+      onClicked: tool.clicked()
+    }
+    PanelToolTip {
+      visible: toolMouse.containsMouse
+      text: tool.tip
     }
   }
 

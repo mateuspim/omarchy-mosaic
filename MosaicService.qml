@@ -74,15 +74,26 @@ Scope {
   // Enabled monitors (Model.parseMonitors), refreshed with the list.
   property var monitors: []
 
-  // Layouts (layouts.lua), chosen per session and saved in layouts.json
-  // ({ SESSION: { layout, before } }). Hyprland sets them per workspace,
-  // and forgets them on a config reload, so `appliedLayouts` ({ SESSION:
-  // workspace }) says where each one is in place now; syncLayouts applies
-  // the rest. `layoutError` is why the last attempt failed.
-  property var layouts: ({})
-  property var appliedLayouts: ({})
+  // Layouts (layouts.lua), set per workspace and saved in layouts.json
+  // (Model.parseLayouts: { workspaces, custom, legacy }). Hyprland forgets
+  // runtime layouts and rules on a config reload, so `layoutsApplied` says
+  // whether the saved ones are in place; syncLayouts applies them.
+  // `layoutError` is why the last attempt failed.
+  property var layoutState: ({ workspaces: {}, custom: {}, legacy: {} })
+  property bool layoutsRead: false
+  property bool layoutsApplied: false
+  // The Layouts tab's workspaces (Model.layoutWorkspaceRows).
+  readonly property var layoutWorkspaces: {
+    var values = Hyprland.workspaces.values
+    var workspaces = []
+    for (var i = 0; i < values.length; i++)
+      workspaces.push({ id: values[i].id, monitor: values[i].monitor ? values[i].monitor.name : "" })
+    return Model.layoutWorkspaceRows(workspaces, layoutState)
+  }
   property string layoutError: ""
   property bool layoutSyncPending: false
+  // The file's text as last read or written.
+  property string layoutsText: ""
   // Tile states from just before a config reload ({ ADDRESS: state }). A
   // reload may reset contained tiles' records, so the next sync puts these
   // back instead of what the list reads by then.
@@ -205,24 +216,59 @@ Scope {
     return startAction(label || "Containing fullscreen", function(list) { return Model.planContain(list, session) })
   }
 
-  // `mosaic layout SESSION NAME`: gives the session's workspace a layout
-  // (Model.LAYOUT_CHOICES; "default" hands it back), and saves the choice.
-  function setLayout(session, name, label) {
-    return startAction(label || "Setting the layout of " + session, function(list) {
-      var workspace = Model.sessionWorkspace(list, session)
-      var result = Model.planLayout(list, root.layouts, session, name, root.workspaceLayout(workspace), root.layoutsLua)
-      if (result.error) return result
-      var applied = Object.assign({}, root.appliedLayouts)
-      if (result.layouts[session]) applied[session] = workspace
-      else delete applied[session]
-      root.pendingLayouts = { layouts: result.layouts, applied: applied }
-      return { error: "", expressions: result.expressions, message: result.message }
+  // `mosaic layout --workspace N NAME`: gives a workspace a layout (a
+  // Model.layoutChoices entry, or a custom layout's name; "default" hands
+  // it back), and saves the choice.
+  function setWorkspaceLayout(workspace, name, label) {
+    return startAction(label || "Setting the layout of workspace " + workspace, function(list) {
+      return root.layoutPlan(Model.planWorkspaceLayout(list, root.layoutState, workspace, name,
+        root.workspaceLayout(Number(workspace)), root.layoutsLua), false)
     })
   }
 
-  // The choice saved for a session: a Model.LAYOUTS name, or "default".
-  function layoutOf(session) {
-    return layouts[session] ? layouts[session].layout : "default"
+  // `mosaic layout --session NAME NAME`: the layout of the workspace the
+  // session's tiles are on.
+  function setSessionLayout(session, name, label) {
+    return startAction(label || "Setting the layout of " + session, function(list) {
+      var workspace = Model.sessionWorkspace(list, session)
+      if (workspace === null) return { error: "Session " + session + " has no tiled tiles" }
+      return root.layoutPlan(Model.planWorkspaceLayout(list, root.layoutState, workspace, name,
+        root.workspaceLayout(workspace), root.layoutsLua), false)
+    })
+  }
+
+  // Saves a custom layout (Model.normalizeCustom), new or replacing
+  // `oldSlug`, and lays out again the workspaces that use it.
+  function saveCustomLayout(oldSlug, def, label) {
+    return startAction(label || "Saving layout " + (def && def.name ? def.name : ""), function(list) {
+      return root.layoutPlan(Model.planSaveCustom(list, root.layoutState, oldSlug || "", def, root.layoutsLua), false)
+    })
+  }
+
+  function deleteCustomLayout(slug, label) {
+    return startAction(label || "Deleting layout " + slug, function(list) {
+      return root.layoutPlan(Model.planDeleteCustom(list, root.layoutState, slug, root.layoutsLua), false)
+    })
+  }
+
+  // Turns a layout plan into the action runner's plan; its state is kept
+  // once the steps succeed (see finishLayouts).
+  function layoutPlan(result, sync) {
+    if (result.error) {
+      if (sync) pendingLayouts = { state: layoutState, sync: true }
+      return result
+    }
+    pendingLayouts = { state: result.state, sync: sync }
+    return { error: "", expressions: result.expressions, message: result.message || "" }
+  }
+
+  // The layout choice of a workspace, or of the one a session is on.
+  function workspaceChoice(workspace) {
+    return Model.workspaceChoice(layoutState, workspace)
+  }
+  function sessionChoice(session) {
+    var workspace = Model.sessionWorkspace(list, session)
+    return workspace === null ? "default" : Model.workspaceChoice(layoutState, workspace)
   }
 
   // The tiled layout Hyprland reports for a workspace, or "".
@@ -235,30 +281,21 @@ Scope {
     return ""
   }
 
-  // Applies saved layouts wherever they are not in place yet (see
-  // Model.layoutChanges): after a start or a config reload, and when a
-  // session's tiles move to another workspace. Waits for a running action.
+  // Applies every saved layout once the file is read: at start and after
+  // a config reload. Version 1's session layouts wait for their tiles to
+  // be listed, to learn their workspaces. Waits for a running action.
   function syncLayouts() {
+    if (layoutsApplied || !layoutsRead) return
+    if (Object.keys(layoutState.legacy).length > 0 && list.sessions.length === 0) return
     if (busy) {
       layoutSyncPending = true
       return
     }
     layoutSyncPending = false
-    var check = Model.layoutChanges(list, layouts, appliedLayouts)
-    if (check.changes.length === 0) {
-      statesBeforeReload = null
-      if (JSON.stringify(check.applied) !== JSON.stringify(appliedLayouts)) appliedLayouts = check.applied
-      return
-    }
+    var states = statesBeforeReload
+    statesBeforeReload = null
     startAction("Applying layouts", function(fresh) {
-      var changes = Model.layoutChanges(fresh, root.layouts, root.appliedLayouts)
-      var steps = Model.layoutSteps(fresh, changes.changes, root.layoutsLua, root.statesBeforeReload)
-      root.statesBeforeReload = null
-      // Marked as applied even when a step fails, so a broken layout isn't
-      // retried on every list change; layoutError says what went wrong.
-      root.pendingLayouts = { layouts: root.layouts, applied: changes.applied, sync: true }
-      if (steps.error) return steps
-      return { error: "", expressions: steps.expressions, message: "" }
+      return root.layoutPlan(Model.planSyncLayouts(fresh, root.layoutState, root.layoutsLua, states), true)
     })
   }
 
@@ -601,17 +638,25 @@ Scope {
     if (layoutSyncPending) layoutSync.restart()
   }
 
-  // Keeps what a layout action changed: on success, always; on failure,
-  // only a sync's `applied`, so it is not retried in a loop.
+  // Keeps what a layout action changed once it succeeded. A sync counts as
+  // done even when it failed, so it isn't retried in a loop; layoutError
+  // says why.
   function finishLayouts(error) {
     var done = pendingLayouts
     pendingLayouts = null
-    if (error && !done.sync) return
-    layoutError = error
-    appliedLayouts = done.applied
-    if (JSON.stringify(done.layouts) === JSON.stringify(layouts)) return
-    layouts = done.layouts
-    layoutsFile.setText(Model.serializeLayouts(layouts))
+    if (done.sync) {
+      layoutsApplied = true
+      layoutError = error
+    } else if (!error) {
+      layoutError = ""
+    }
+    if (error) return
+    var text = Model.serializeLayouts(done.state)
+    layoutState = done.state
+    if (text !== layoutsText) {
+      layoutsText = text
+      layoutsFile.setText(text)
+    }
   }
 
   // Queues re-applying a moved tile's fullscreen state, since a move leaves
@@ -1010,10 +1055,24 @@ Scope {
     function close(session: string): string { return root.started(root.close(session)) }
     // `mosaic contain [--session S]`.
     function contain(session: string): string { return root.started(root.contain(session)) }
+    // `mosaic layout --workspace N LAYOUT`.
+    function layout(workspace: string, name: string): string { return root.started(root.setWorkspaceLayout(workspace, name)) }
     // `mosaic layout --session NAME LAYOUT`.
-    function layout(session: string, name: string): string { return root.started(root.setLayout(session, name)) }
-    // `mosaic layout`: each session's layout.
-    function layouts(): string { return Model.layoutsText(root.list, root.layouts) }
+    function sessionLayout(session: string, name: string): string { return root.started(root.setSessionLayout(session, name)) }
+    // `mosaic layout`: workspaces with a layout, and custom layouts.
+    function layouts(): string { return Model.layoutsText(root.layoutState) }
+    // Saves a custom layout from JSON (see Model.normalizeCustom), replacing
+    // the one called `slug` if given.
+    function layoutSave(slug: string, definition: string): string {
+      var def
+      try {
+        def = JSON.parse(definition)
+      } catch (error) {
+        return "error: The layout must be JSON"
+      }
+      return root.started(root.saveCustomLayout(slug, def))
+    }
+    function layoutDelete(slug: string): string { return root.started(root.deleteCustomLayout(slug)) }
 
     // How action JOB went: "running", "done" or "error" on the first line,
     // then the CLI's message or the error; "unknown" for an old number.
@@ -1160,7 +1219,7 @@ Scope {
       // A config reload drops runtime binds, the swap key among them.
       // It drops runtime layouts and workspace rules too.
       if (name === "configreloaded") {
-        root.appliedLayouts = ({})
+        root.layoutsApplied = false
         root.statesBeforeReload = Model.tileStates(root.list)
         layoutSync.restart()
         root.boundSwapKey = ""
@@ -1351,7 +1410,13 @@ Scope {
     path: root.layoutsPath
     printErrors: false
     onLoaded: {
-      root.layouts = Model.parseLayouts(text())
+      root.layoutsText = text()
+      root.layoutState = Model.parseLayouts(root.layoutsText)
+      root.layoutsRead = true
+      layoutSync.restart()
+    }
+    onLoadFailed: {
+      root.layoutsRead = true
       layoutSync.restart()
     }
     onSaveFailed: function(error) { root.layoutError = "Cannot write " + root.layoutsPath + ": " + error }

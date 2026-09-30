@@ -45,8 +45,10 @@ roughly in order of value; confirm priorities with the user before starting:
   fit. Prefer Hyprland layout settings or split ratios over floating
   geometry, which was rejected. **Done (2026-09-29):** the four layouts,
   as Hyprland Lua tiling layouts (`layouts.lua`), picked per session on the
-  panel's session header (G) or with `mosaic layout`. **Next:** a layout
-  editor (the user's request), and a dedicated workspace per session.
+  panel's session header (G) or with `mosaic layout`. Then layouts per
+  workspace and custom zone layouts designed on the panel's Layouts tab.
+  **Next:** a full-screen drag editor on the same zone format, and a
+  dedicated workspace per session.
 - **Audio.** Mute every tile but the focused one, per-tile volume, and an
   audio indicator in the panel. PipeWire can't do it: every tile belongs to
   one browser process, and Chromium plays every tab through one audio

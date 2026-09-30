@@ -4,6 +4,11 @@
 -- They are Hyprland tiled layouts, not floating geometry, so swaps and
 -- Omarchy's bindings keep working. Hyprland applies the gaps.
 --
+-- Custom layouts, designed on the panel's Layouts tab, are zones: boxes in
+-- fractions of the area, in the order windows fill them (the main zone
+-- first). The service sends them with `MosaicLayouts.define(slug, zones)`,
+-- which registers `mosaic-c-<slug>`.
+--
 -- Loaded as a plain file too (tests/layouts_test.lua), where `hl` is absent
 -- and only the returned table is used.
 
@@ -118,29 +123,61 @@ local function whole(b)
   return box(x, y, math.floor(b.x + b.w + 0.5) - x, math.floor(b.y + b.h + 0.5) - y)
 end
 
--- Boxes in whole pixels, so neighbours meet without a seam.
+-- A custom layout: window i takes zone i, and when windows outnumber
+-- zones, the extra ones share the last zone with its own window, split
+-- along its longer side. Without zones, a balanced grid.
+function M.zones(zones, area, n)
+  if not zones or #zones == 0 then return M.grid(area, n) end
+  local boxes = {}
+  if n == 0 then return boxes end
+  local function scaled(z)
+    return box(area.x + z.x * area.w, area.y + z.y * area.h, z.w * area.w, z.h * area.h)
+  end
+  local own = math.min(n, #zones)
+  for i = 1, own - 1 do boxes[i] = scaled(zones[i]) end
+  local last = scaled(zones[own])
+  for _, cell in ipairs(lines(last, { n - own + 1 }, last.h > last.w)) do boxes[#boxes + 1] = cell end
+  return boxes
+end
+
+-- Boxes in whole pixels, so neighbours meet without a seam. `name` is a
+-- built-in layout, or a table of zones.
 function M.arrange(name, area, n)
-  local boxes = M[name](area, n)
+  local boxes = type(name) == "table" and M.zones(name, area, n) or M[name](area, n)
   for i, b in ipairs(boxes) do boxes[i] = whole(b) end
   return boxes
 end
 
 -- Hyprland refuses a name registered twice and has no way to unregister
--- one, so the names are registered once per config load (a reload starts
--- a fresh Lua state), and they call whatever code the last load left in
+-- one, so each name is registered once per config load (a reload starts a
+-- fresh Lua state), and calls whatever code the last load left in
 -- `MosaicLayouts`. Loading this file again updates the layouts in place.
+-- Custom zones live in `MosaicCustom`, which a load keeps.
+local function register(name, pick)
+  if MosaicRegistered[name] then return end
+  hl.layout.register(name, {
+    recalculate = function(ctx)
+      local boxes = MosaicLayouts.arrange(pick(), ctx.area, #ctx.targets)
+      for i, target in ipairs(ctx.targets) do target:place(boxes[i]) end
+    end,
+  })
+  MosaicRegistered[name] = true
+end
+
+-- Sets a custom layout's zones, registering its name the first time.
+function M.define(slug, zones)
+  MosaicCustom[slug] = zones
+  register("mosaic-c-" .. slug, function() return MosaicCustom[slug] or "grid" end)
+end
+
+-- A load from before MosaicRegistered existed makes the first register
+-- here complain "already registered", which the service accepts.
 if hl and hl.layout then
-  local first = MosaicLayouts == nil
   MosaicLayouts = M
-  if first then
-    for _, name in ipairs(M.names) do
-      hl.layout.register("mosaic-" .. name, {
-        recalculate = function(ctx)
-          local boxes = MosaicLayouts.arrange(name, ctx.area, #ctx.targets)
-          for i, target in ipairs(ctx.targets) do target:place(boxes[i]) end
-        end,
-      })
-    end
+  MosaicCustom = MosaicCustom or {}
+  MosaicRegistered = MosaicRegistered or {}
+  for _, name in ipairs(M.names) do
+    register("mosaic-" .. name, function() return name end)
   end
 end
 

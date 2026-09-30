@@ -5,7 +5,7 @@ import vm from "node:vm"
 const source = fs.readFileSync(new URL("../Model.js", import.meta.url), "utf8")
   .replace(/^\.pragma library\s*/m, "")
 const model = {}
-vm.runInNewContext(source + "\nObject.assign(model, { reconcileVolumes, tileStates, layoutsText, layoutLabel, nextLayout, parseLayoutName, validHyprLayout, parseLayouts, serializeLayouts, layoutsLoadLua, layoutsLoaded, layoutRuleLua, sessionWorkspace, layoutSteps, planLayout, layoutChanges, hiddenEntries, showWebapp, nameList, visibleWebapps, hideWebapp, sessionOf, clientFromIpc, parseStore, tileState, buildList, shapeList, parseClients, validAddress, dispatchExpression, listTiles, findTile, planFocus, planRemove, planClose, planContain, restoreAfterMove, monitorFromIpc, parseMonitors, resolveAddTargets, chooseWorkspace, desktopId, isChromiumFamily, isAppWindow, parseOpenWindow, tileDispatches, pruneRecords, serializeStore, planReplace, replaceRecord, parseCursorPos, cursorMoveExpression, parseKeySpec, bindConflict, tileRect, listText, webappsText, monitorsText, splitLines, parseBridgeMessage, browserLabel, bridgeWindows, siteOf, matchTiles, extensionState, extensionNotice, extensionSteps, browserClass, browserPids, tileAudio, focusMutes, audioIcon, extensionFromManifest, bridgeHas, stepVolume, parseVolume, swapBindLua, unbindLua, webappUrl, webappFromEntry, buildWebapps, shapeWebapps, findWebapp, resolveTarget, parseList, tileLabel, tileMeta, normalizeUrl, sessionName, summary, anyUncontained, parseManifest });", { model })
+vm.runInNewContext(source + "\nObject.assign(model, {  zoneCount, newCustom, zoneDividers, withDivider, withoutZone, withSplit, ordinal, reconcileVolumes, layoutWorkspaceRows, customRows, freeLayoutName, layoutChoices, layoutLabel, nextLayout, parseLayoutName, hyprLayoutName, layoutSlug, normalizeCustom, visualZones, defineLua, withZoneSize, withMain, withName, customSummary, parseLayouts, serializeLayouts, layoutsLoadLua, layoutsLoaded, layoutRuleLua, sessionWorkspace, tileStates, planWorkspaceLayout, planSyncLayouts, planSaveCustom, planDeleteCustom, workspaceChoice, layoutsText, hiddenEntries, showWebapp, nameList, visibleWebapps, hideWebapp, sessionOf, clientFromIpc, parseStore, tileState, buildList, shapeList, parseClients, validAddress, dispatchExpression, listTiles, findTile, planFocus, planRemove, planClose, planContain, restoreAfterMove, monitorFromIpc, parseMonitors, resolveAddTargets, chooseWorkspace, desktopId, isChromiumFamily, isAppWindow, parseOpenWindow, tileDispatches, pruneRecords, serializeStore, planReplace, replaceRecord, parseCursorPos, cursorMoveExpression, parseKeySpec, bindConflict, tileRect, listText, webappsText, monitorsText, splitLines, parseBridgeMessage, browserLabel, bridgeWindows, siteOf, matchTiles, extensionState, extensionNotice, extensionSteps, browserClass, browserPids, tileAudio, focusMutes, audioIcon, extensionFromManifest, bridgeHas, stepVolume, parseVolume, swapBindLua, unbindLua, webappUrl, webappFromEntry, buildWebapps, shapeWebapps, findWebapp, resolveTarget, parseList, tileLabel, tileMeta, normalizeUrl, sessionName, summary, anyUncontained, parseManifest });", { model })
 
 // Values built inside the VM belong to another realm, so compare copies.
 const plain = value => JSON.parse(JSON.stringify(value))
@@ -503,69 +503,157 @@ assert.equal(model.audioIcon({ audible: true, muted: false, volume: 0.3 }), "�
 
 // Layouts. `live`: streams (0x2 contained, 0x3 uncontained) on workspace
 // 1, news (0x1 contained) on workspace 10.
-assert.equal(model.nextLayout("default"), "grid")
-assert.equal(model.nextLayout("fit"), "default")
-assert.equal(model.layoutLabel("main"), "Main + small")
-assert.equal(model.parseLayoutName(" Grid "), "grid")
-assert.equal(model.parseLayoutName("16:9"), "fit")
-assert.equal(model.parseLayoutName("off"), "default")
-assert.equal(model.parseLayoutName("spiral"), "")
-assert.deepEqual(plain(model.parseLayouts('{"version":1,"sessions":{"streams":{"layout":"grid","before":"dwindle"},'
-  + '"Bad":{"layout":"grid"},"news":{"layout":"spiral"},"x":{"layout":"fit","before":"a\\"b"}}}')),
-  { streams: { layout: "grid", before: "dwindle" }, x: { layout: "fit", before: "" } })
-assert.deepEqual(plain(model.parseLayouts("oops")), {})
-assert.deepEqual(plain(model.parseLayouts(model.serializeLayouts({ b: { layout: "main", before: "" }, a: { layout: "fit", before: "master" } }))),
-  { a: { layout: "fit", before: "master" }, b: { layout: "main", before: "" } })
-assert.equal(model.layoutsLoadLua("/home/u/omarchy-mosaic/layouts.lua"), 'dofile("/home/u/omarchy-mosaic/layouts.lua")')
-assert.equal(model.layoutsLoadLua('/home/u/x") os.exit() --.lua'), "")
-assert.equal(model.layoutsLoaded("ok\n"), true)
-assert.equal(model.layoutsLoaded("error: x.lua:130: hl.layout.register: layout 'lua:mosaic-grid' is already registered\n"), true)
-assert.equal(model.layoutsLoaded("error: x.lua:3: syntax error"), false)
-assert.equal(model.layoutsLoaded(""), false)
-assert.equal(model.layoutRuleLua(9, "grid"), 'hl.workspace_rule({ workspace = "9", layout = "lua:mosaic-grid" })')
-assert.equal(model.layoutRuleLua(9, "dwindle"), 'hl.workspace_rule({ workspace = "9", layout = "dwindle" })')
-assert.equal(model.layoutRuleLua(-98, "grid"), "")
-assert.equal(model.layoutRuleLua(9, 'x" })'), "")
-assert.equal(model.sessionWorkspace(live, "news"), 10)
-assert.equal(model.sessionWorkspace(live, "gone"), null)
+{
+  const three = { name: "Three", tree: { split: "row", sizes: [25, 50, 25], children: [{}, {}, {}] }, main: 2 }
+  const custom = { three }
+  assert.deepEqual(plain(model.layoutChoices(custom)), ["default", "grid", "stack", "main", "fit", "custom:three"])
+  assert.equal(model.nextLayout("fit", custom), "custom:three")
+  assert.equal(model.nextLayout("custom:three", custom), "default")
+  assert.equal(model.layoutLabel("main", custom), "Main + small")
+  assert.equal(model.layoutLabel("custom:three", custom), "Three")
+  assert.equal(model.layoutLabel("custom:gone", custom), "Missing layout")
+  assert.equal(model.parseLayoutName(" Grid ", custom), "grid")
+  assert.equal(model.parseLayoutName("16:9", custom), "fit")
+  assert.equal(model.parseLayoutName("off", custom), "default")
+  assert.equal(model.parseLayoutName("THREE", custom), "custom:three")
+  assert.equal(model.parseLayoutName("spiral", custom), "")
+  assert.equal(model.hyprLayoutName("grid"), "lua:mosaic-grid")
+  assert.equal(model.hyprLayoutName("custom:three"), "lua:mosaic-c-three")
+  assert.equal(model.hyprLayoutName("custom:Bad Name"), "")
+  assert.equal(model.hyprLayoutName("dwindle"), "dwindle")
+  assert.equal(model.layoutSlug("  My Streams! 2 "), "my-streams-2")
 
-const load = 'dofile("/p/layouts.lua")'
-const containOn = address => model.dispatchExpression("contain", address)
-assert.deepEqual(plain(model.planLayout(live, {}, "streams", "grid", "dwindle", load)), {
-  layouts: { streams: { layout: "grid", before: "dwindle" } },
-  expressions: [{ eval: load }, { eval: model.layoutRuleLua(1, "grid") }, containOn("0x2"), model.dispatchExpression("release", "0x3")],
-  message: "Layout of streams: Grid." })
-// A second change keeps the first `before`, even though Hyprland now
-// reports a Lua layout; going back to default restores it.
-const saved = { streams: { layout: "grid", before: "master" } }
-assert.deepEqual(plain(model.planLayout(live, saved, "streams", "fit", "lua:mosaic-grid", load).layouts), { streams: { layout: "fit", before: "master" } })
-const back = model.planLayout(live, saved, "streams", "default", "lua:mosaic-grid", load)
-assert.deepEqual(plain(back.layouts), {})
-assert.deepEqual(plain(back.expressions[1]), { eval: model.layoutRuleLua(1, "master") })
-assert.equal(model.planLayout(live, {}, "streams", "grid", "lua:mosaicprobe", load).layouts.streams.before, "")
-assert.equal(model.planLayout(live, {}, "streams", "spiral", "dwindle", load).error.startsWith("Unknown layout"), true)
-assert.equal(model.planLayout(live, {}, "gone", "grid", "dwindle", load).error, "Session gone has no tiled tiles")
-assert.equal(model.planLayout(live, {}, "Bad", "grid", "dwindle", load).error.startsWith("Invalid session name"), true)
-assert.equal(model.planLayout(live, {}, "streams", "grid", "dwindle", "").error.startsWith("Cannot load"), true)
+  // Definitions: trees, and the earlier template form read as one.
+  assert.deepEqual(plain(model.normalizeCustom({ name: " Three ", template: "columns", sizes: [25, 50, 25], main: 2 })), three)
+  assert.deepEqual(plain(model.normalizeCustom({ name: "g", template: "grid", cols: 2, rows: 1 })).tree, { split: "row", sizes: [50, 50], children: [{}, {}] })
+  assert.equal(model.normalizeCustom({ name: "x", tree: { split: "row", sizes: [50, 40], children: [{}, {}] } }), null)
+  assert.equal(model.normalizeCustom({ name: "x", tree: { split: "row", sizes: [97, 3], children: [{}, {}] } }), null)
+  assert.equal(model.normalizeCustom({ name: "x", tree: { split: "diagonal", sizes: [50, 50], children: [{}, {}] } }), null)
+  assert.equal(model.normalizeCustom({ name: "!!", tree: {} }), null)
+  assert.deepEqual(plain(model.normalizeCustom({ name: "one", tree: { split: "row", sizes: [100], children: [{}] }, main: 3 })), { name: "one", tree: {}, main: 1 })
+  const side = model.newCustom("Side", "side")
+  assert.deepEqual(plain(model.visualZones(side)).map(z => [z.x, z.y, z.w, z.h, z.fill, z.path]),
+    [[0, 0, 0.7, 1, 1, [0]], [0.7, 0, 0.3, 0.5, 2, [1, 0]], [0.7, 0.5, 0.3, 0.5, 3, [1, 1]]])
+  assert.deepEqual(plain(model.visualZones(three)).map(z => [z.x, z.w, z.fill, z.main]), [[0, 0.25, 2, false], [0.25, 0.5, 1, true], [0.75, 0.25, 3, false]])
+  assert.deepEqual(plain(model.visualZones(model.newCustom("g", "grid"))).map(z => z.fill), [1, 2, 3, 4])
+  assert.equal(model.defineLua("three", three),
+    'MosaicLayouts.define("three", { { x = 0.25, y = 0, w = 0.5, h = 1 }, { x = 0, y = 0, w = 0.25, h = 1 }, { x = 0.75, y = 0, w = 0.25, h = 1 } })')
+  assert.equal(model.defineLua('x") os.exit() --', three), "")
+  assert.deepEqual(plain(model.zoneDividers(side)), [
+    { path: [], index: 0, vertical: true, x: 0.7, y: 0, length: 1, from: 0, span: 1 },
+    { path: [1], index: 0, vertical: false, x: 0.7, y: 0.5, length: 0.3, from: 0, span: 1 }])
 
-// Re-applying: nothing applied yet applies every saved layout; a session
-// that moved gets its layout on the new workspace and hands the old one back.
-const both = { news: { layout: "fit", before: "" }, streams: { layout: "grid", before: "master" } }
-assert.deepEqual(plain(model.layoutChanges(live, both, {})), {
-  changes: [{ workspace: 10, layout: "fit" }, { workspace: 1, layout: "grid" }], applied: { news: 10, streams: 1 } })
-assert.deepEqual(plain(model.layoutChanges(live, both, { news: 10, streams: 1 })).changes, [])
-assert.deepEqual(plain(model.layoutChanges(live, both, { news: 10, streams: 4 })).changes,
-  [{ workspace: 1, layout: "grid" }, { workspace: 4, layout: "master" }])
-assert.deepEqual(plain(model.layoutChanges(live, { streams: { layout: "grid", before: "" } }, { streams: 1, gone: 3 })).changes, [])
-assert.deepEqual(plain(model.layoutSteps(live, [{ workspace: 10, layout: "fit" }], load).expressions),
-  [{ eval: load }, { eval: model.layoutRuleLua(10, "fit") }, containOn("0x1")])
-assert.deepEqual(plain(model.layoutSteps(live, [], load).expressions), [])
-// States from before a reload win over the list's.
-assert.deepEqual(plain(model.tileStates(live)), { "0x1": "contained", "0x2": "contained", "0x3": "uncontained" })
-assert.deepEqual(plain(model.layoutSteps(live, [{ workspace: 1, layout: "grid" }], load, { "0x3": "contained" }).expressions.slice(2)),
-  [containOn("0x2"), containOn("0x3")])
-assert.equal(model.layoutsText(live, { streams: { layout: "fit", before: "" } }), "news     Hyprland\nstreams  16:9 fit")
-assert.equal(model.layoutsText({ version: 1, sessions: [] }, {}), "No mosaic tiles are open.")
+  // Editing.
+  assert.deepEqual(plain(model.withDivider(three, [], 0, 0.4, 0, 1).tree.sizes), [40, 35, 25])
+  assert.deepEqual(plain(model.withDivider(three, [], 1, 0.99, 0, 1).tree.sizes), [25, 70, 5])
+  assert.deepEqual(plain(model.withDivider(side, [1], 0, 0.8, 0, 1).tree.children[1].sizes), [80, 20])
+  // Splitting beside in a row adds a sibling; below nests a split.
+  const beside = model.withSplit(three, 0, "row")
+  assert.deepEqual(plain(beside.tree.sizes), [13, 12, 50, 25])
+  assert.equal(beside.main, 3)
+  const below = model.withSplit(three, 1, "column")
+  assert.deepEqual(plain(below.tree.children[1]), { split: "column", sizes: [50, 50], children: [{}, {}] })
+  assert.equal(below.main, 2)
+  assert.deepEqual(plain(model.withSplit({ name: "o", tree: {}, main: 1 }, 0, "row").tree), { split: "row", sizes: [50, 50], children: [{}, {}] })
+  // Removing gives the share to the neighbour and collapses one-zone splits.
+  assert.deepEqual(plain(model.withoutZone(three, 0)), { name: "Three", tree: { split: "row", sizes: [75, 25], children: [{}, {}] }, main: 1 })
+  assert.deepEqual(plain(model.withoutZone(side, 2)), { name: "Side", tree: { split: "row", sizes: [70, 30], children: [{}, {}] }, main: 1 })
+  assert.deepEqual(plain(model.withoutZone(model.withoutZone(three, 0), 0).tree), {})
+  assert.equal(model.withoutZone({ name: "o", tree: {}, main: 1 }, 0).tree.split, undefined)
+  assert.deepEqual(plain(model.withZoneSize(three, 1, 10).tree.sizes), [25, 60, 15])
+  assert.deepEqual(plain(model.withZoneSize(three, 2, 10).tree.sizes), [25, 40, 35])
+  assert.deepEqual(plain(model.withZoneSize(three, 0, -30).tree.sizes), [5, 70, 25])
+  assert.equal(model.withMain(three, 0).main, 1)
+  assert.equal(model.zoneCount(side), 3)
+  assert.deepEqual([1, 2, 3, 4, 11, 12, 22].map(model.ordinal), ["1st", "2nd", "3rd", "4th", "11th", "12th", "22nd"])
+  assert.equal(model.customSummary(three), "3 zones  ·  main 50%")
+
+  // The file: version 2, and version 1's sessions as legacy.
+  const text = model.serializeLayouts({ workspaces: { "10": { layout: "custom:three", before: "dwindle" }, "8": { layout: "grid", before: "" } }, custom })
+  assert.deepEqual(plain(model.parseLayouts(text)), { workspaces: { "8": { layout: "grid", before: "" }, "10": { layout: "custom:three", before: "dwindle" } }, custom, legacy: {} })
+  assert.deepEqual(plain(model.parseLayouts('{"version":2,"workspaces":{"0":{"layout":"grid"},"x":{"layout":"grid"},"3":{"layout":"custom:gone"},"4":{"layout":"fit","before":"a\\"b"}},'
+    + '"custom":{"Bad":' + JSON.stringify(three) + ',"ok":{"name":"Ok","tree":{"split":"row","sizes":[60,50],"children":[{},{}]}}}}')),
+    { workspaces: { "4": { layout: "fit", before: "" } }, custom: {}, legacy: {} })
+  assert.deepEqual(plain(model.parseLayouts('{"version":1,"sessions":{"streams":{"layout":"stack","before":"dwindle"},"x":{"layout":"spiral"}}}')).legacy,
+    { streams: { layout: "stack", before: "dwindle" } })
+  assert.deepEqual(plain(model.parseLayouts("oops")), { workspaces: {}, custom: {}, legacy: {} })
+
+  // Lua text.
+  assert.equal(model.layoutsLoadLua("/home/u/omarchy-mosaic/layouts.lua"), 'dofile("/home/u/omarchy-mosaic/layouts.lua")')
+  assert.equal(model.layoutsLoadLua('/home/u/x") os.exit() --.lua'), "")
+  assert.equal(model.layoutsLoaded("ok\n"), true)
+  assert.equal(model.layoutsLoaded("error: x.lua:130: hl.layout.register: layout 'lua:mosaic-grid' is already registered\n"), true)
+  assert.equal(model.layoutsLoaded("error: x.lua:3: syntax error"), false)
+  assert.equal(model.layoutsLoaded(""), false)
+  assert.equal(model.layoutRuleLua(9, "grid"), 'hl.workspace_rule({ workspace = "9", layout = "lua:mosaic-grid" })')
+  assert.equal(model.layoutRuleLua("9", "dwindle"), 'hl.workspace_rule({ workspace = "9", layout = "dwindle" })')
+  assert.equal(model.layoutRuleLua(-98, "grid"), "")
+  assert.equal(model.layoutRuleLua(9, 'x" })'), "")
+  assert.equal(model.sessionWorkspace(live, "news"), 10)
+  assert.equal(model.sessionWorkspace(live, "gone"), null)
+  assert.deepEqual(plain(model.tileStates(live)), { "0x1": "contained", "0x2": "contained", "0x3": "uncontained" })
+
+  // Plans.
+  const load = 'dofile("/p/layouts.lua")'
+  const containOn = address => model.dispatchExpression("contain", address)
+  const empty = { workspaces: {}, custom, legacy: {} }
+  const set = model.planWorkspaceLayout(live, empty, 1, "grid", "dwindle", load)
+  assert.deepEqual(plain(set), {
+    state: { workspaces: { "1": { layout: "grid", before: "dwindle" } }, custom, legacy: {} },
+    expressions: [{ eval: load }, { eval: model.layoutRuleLua(1, "grid") }, containOn("0x2"), model.dispatchExpression("release", "0x3")],
+    message: "Workspace 1: Grid." })
+  // A custom choice defines its zones first; `before` stays from the first
+  // change; default puts it back.
+  const onCustom = model.planWorkspaceLayout(live, set.state, 1, "three", "lua:mosaic-grid", load)
+  assert.deepEqual(plain(onCustom.state.workspaces), { "1": { layout: "custom:three", before: "dwindle" } })
+  assert.deepEqual(plain(onCustom.expressions.slice(0, 3)), [{ eval: load }, { eval: model.defineLua("three", three) }, { eval: model.layoutRuleLua(1, "custom:three") }])
+  const back = model.planWorkspaceLayout(live, onCustom.state, 1, "default", "lua:mosaic-grid", load)
+  assert.deepEqual(plain(back.state.workspaces), {})
+  assert.deepEqual(plain(back.expressions[1]), { eval: model.layoutRuleLua(1, "dwindle") })
+  assert.equal(model.planWorkspaceLayout(live, empty, 1, "grid", "lua:mosaicprobe", load).state.workspaces["1"].before, "")
+  assert.equal(model.planWorkspaceLayout(live, empty, 8, "grid", "", load).expressions.length, 2)
+  assert.equal(model.planWorkspaceLayout(live, empty, 1, "spiral", "dwindle", load).error.startsWith("Unknown layout"), true)
+  assert.equal(model.planWorkspaceLayout(live, empty, "x", "grid", "dwindle", load).error.startsWith("Unexpected workspace"), true)
+  assert.equal(model.planWorkspaceLayout(live, empty, 1, "grid", "dwindle", "").error.startsWith("Cannot load"), true)
+
+  // Sync: every custom layout defined, every workspace set, containment
+  // from before a reload; legacy session layouts move to their workspaces.
+  const saved = { workspaces: { "10": { layout: "custom:three", before: "" } }, custom, legacy: { streams: { layout: "stack", before: "dwindle" }, gone: { layout: "grid", before: "" } } }
+  const sync = model.planSyncLayouts(live, saved, load, { "0x3": "contained" })
+  assert.deepEqual(plain(sync.state.workspaces), { "1": { layout: "stack", before: "dwindle" }, "10": { layout: "custom:three", before: "" } })
+  assert.deepEqual(plain(sync.expressions), [{ eval: load }, { eval: model.defineLua("three", three) },
+    { eval: model.layoutRuleLua(1, "stack") }, containOn("0x2"), containOn("0x3"),
+    { eval: model.layoutRuleLua(10, "custom:three") }, containOn("0x1")])
+  assert.deepEqual(plain(model.planSyncLayouts(live, { workspaces: {}, custom: {}, legacy: {} }, load).expressions), [])
+
+  // Saving: a new layout is defined; editing one in use lays its
+  // workspaces out again (switching away first); renaming moves them.
+  const saveNew = model.planSaveCustom(live, empty, "", { name: "Two", tree: { split: "column", sizes: [70, 30], children: [{}, {}] }, main: 1 }, load)
+  assert.equal(saveNew.slug, "two")
+  assert.deepEqual(plain(saveNew.expressions.map(e => e.eval.slice(0, 20))), [load.slice(0, 20), 'MosaicLayouts.define'])
+  const inUse = { workspaces: { "10": { layout: "custom:three", before: "" } }, custom, legacy: {} }
+  const edit = model.planSaveCustom(live, inUse, "three", model.withZoneSize(three, 1, 10), load)
+  assert.deepEqual(plain(edit.expressions.slice(2)), [{ eval: model.layoutRuleLua(10, "dwindle") }, { eval: model.layoutRuleLua(10, "custom:three") }, containOn("0x1")])
+  const renamed = model.planSaveCustom(live, inUse, "three", model.withName(three, "Wide"), load)
+  assert.deepEqual(plain(renamed.state), { workspaces: { "10": { layout: "custom:wide", before: "" } }, custom: { wide: plain(model.withName(three, "Wide")) }, legacy: {} })
+  assert.equal(renamed.expressions.length, 4)
+  assert.equal(model.planSaveCustom(live, { workspaces: {}, custom: { three, two: saveNew.state.custom.two }, legacy: {} }, "two", model.withName(three, "three"), load).error, "There is already a layout called Three")
+  assert.equal(model.planSaveCustom(live, empty, "", { name: "", tree: {} }, load).error.startsWith("Give the layout a name"), true)
+  // Deleting hands its workspaces back.
+  const deleted = model.planDeleteCustom(live, { workspaces: { "10": { layout: "custom:three", before: "master" } }, custom, legacy: {} }, "three", load)
+  assert.deepEqual(plain(deleted.state), { workspaces: {}, custom: {}, legacy: {} })
+  assert.deepEqual(plain(deleted.expressions), [{ eval: load }, { eval: model.layoutRuleLua(10, "master") }, containOn("0x1")])
+  assert.equal(model.planDeleteCustom(live, empty, "gone", load).error, 'No custom layout "gone"')
+
+  assert.deepEqual(plain(model.layoutWorkspaceRows([{ id: 3, monitor: "DP-5" }, { id: -98, monitor: "DP-5" }, { id: 1, monitor: "DP-4" }], inUse)),
+    [{ id: 1, monitor: "DP-4", choice: "default" }, { id: 3, monitor: "DP-5", choice: "default" }, { id: 10, monitor: "", choice: "custom:three" }])
+  assert.deepEqual(plain(model.customRows({ b: { name: "beta" }, a: { name: "Zed" } })).map(row => row.slug), ["b", "a"])
+  assert.equal(model.freeLayoutName({ "layout-1": three }), "Layout 2")
+  assert.equal(model.workspaceChoice(inUse, 10), "custom:three")
+  assert.equal(model.workspaceChoice(inUse, "8"), "default")
+  assert.equal(model.layoutsText(inUse), "workspace 10  Three\n\nCustom layouts:\n  Three  (3 zones  ·  main 50%)")
+  assert.equal(model.layoutsText({ workspaces: {}, custom: {} }), "No workspace has a Mosaic layout.")
+}
 
 // Volumes: a following extension's report wins unless the tile was just
 // set; an older one gets the level again; gone tiles are dropped.

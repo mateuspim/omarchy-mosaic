@@ -172,29 +172,51 @@ only on incompatible changes; adding a field doesn't bump it.
 stretched), `mosaic-stack` (one row on a landscape area, one column on a
 portrait one), `mosaic-main` (the first tile takes 70% of the long side,
 the rest share a line beside or below it), and `mosaic-fit` (the grid
-whose 16:9 tiles come out largest, centered). They are real tiled
-layouts: Hyprland applies the gaps, and swaps (Omarchy's bindings,
-`hl.dsp.window.swap`) move tiles between slots. Floating geometry stays
-rejected (see "Compared approaches").
+whose 16:9 tiles come out largest, centered). Custom layouts are zones,
+`mosaic-c-<slug>`. They are real tiled layouts: Hyprland applies the gaps,
+and swaps (Omarchy's bindings, `hl.dsp.window.swap`) move windows between
+slots. Floating geometry stays rejected (see "Compared approaches").
 
+- **Layouts belong to workspaces** (the user's choice, 2026-09-29), like
+  Hyprland's own: workspace 8 can be Grid and 9 a custom layout, for every
+  window there. A session's header button sets the layout of the workspace
+  its first tiled tile is on.
 - The service loads the file with `hyprctl eval 'dofile("…/layouts.lua")'`
   and sets a layout per workspace with `hl.workspace_rule({ workspace =
   "N", layout = "lua:mosaic-grid" })`. The **`lua:` prefix** is required;
-  an unknown name silently falls back to dwindle.
-- Hyprland refuses a name registered twice and can't unregister one, so the
-  file registers the names once per Lua state and has them call the code in
-  the global `MosaicLayouts`, which every load replaces.
-- A layout belongs to a session, saved in
-  `$XDG_STATE_HOME/mosaic/layouts.json`: `{ "version": 1, "sessions": {
-  "streams": { "layout": "grid", "before": "dwindle" } } }`, where `before`
-  is the workspace's layout before Mosaic changed it, which `default` puts
-  back. It applies to the workspace of the session's first tiled tile, so
-  other windows there join the layout, and two sessions on one workspace
-  share whichever was applied last.
+  an unknown name silently falls back to dwindle. A rule works before the
+  workspace exists.
+- Hyprland refuses a name registered twice and can't unregister one, so
+  names are registered once per Lua state (`MosaicRegistered`) and call the
+  code in the global `MosaicLayouts`, which every load replaces. Custom
+  zones live in `MosaicCustom`, set by `MosaicLayouts.define(slug, zones)`.
+  A deleted layout's name stays registered, unused, until a reload.
+- **Custom layouts** (`Model.normalizeCustom`) are a tree of splits: a
+  zone is `{}`, a split is `{ split: "row" | "column", sizes, children }`
+  with percent `sizes` (at least 5% each, adding up to 100), up to 6
+  children, 4 levels, and 16 zones; plus a `main` zone (1-based, depth
+  first). Windows fill the main zone first, then the others in visual
+  order; extra windows share the last zone, split along its longer side.
+  The first form (a `columns`, `rows`, or `grid` template) is read as a
+  tree. The panel's Layouts tab edits them: presets to start from, lines
+  between zones dragged on the preview (`Model.zoneDividers`,
+  `withDivider`), and split, main, and remove buttons on each zone (the
+  user asked for mouse editing "like PowerToys"; a full-screen editor on
+  the monitor could come later on the same format).
+- Changing a custom layout's zones doesn't lay out a workspace that uses
+  it, and neither does setting the same rule again; switching it to
+  dwindle and back does, so a save does that for each workspace using it.
+- `$XDG_STATE_HOME/mosaic/layouts.json`: `{ "version": 2, "workspaces": {
+  "8": { "layout": "grid", "before": "dwindle" }, "9": { "layout":
+  "custom:three", "before": "" } }, "custom": { "three": { "name": "Three",
+  "tree": { "split": "row", "sizes": [25, 50, 25], "children": [{}, {},
+  {}] }, "main": 2 } } }`, where
+  `before` is the workspace's layout before Mosaic changed it, which
+  `default` puts back. Version 1 (unreleased, one day old) kept layouts per
+  session; they move to their sessions' workspaces on the first sync.
 - Runtime rules and registrations are gone after a config reload, so the
-  service applies saved layouts again on `configreloaded`, at start, and
-  when a session's tiles move to another workspace (handing the old one its
-  `before` layout back). See `Model.layoutChanges`.
+  service applies everything saved again at start and on
+  `configreloaded` (`Model.planSyncLayouts`).
 - **Switching a workspace's layout resets `fullscreenClient` 2 → 0** for
   its tiles (seen for dwindle → master and master → Lua; a relayout within
   one layout keeps it). So every switch is followed by re-applying each
