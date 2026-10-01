@@ -1657,6 +1657,10 @@ Panel {
   // The selected zone and its buttons, under the editor's preview, for
   // zones too small to hold them.
   component EditorToolbar: RowLayout {
+    id: toolbar
+    // Larger in the large editor.
+    property real toolSize: Style.space(22)
+    property real textSize: Style.font.caption
     spacing: Style.space(2)
     Text {
       Layout.fillWidth: true
@@ -1664,41 +1668,47 @@ Panel {
         var editor = root.layoutEditor
         if (!editor) return ""
         var zone = Model.visualZones(editor.def)[editor.zone]
-        return "Zone " + (editor.zone + 1) + "  ·  " + Model.zonePercent(zone) + "%  ·  "
-          + (zone.main ? "main" : "filled " + Model.ordinal(zone.fill))
+        return "Zone " + zone.fill + "  ·  " + Model.zonePercent(zone) + "%"
+          + (zone.main ? "  ·  main, the first window goes here" : "")
       }
       color: root.foreground
       font.family: root.fontFamily
-      font.pixelSize: Style.font.caption
+      font.pixelSize: toolbar.textSize
       elide: Text.ElideRight
     }
     ZoneTool {
+      size: toolbar.toolSize
       kind: "smaller"
       tip: "Make this zone smaller · −"
       onClicked: root.editorSize(-1)
     }
     ZoneTool {
+      size: toolbar.toolSize
       kind: "bigger"
       tip: "Make this zone bigger · +"
       onClicked: root.editorSize(1)
     }
     ZoneTool {
+      size: toolbar.toolSize
       kind: "beside"
       tip: "Split: a new zone beside this one · S"
       onClicked: root.editorSplit(root.layoutEditor.zone, "row")
     }
     ZoneTool {
+      size: toolbar.toolSize
       kind: "below"
       tip: "Split: a new zone below this one · B"
       onClicked: root.editorSplit(root.layoutEditor.zone, "column")
     }
     ZoneTool {
+      size: toolbar.toolSize
       kind: "main"
       tip: "Main zone: the first window goes here · M"
       on: root.layoutEditor !== null && root.layoutEditor.def.main === root.layoutEditor.zone + 1
       onClicked: root.editorMain(root.layoutEditor.zone)
     }
     ZoneTool {
+      size: toolbar.toolSize
       kind: "remove"
       tip: "Remove this zone · X"
       onClicked: root.editorRemove(root.layoutEditor.zone)
@@ -1823,6 +1833,8 @@ Panel {
 
           EditorToolbar {
             Layout.fillWidth: true
+            toolSize: Style.space(36)
+            textSize: Style.font.body
           }
 
           Text {
