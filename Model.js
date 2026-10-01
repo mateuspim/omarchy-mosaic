@@ -1112,20 +1112,37 @@ function workspaceChoice(state, workspace) {
   return entry ? entry.layout : "default"
 }
 
-// The Layouts tab's workspaces: the ones Hyprland has ([{ id, monitor }],
-// special ones left out) and any with a saved layout, by number, each with
-// its choice: [{ id, monitor, choice }].
+// The Layouts tab's workspaces: the ones Hyprland has ([{ id, monitor,
+// windows }], special ones left out) and any with a saved layout, by
+// number, each with its choice: [{ id, monitor, windows, choice }].
 function layoutWorkspaceRows(workspaces, state) {
   var rows = {}
   ;(workspaces || []).forEach(function(workspace) {
-    if (workspace.id >= 1) rows[workspace.id] = { id: workspace.id, monitor: String(workspace.monitor || "") }
+    if (workspace.id >= 1) rows[workspace.id] = { id: workspace.id, monitor: String(workspace.monitor || ""), windows: Number(workspace.windows) || 0 }
   })
   Object.keys(state.workspaces).forEach(function(id) {
-    if (!rows[id]) rows[id] = { id: Number(id), monitor: "" }
+    if (!rows[id]) rows[id] = { id: Number(id), monitor: "", windows: 0 }
   })
   return Object.keys(rows).map(function(id) {
-    return { id: rows[id].id, monitor: rows[id].monitor, choice: workspaceChoice(state, id) }
+    var row = rows[id]
+    return { id: row.id, monitor: row.monitor, windows: row.windows, choice: workspaceChoice(state, id) }
   }).sort(function(a, b) { return a.id - b.id })
+}
+
+// The rows the tab shows: all of them, or only workspaces with windows or
+// a layout of their own (and `keep`, the one under the cursor).
+function shownWorkspaceRows(rows, all, keep) {
+  if (all) return rows
+  return rows.filter(function(row) { return row.windows > 0 || row.choice !== "default" || row.id === keep })
+}
+
+// Clients per workspace, from `clients` ([{ workspace }]): { id: count }.
+function windowCounts(clients) {
+  var counts = {}
+  ;(clients || []).forEach(function(client) {
+    if (client.workspace >= 1) counts[client.workspace] = (counts[client.workspace] || 0) + 1
+  })
+  return counts
 }
 
 // Custom layouts by name: [{ slug, def }].

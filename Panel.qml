@@ -36,7 +36,14 @@ Panel {
   // The Layouts tab: workspaces and custom layouts from the service, and
   // the editor (see openEditor), or null.
   readonly property var layoutCustom: service ? service.layoutState.custom : ({})
-  readonly property var workspaceRows: service ? service.layoutWorkspaces : []
+  readonly property var allWorkspaceRows: service ? service.layoutWorkspaces : []
+  // Empty workspaces without a layout of their own hide until W, except
+  // the focused one.
+  property bool showAllWorkspaces: false
+  readonly property var usedWorkspaceRows: Model.shownWorkspaceRows(allWorkspaceRows, false,
+    Hyprland.focusedWorkspace ? Hyprland.focusedWorkspace.id : 0)
+  readonly property var workspaceRows: showAllWorkspaces ? allWorkspaceRows : usedWorkspaceRows
+  readonly property int hiddenWorkspaces: allWorkspaceRows.length - usedWorkspaceRows.length
   readonly property var customRows: Model.customRows(layoutCustom)
   property var layoutEditor: null
   // The custom layout the next D deletes, and the save the editor waits for.
@@ -498,6 +505,7 @@ Panel {
     else if (key === "d" && cursorActive) deleteLayout(selectedCustom)
     else if (key === "g" && cursorActive) cycleWorkspaceLayout(selectedWorkspace)
     else if (t === "0" && cursorActive) setWorkspaceLayout(selectedWorkspace, "default")
+    else if (key === "w" && (showAllWorkspaces || hiddenWorkspaces > 0)) showAllWorkspaces = !showAllWorkspaces
     else return false
     return true
   }
@@ -971,6 +979,15 @@ Panel {
               }
             }
 
+            Button {
+              visible: root.showAllWorkspaces || root.hiddenWorkspaces > 0
+              width: parent.width
+              text: root.showAllWorkspaces ? "Only workspaces in use" : "Show all workspaces  ·  " + root.hiddenWorkspaces + " more"
+              iconText: root.showAllWorkspaces ? "󰅃" : "󰅀"
+              foreground: root.foreground
+              onClicked: root.showAllWorkspaces = !root.showAllWorkspaces
+            }
+
             PanelSectionHeader {
               text: "YOUR LAYOUTS  ·  " + root.customRows.length
               foreground: root.foreground
@@ -1209,7 +1226,7 @@ Panel {
               : root.view === "layouts"
               ? (root.layoutEditor
                 ? "←→ zone  ·  −/+ size  ·  S split beside  ·  B below  ·  X remove  ·  M main  ·  T preset  ·  N name  ·  F large  ·  Enter save  ·  Esc cancel"
-                : "↑↓ select  ·  Enter or G next layout  ·  0 Hyprland's  ·  N new  ·  E edit  ·  D delete  ·  H/L tabs")
+                : "↑↓ select  ·  Enter or G next layout  ·  0 Hyprland's  ·  W all workspaces  ·  N new  ·  E edit  ·  D delete  ·  H/L tabs")
               : root.swapTile
                 ? "1–9 or A pick the replacement  ·  Esc cancel"
                 : "↑↓ select  ·  Enter focus  ·  S swap  ·  G layout  ·  M mute  ·  −/+ volume  ·  F focused only  ·  X remove  ·  ⇧D close session  ·  H/L tabs  ·  R refresh"
@@ -1403,7 +1420,8 @@ Panel {
         }
         Text {
           Layout.fillWidth: true
-          text: !workspaceRow.entry ? "" : workspaceRow.entry.monitor !== "" ? workspaceRow.entry.monitor : "Not open"
+          text: !workspaceRow.entry ? "" : (workspaceRow.entry.monitor !== "" ? workspaceRow.entry.monitor : "Not open")
+            + (workspaceRow.entry.windows > 0 ? "  ·  " + workspaceRow.entry.windows + (workspaceRow.entry.windows === 1 ? " window" : " windows") : "  ·  empty")
           color: root.dim
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption

@@ -87,9 +87,11 @@ Scope {
     var values = Hyprland.workspaces.values
     var workspaces = []
     for (var i = 0; i < values.length; i++)
-      workspaces.push({ id: values[i].id, monitor: values[i].monitor ? values[i].monitor.name : "" })
+      workspaces.push({ id: values[i].id, monitor: values[i].monitor ? values[i].monitor.name : "", windows: workspaceWindows[values[i].id] || 0 })
     return Model.layoutWorkspaceRows(workspaces, layoutState)
   }
+  // Windows per workspace ({ id: count }), kept by rebuild().
+  property var workspaceWindows: ({})
   property string layoutError: ""
   property bool layoutSyncPending: false
   // The file's text as last read or written.
@@ -191,6 +193,8 @@ Scope {
     var monitors = []
     var outputs = Hyprland.monitors.values
     for (var m = 0; m < outputs.length; m++) monitors.push({ id: outputs[m].id, name: outputs[m].name })
+    var counts = Model.windowCounts(clients)
+    if (JSON.stringify(counts) !== JSON.stringify(workspaceWindows)) workspaceWindows = counts
     var next = Model.buildList(clients, monitors, records)
     if (JSON.stringify(next) !== JSON.stringify(list)) list = next
   }

@@ -11,7 +11,9 @@
   / 25 with the middle one main). `mosaic layout --workspace
   N LAYOUT`; new IPC `sessionLayout`, `layoutSave`, `layoutDelete`.
   `layouts.json` is version 2; session layouts from version 1 move to
-  their workspaces.
+  their workspaces. The tab lists only workspaces with windows or a layout
+  of their own, plus the focused one; **Show all workspaces** (W) lists
+  the rest.
 
 - **Volume follows the site**: a tile's volume changed with the page's own
   control (YouTube's slider, arrow keys) is now kept and shown on the
