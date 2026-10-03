@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.1.0 (2026-10-02)
 
 - **Swaps change the page in place**: with the browser extension
   connected, swapping a tile (S in the panel, Super+Shift+S on the tile,
