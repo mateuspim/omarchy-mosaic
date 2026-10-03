@@ -5,7 +5,7 @@ import vm from "node:vm"
 const source = fs.readFileSync(new URL("../Model.js", import.meta.url), "utf8")
   .replace(/^\.pragma library\s*/m, "")
 const model = {}
-vm.runInNewContext(source + "\nObject.assign(model, {  zoneCount, newCustom, zoneDividers, withDivider, withoutZone, withSplit, ordinal, reconcileVolumes, layoutWorkspaceRows, shownWorkspaceRows, windowCounts, customRows, freeLayoutName, layoutChoices, layoutLabel, nextLayout, parseLayoutName, hyprLayoutName, layoutSlug, normalizeCustom, visualZones, defineLua, withZoneSize, withMain, withName, customSummary, parseLayouts, serializeLayouts, layoutsLoadLua, layoutsLoaded, layoutRuleLua, sessionWorkspace, tileStates, planWorkspaceLayout, planSyncLayouts, planSaveCustom, planDeleteCustom, workspaceChoice, layoutsText, hiddenEntries, showWebapp, nameList, visibleWebapps, hideWebapp, sessionOf, clientFromIpc, parseStore, tileState, buildList, shapeList, parseClients, validAddress, dispatchExpression, listTiles, findTile, planFocus, planRemove, planClose, planContain, restoreAfterMove, monitorFromIpc, parseMonitors, resolveAddTargets, chooseWorkspace, desktopId, isChromiumFamily, isAppWindow, parseOpenWindow, tileDispatches, pruneRecords, serializeStore, planReplace, replaceRecord, parseCursorPos, cursorMoveExpression, parseKeySpec, bindConflict, tileRect, listText, webappsText, monitorsText, splitLines, parseBridgeMessage, browserLabel, bridgeWindows, siteOf, matchTiles, tileTab, navigationSettled, extensionState, extensionNotice, extensionSteps, browserClass, browserPids, tileAudio, focusMutes, audioIcon, extensionFromManifest, bridgeHas, stepVolume, parseVolume, swapBindLua, unbindLua, webappUrl, webappFromEntry, buildWebapps, shapeWebapps, findWebapp, resolveTarget, parseList, tileLabel, tileMeta, normalizeUrl, sessionName, summary, anyUncontained, parseManifest });", { model })
+vm.runInNewContext(source + "\nObject.assign(model, {  zoneCount, newCustom, zoneDividers, withDivider, withoutZone, withSplit, ordinal, reconcileVolumes, layoutWorkspaceRows, shownWorkspaceRows, windowCounts, customRows, freeLayoutName, layoutChoices, layoutLabel, nextLayout, parseLayoutName, hyprLayoutName, layoutSlug, normalizeCustom, visualZones, defineLua, withZoneSize, withMain, withName, customSummary, parseLayouts, serializeLayouts, layoutsLoadLua, layoutsLoaded, layoutRuleLua, sessionWorkspace, tileStates, planWorkspaceLayout, planSyncLayouts, planSaveCustom, planDeleteCustom, workspaceChoice, layoutsText, hiddenEntries, showWebapp, nameList, visibleWebapps, hideWebapp, sessionOf, clientFromIpc, parseStore, tileState, buildList, shapeList, parseClients, validAddress, dispatchExpression, listTiles, findTile, planFocus, planRemove, planClose, planContain, restoreAfterMove, monitorFromIpc, parseMonitors, resolveAddTargets, chooseWorkspace, desktopId, isChromiumFamily, isAppWindow, parseOpenWindow, tileDispatches, pruneRecords, serializeStore, planReplace, replaceRecord, parseCursorPos, cursorMoveExpression, parseKeySpec, bindConflict, tileRect, listText, webappsText, monitorsText, splitLines, parseBridgeMessage, browserLabel, bridgeWindows, siteOf, matchTiles, keepTabs, tileTab, navigationSettled, extensionState, extensionNotice, extensionSteps, browserClass, browserPids, tileAudio, focusMutes, audioIcon, extensionFromManifest, bridgeHas, stepVolume, parseVolume, swapBindLua, unbindLua, webappUrl, webappFromEntry, buildWebapps, shapeWebapps, findWebapp, resolveTarget, parseList, tileLabel, tileMeta, normalizeUrl, sessionName, summary, anyUncontained, parseManifest });", { model })
 
 // Values built inside the VM belong to another realm, so compare copies.
 const plain = value => JSON.parse(JSON.stringify(value))
@@ -426,9 +426,23 @@ const sameTabs = [{ windows: [tab(1, "https://youtube.com/", "YouTube"), tab(2, 
 assert.equal(model.matchTiles(sameSite, sameTabs).matched, 0)
 assert.deepEqual(plain(model.matchTiles(sameSite, sameTabs, { "0xa": { bridge: 0, window: 2, tab: 102 }, "0xb": { bridge: 0, window: 1, tab: 101 } }).tiles),
   { "0xa": { bridge: 0, window: 2, tab: 102 }, "0xb": { bridge: 0, window: 1, tab: 101 } })
+// Focus tells look-alikes apart: only the focused tile, and only on its site.
+const focusTabs = [{ windows: [tab(1, "https://kick.com/", "Kick"), Object.assign(tab(2, "https://kick.com/", "Kick"), { focused: true })] }]
+const kicks = [{ address: "0xa", url: "https://kick.com", title: "Kick", index: 1 }, { address: "0xb", url: "https://kick.com", title: "Kick", index: 2 }]
+assert.deepEqual(plain(model.matchTiles(kicks, focusTabs, null, "0xb").tiles), { "0xb": { bridge: 0, window: 2, tab: 102 } })
+assert.equal(model.matchTiles(kicks, focusTabs, null, "0xother").matched, 0)
+assert.equal(model.matchTiles([{ address: "0xa", url: "https://twitch.tv", title: "Kick", index: 1 }, kicks[1]], focusTabs, null, "0xa").tiles["0xa"], undefined)
 // A tab that is gone, or now another bridge's, is matched afresh.
 assert.deepEqual(plain(model.matchTiles([extensionTiles[0]], [{ windows: [tab(1, "https://www.twitch.tv/chan", "(4) chan - Twitch")] }], { "0xa": { bridge: 1, window: 1, tab: 101 } }).tiles),
   { "0xa": { bridge: 0, window: 1, tab: 101 } })
+
+// Saved pairings are updated by a check, and dropped with their tiles.
+assert.deepEqual(plain(model.keepTabs({ "0xa": { bridge: 0, window: 1, tab: 101 }, "0xgone": { bridge: 0, window: 9, tab: 109 } },
+  { tiles: { "0xb": { bridge: 0, window: 2, tab: 102 } } }, ["0xa", "0xb"])),
+  { "0xa": { bridge: 0, window: 1, tab: 101 }, "0xb": { bridge: 0, window: 2, tab: 102 } })
+assert.deepEqual(plain(model.keepTabs({ "0xa": { bridge: 0, window: 1, tab: 101 } }, { tiles: { "0xa": { bridge: 0, window: 3, tab: 103 } } }, ["0xa"])),
+  { "0xa": { bridge: 0, window: 3, tab: 103 } })
+assert.deepEqual(plain(model.keepTabs({ "0xa": { bridge: "x", tab: 1 } }, null, ["0xa"])), {})
 
 const navBridges = [{ windows: [tab(1, "https://kick.com/", "Kick")] }]
 assert.equal(model.tileTab({ tiles: { "0xa": { bridge: 0, window: 1, tab: 101 } } }, navBridges, "0xa").title, "Kick")

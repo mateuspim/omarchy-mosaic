@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- **A nicer swap card** (Super+Shift+S on a tile): the site's logo and
+  address up top, an "In place" or "New window" chip, the web apps as a
+  grid of tiles with their icons and number keys (the one it already
+  shows dimmed), and the keys as key caps.
+- **Tiles on the same site stay told apart**: the tab each tile was
+  matched to is remembered across shell restarts, and two look-alike tiles
+  never matched before are paired as soon as you focus one of them.
+
 ## 1.1.0 (2026-10-02)
 
 - **Swaps change the page in place**: with the browser extension

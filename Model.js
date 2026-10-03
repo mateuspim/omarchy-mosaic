@@ -1597,14 +1597,19 @@ function siteOf(url) {
 // earlier result's `tiles`, optional) while that tab is still there, since
 // a swap in place or the user browsing changes its title and site. Else it
 // is the one app window whose tab has the tile's title (Hyprland's title
-// is the page's), else the one left on the tile's site. Returns { total,
-// matched, tiles: { ADDRESS: { bridge, window, tab } }, missing: [labels] }.
-function matchTiles(tiles, bridges, previous) {
+// is the page's), else the one left on the tile's site. Tiles alike in
+// both can only be told apart by focus: `focused` (optional) is the
+// address of the window Hyprland has focused, which then takes the one
+// window on its site that the browser, in this fresh report, says has
+// focus. Returns { total, matched, tiles: { ADDRESS: { bridge, window,
+// tab } }, missing: [labels] }.
+function matchTiles(tiles, bridges, previous, focused) {
   var candidates = []
   for (var b = 0; b < bridges.length; b++) {
     var windows = bridges[b].windows || []
     for (var w = 0; w < windows.length; w++) {
-      if (windows[w].tabs.length === 1) candidates.push({ bridge: b, window: windows[w].id, tab: windows[w].tabs[0] })
+      if (windows[w].tabs.length === 1)
+        candidates.push({ bridge: b, window: windows[w].id, focused: windows[w].focused === true, tab: windows[w].tabs[0] })
     }
   }
   var found = {}
@@ -1627,6 +1632,11 @@ function matchTiles(tiles, bridges, previous) {
   tiles.forEach(function(tile) {
     var site = siteOf(tile.url)
     claim(tile, function(candidate) { return site !== "" && siteOf(candidate.tab.url) === site })
+  })
+  tiles.forEach(function(tile) {
+    if (tile.address !== focused) return
+    var site = siteOf(tile.url)
+    claim(tile, function(candidate) { return candidate.focused && site !== "" && siteOf(candidate.tab.url) === site })
   })
   var missing = tiles.filter(function(tile) { return !found[tile.address] }).map(tileLabel)
   return { total: tiles.length, matched: tiles.length - missing.length, tiles: found, missing: missing }
@@ -1805,6 +1815,20 @@ function reconcileVolumes(volumes, audio, live, follows, recent) {
     next[address] = level
   })
   return { volumes: next, resend: resend }
+}
+
+// The tile-to-tab pairings worth keeping (see matchTiles' `previous`):
+// `saved` ones, updated by the latest `check`, for the tiles at
+// `addresses` only. Saved across shell restarts, since a restart forgets
+// them and the browser's tab ids outlive it.
+function keepTabs(saved, check, addresses) {
+  var merged = Object.assign({}, saved || {}, check && check.tiles ? check.tiles : {})
+  var kept = {}
+  addresses.forEach(function(address) {
+    var entry = merged[address]
+    if (entry && Number.isInteger(entry.bridge) && Number.isInteger(entry.tab)) kept[address] = entry
+  })
+  return kept
 }
 
 // The extension's report of a tile's tab ({ url, title, … }), or null.

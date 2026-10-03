@@ -126,6 +126,15 @@ Scope {
     var runtime = Quickshell.env("XDG_RUNTIME_DIR") || ""
     return (runtime !== "" ? runtime : "/tmp") + "/pym-mosaic.sock"
   }
+  // Which tab each tile was matched to (Model.keepTabs), kept beside the
+  // socket so a shell restart can tell apart tiles on one site.
+  readonly property string tabsPath: bridgePath.replace(/\.sock$/, "") + "-tabs.json"
+  property var savedTabs: ({})
+  // The window Hyprland last focused, and a tile the extension could not
+  // tell from another, focused, whose fresh report may pair it by focus.
+  property string focusedWindow: ""
+  property string focusProbe: ""
+  property bool tabsLoaded: false
   // Open bridge connections, and the ones a verify still waits for.
   property var bridgeSockets: []
   property var pingWaiting: []
@@ -870,9 +879,17 @@ Scope {
     return ""
   }
 
-  // The tabs tiles were matched to last time, for Model.matchTiles.
+  // The tabs tiles were matched to before, for Model.matchTiles.
   function knownTabs() {
-    return extensionCheck && extensionCheck.tiles ? extensionCheck.tiles : null
+    return Object.assign({}, savedTabs, extensionCheck && extensionCheck.tiles ? extensionCheck.tiles : {})
+  }
+
+  onExtensionCheckChanged: {
+    if (!tabsLoaded || !extensionCheck || !extensionCheck.tiles) return
+    var kept = Model.keepTabs(savedTabs, extensionCheck, Model.listTiles(list).map(function(tile) { return tile.address }))
+    if (JSON.stringify(kept) === JSON.stringify(savedTabs)) return
+    savedTabs = kept
+    tabsFile.setText(JSON.stringify(kept))
   }
 
   function finishVerify() {
@@ -884,7 +901,9 @@ Scope {
       extensionCheck = { error: "The browser extension did not answer" }
       return
     }
-    extensionCheck = Model.matchTiles(Model.shapeList(list).tiles, bridges, knownTabs())
+    var probe = focusProbe !== "" && focusProbe === focusedWindow ? focusProbe : ""
+    focusProbe = ""
+    extensionCheck = Model.matchTiles(Model.shapeList(list).tiles, bridges, knownTabs(), probe)
   }
 
   function bridgeOpened(socket) {
@@ -1026,9 +1045,13 @@ Scope {
   // windows leave the audio as it is.
   function windowFocused(data) {
     var address = "0x" + String(data).trim()
-    if (address === audioFocus) return
+    focusedWindow = address
     var isTile = Model.listTiles(list).some(function(tile) { return tile.address === address })
-    if (!isTile) return
+    if (isTile && bridges.length > 0 && extensionCheck && extensionCheck.tiles && !extensionCheck.tiles[address]) {
+      focusProbe = address
+      focusProbeTimer.restart()
+    }
+    if (address === audioFocus || !isTile) return
     audioFocus = address
     applyAudioFocus()
   }
@@ -1220,10 +1243,37 @@ Scope {
   }
 
   // How long a verify waits for every extension to answer.
+  // Gives the browser a moment to see the focus before asking it.
+  Timer {
+    id: focusProbeTimer
+    interval: 300
+    onTriggered: if (root.focusProbe === root.focusedWindow) root.verifyExtension()
+  }
+
   Timer {
     id: verifyTimeout
     interval: 3000
     onTriggered: root.finishVerify()
+  }
+
+  FileView {
+    id: tabsFile
+    path: root.tabsPath
+    printErrors: false
+    onLoaded: {
+      try {
+        var parsed = JSON.parse(text())
+        root.savedTabs = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : ({})
+      } catch (error) {
+        root.savedTabs = ({})
+      }
+      root.tabsLoaded = true
+      root.autoCheck()
+    }
+    onLoadFailed: {
+      root.tabsLoaded = true
+      root.autoCheck()
+    }
   }
 
   // Covers a tile while a swap in place loads its new page.

@@ -142,7 +142,12 @@ logins and memory; the user chose an extension instead.
 - **Finding tiles.** A tile keeps the tab it was matched to while that
   tab exists (a swap in place can leave two tiles on one site with one
   title); else it is the extension window whose one tab has the tile's
-  Hyprland title (`Model.matchTiles`), else the one left on its site. Verify reports how many tiles were found.
+  Hyprland title (`Model.matchTiles`), else the one left on its site.
+  Pairings are saved beside the socket (`pym-mosaic-tabs.json` in
+  `$XDG_RUNTIME_DIR`), since tab ids outlive a shell restart. Tiles alike
+  in title and site, never paired before, are told apart by focus: when one
+  is focused, the service asks for a fresh report (`ping`) and pairs it
+  with the browser window that reports focus. Verify reports how many tiles were found.
 - **Quickshell facts.** A `SocketServer` makes one handler `Socket` per
   connection; writes before `connected` turns true are lost; a closed
   handler socket is never destroyed and `destroy()` refuses it

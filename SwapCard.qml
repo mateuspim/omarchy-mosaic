@@ -35,6 +35,29 @@ Scope {
     return null
   }
   readonly property string tileLabel: tile ? Model.tileLabel(tile) : ""
+  // The web app the tile shows now, if any; its tile is dimmed.
+  readonly property var currentApp: {
+    var site = tile ? Model.siteOf(tile.url) : ""
+    for (var i = 0; site !== "" && i < allApps.length; i++) {
+      if (Model.siteOf(allApps[i].url) === site) return allApps[i]
+    }
+    return null
+  }
+  // The site's logo: its web app's icon, else the tab's favicon from the
+  // extension; "" when there is neither, and the header shows only the
+  // title.
+  readonly property string logoSource: {
+    if (currentApp && currentApp.icon) return iconSource(currentApp.icon)
+    var tab = tile ? Model.tileTab(service.extensionCheck, service.bridges, tile.address) : null
+    return tab && /^(https?|data):/.test(tab.favIconUrl || "") ? tab.favIconUrl : ""
+  }
+  readonly property color dim: Util.alpha(Color.menu.text, 0.55)
+
+  function iconSource(icon) {
+    if (!icon) return ""
+    if (icon.indexOf("/") === 0) return "file://" + icon
+    return Quickshell.iconPath(icon, true)
+  }
 
   // Opens the card over `tile` once its geometry is known.
   function openFor(tile) {
@@ -153,7 +176,7 @@ Scope {
     BorderSurface {
       id: card
       anchors.centerIn: parent
-      width: Math.max(Style.space(200), Math.min(Style.space(420), parent.width - Style.gapsOut * 2))
+      width: Math.max(Style.space(200), Math.min(Style.space(460), parent.width - Style.gapsOut * 2))
       height: Math.min(parent.height - Style.gapsOut * 2, content.implicitHeight + card.contentTopInset + card.contentBottomInset)
       radius: Style.cornerRadius
       color: Color.menu.background
@@ -174,7 +197,7 @@ Scope {
             event.accepted = true
           } else if (event.text >= "1" && event.text <= "9" && event.text.length === 1) {
             var app = root.apps[Number(event.text) - 1]
-            if (app) root.pick(app.url, app.name)
+            if (app && app !== root.currentApp) root.pick(app.url, app.name)
             event.accepted = true
           } else if (event.text === "a" || event.text === "A" || event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
             field.forceActiveFocus()
@@ -191,32 +214,139 @@ Scope {
           anchors.topMargin: card.contentTopInset
           anchors.leftMargin: card.contentLeftInset
           anchors.rightMargin: card.contentRightInset
-          spacing: Style.spacing.md
+          spacing: Style.spacing.xxl
 
-          Text {
+          // What the tile shows now, and how the swap will happen.
+          RowLayout {
             Layout.fillWidth: true
-            textFormat: Text.PlainText
-            text: "Replace " + root.tileLabel
-            color: Color.menu.text
-            font.family: Style.font.menuFamily
-            font.pixelSize: Style.font.title
-            elide: Text.ElideRight
+            spacing: Style.spacing.xl
+
+            Rectangle {
+              visible: currentIcon.status === Image.Ready
+              Layout.preferredWidth: Style.space(40)
+              Layout.preferredHeight: Style.space(40)
+              radius: Style.cornerRadius
+              color: Util.alpha(Color.menu.text, 0.06)
+              border.width: 1
+              border.color: Util.alpha(Color.menu.text, 0.12)
+              Image {
+                id: currentIcon
+                anchors.centerIn: parent
+                width: Style.space(24)
+                height: Style.space(24)
+                source: root.logoSource
+                sourceSize.width: 64
+                sourceSize.height: 64
+                fillMode: Image.PreserveAspectFit
+              }
+            }
+
+            ColumnLayout {
+              Layout.fillWidth: true
+              spacing: Style.spacing.xxs
+              Text {
+                Layout.fillWidth: true
+                textFormat: Text.PlainText
+                text: "SWAP TILE" + (root.tile ? "  ·  " + root.tile.monitor + "  ·  workspace " + root.tile.workspace : "")
+                color: root.dim
+                font.family: Style.font.menuFamily
+                font.pixelSize: Style.font.caption
+                font.letterSpacing: 1
+                elide: Text.ElideRight
+              }
+              Text {
+                Layout.fillWidth: true
+                textFormat: Text.PlainText
+                text: root.tileLabel
+                color: Color.menu.text
+                font.family: Style.font.menuFamily
+                font.pixelSize: Style.font.title
+                font.bold: true
+                elide: Text.ElideRight
+              }
+            }
+
+            Rectangle {
+              readonly property bool inPlace: root.tile !== null && root.service.canNavigate(root.tile.address)
+              Layout.alignment: Qt.AlignTop
+              implicitWidth: modeText.implicitWidth + Style.space(14)
+              implicitHeight: modeText.implicitHeight + Style.space(6)
+              radius: height / 2
+              color: inPlace ? Util.alpha(Color.accent, 0.16) : Util.alpha(Color.menu.text, 0.08)
+              Text {
+                id: modeText
+                anchors.centerIn: parent
+                text: parent.inPlace ? "In place" : "New window"
+                color: parent.inPlace ? Color.accent : root.dim
+                font.family: Style.font.menuFamily
+                font.pixelSize: Style.font.caption
+              }
+            }
           }
 
-          Flow {
+          // The web apps, as an even grid of tiles.
+          GridLayout {
             visible: root.apps.length > 0
             Layout.fillWidth: true
-            spacing: Style.space(6)
+            columns: Math.max(1, Math.min(root.apps.length, Math.floor(content.width / Style.space(96))))
+            columnSpacing: Style.spacing.md
+            rowSpacing: Style.spacing.md
+
             Repeater {
               model: root.apps
-              Button {
+              CursorSurface {
+                id: appTile
                 required property var modelData
                 required property int index
-                text: (index < 9 ? (index + 1) + "  " : "") + modelData.name
-                foreground: Color.menu.text
-                fontFamily: Style.font.menuFamily
+                readonly property bool isCurrent: root.currentApp !== null && root.currentApp.url === modelData.url
+                Layout.fillWidth: true
+                Layout.preferredWidth: 1
+                implicitHeight: appColumn.implicitHeight + Style.space(20)
                 bordered: true
-                onClicked: root.pick(modelData.url, modelData.name)
+                hasCursor: appMouse.containsMouse && !isCurrent
+                foreground: Color.menu.text
+                opacity: isCurrent ? 0.45 : 1.0
+
+                Column {
+                  id: appColumn
+                  anchors.centerIn: parent
+                  spacing: Style.spacing.md
+                  Image {
+                    id: appIcon
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    width: Style.space(28)
+                    height: Style.space(28)
+                    source: root.iconSource(appTile.modelData.icon)
+                    sourceSize.width: 64
+                    sourceSize.height: 64
+                    fillMode: Image.PreserveAspectFit
+                    visible: status === Image.Ready
+                  }
+                  Text {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    width: Math.min(implicitWidth, appTile.width - Style.space(12))
+                    textFormat: Text.PlainText
+                    text: appTile.modelData.name
+                    color: Color.menu.text
+                    font.family: Style.font.menuFamily
+                    font.pixelSize: Style.font.body
+                    elide: Text.ElideRight
+                    horizontalAlignment: Text.AlignHCenter
+                  }
+                  KeyCap {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    label: appTile.isCurrent ? "now" : appTile.index < 9 ? String(appTile.index + 1) : ""
+                    visible: label !== ""
+                  }
+                }
+
+                MouseArea {
+                  id: appMouse
+                  anchors.fill: parent
+                  hoverEnabled: true
+                  cursorShape: appTile.isCurrent ? Qt.ArrowCursor : Qt.PointingHandCursor
+                  onClicked: if (!appTile.isCurrent) root.pick(appTile.modelData.url, appTile.modelData.name)
+                }
               }
             }
           }
@@ -242,19 +372,50 @@ Scope {
             wrapMode: Text.WordWrap
           }
 
-          Text {
-            Layout.fillWidth: true
-            text: field.activeFocus
-              ? "Enter replace  ·  Esc back"
-              : (root.apps.length > 0 ? "1–" + Math.min(9, root.apps.length) + " web app  ·  " : "") + "A edit address  ·  Esc cancel"
-            color: Qt.darker(Color.menu.text, 1.55)
-            font.family: Style.font.menuFamily
-            font.pixelSize: Style.font.caption
-            horizontalAlignment: Text.AlignHCenter
-            wrapMode: Text.WordWrap
+          // Keys, as key caps.
+          Flow {
+            Layout.alignment: Qt.AlignHCenter
+            spacing: Style.spacing.xl
+            Repeater {
+              model: field.activeFocus
+                ? [["Enter", "replace"], ["Esc", "back"]]
+                : (root.apps.length > 0 ? [["1–" + Math.min(9, root.apps.length), "web app"]] : [])
+                  .concat([["A", "edit address"], ["Esc", "cancel"]])
+              Row {
+                required property var modelData
+                spacing: Style.spacing.sm
+                KeyCap { label: parent.modelData[0]; anchors.verticalCenter: parent.verticalCenter }
+                Text {
+                  anchors.verticalCenter: parent.verticalCenter
+                  text: parent.modelData[1]
+                  color: root.dim
+                  font.family: Style.font.menuFamily
+                  font.pixelSize: Style.font.caption
+                }
+              }
+            }
           }
         }
       }
+    }
+  }
+
+  // A small key label, like a key on the keyboard.
+  component KeyCap: Rectangle {
+    property string label: ""
+    implicitWidth: Math.max(implicitHeight, capText.implicitWidth + Style.space(10))
+    implicitHeight: capText.implicitHeight + Style.space(4)
+    radius: Math.max(2, Style.cornerRadius / 2)
+    color: Util.alpha(Color.menu.text, 0.06)
+    border.width: 1
+    border.color: Util.alpha(Color.menu.text, 0.22)
+    Text {
+      id: capText
+      anchors.centerIn: parent
+      text: parent.label
+      color: Color.menu.text
+      font.family: Style.font.menuFamily
+      font.pixelSize: Style.font.caption
     }
   }
 }
