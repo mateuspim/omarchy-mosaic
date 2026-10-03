@@ -73,6 +73,16 @@ Panel {
   // Swap mode: the tile ({ address, label }) that the next web app or
   // address replaces, or null.
   property var swapTile: null
+  // The Add tile section is open (A); it is always open without tiles.
+  property bool adding: false
+  readonly property bool addOpen: swapTile === null && (adding || tiles.length === 0)
+  // The key bar shows every key (?), not only the main ones.
+  property bool allKeys: false
+  readonly property string keyContext: view === "extension"
+    ? (restartNeeded ? "extension-restart" : extensionState === "connected" ? "extension" : "extension-off")
+    : view === "layouts" ? (layoutEditor ? "editor" : "layouts")
+    : view === "hidden" ? "hidden"
+    : swapTile ? "swap" : addOpen && tiles.length > 0 ? "adding" : "tiles"
   // The address field on the tile being swapped, while it shows.
   property var swapField: null
   property string status: ""
@@ -205,6 +215,7 @@ Panel {
     }
     if (addUrl(url, urlField.text.trim())) {
       urlField.text = ""
+      adding = false
       keyCatcher.forceActiveFocus()
     }
   }
@@ -302,6 +313,8 @@ Panel {
     if (name !== "tiles") swapTile = null
     layoutEditor = null
     confirmDelete = ""
+    adding = false
+    status = ""
     view = name
     cursor = 0
     cursorActive = false
@@ -349,8 +362,9 @@ Panel {
       return
     }
     setView("tiles")
+    adding = true
     if (selectedTile && sessionField.text === "") sessionField.text = selectedTile.session
-    urlField.forceActiveFocus()
+    Qt.callLater(function() { urlField.forceActiveFocus() })
   }
 
   // Enters swap mode for `tile`: the web app buttons, 1–9, and the address
@@ -686,10 +700,12 @@ Panel {
       onCloseRequested: {
         if (root.layoutEditor) root.layoutEditor = null
         else if (root.swapTile) root.swapTile = null
+        else if (root.adding) root.adding = false
         else root.close()
       }
       onTabRequested: function(direction) { root.switchPanel(direction) }
       onTextKey: function(t) {
+        if (t === "?") { root.allKeys = !root.allKeys; return }
         if (root.view === "layouts" && root.layoutKey(t)) return
         if (t === "a" || t === "A") root.startAdding()
         else if (t === "d" && root.cursorActive) root.removeTile(root.selectedTile)
@@ -803,7 +819,8 @@ Panel {
               checked: root.audioFollowsFocus
               iconOn: "󰕾"
               iconOff: "󰖀"
-              text: "Only the focused tile plays  ·  F"
+              text: "Only the focused tile plays"
+              keyLabel: "F"
               onToggled: root.toggleAudioFocus()
             }
 
@@ -813,7 +830,8 @@ Panel {
               checked: root.autoContain
               iconOn: "󰊓"
               iconOff: "󰊔"
-              text: "Keep fullscreen in tiles  ·  Shift+C"
+              text: "Keep fullscreen in tiles"
+              keyLabel: "⇧C"
               tooltip: "Contains a tile again whenever it loses containment, and shrinks a fullscreen tile back once another window takes focus"
               onToggled: root.toggleAutoContain()
             }
@@ -862,32 +880,87 @@ Panel {
               }
             }
 
-            // Hidden while swapping: the tile's own card holds the picker.
-            Column {
-              visible: root.swapTile === null
+            // Add tile: one row until A or a click opens it. Hidden while
+            // swapping, since the tile's own card holds the picker then.
+            CursorSurface {
+              visible: root.swapTile === null && !root.addOpen
               width: parent.width
-              spacing: Style.space(6)
+              foreground: root.foreground
+              hasCursor: addMouse.containsMouse
+              implicitHeight: addRow.implicitHeight + Style.space(12)
+              Accessible.role: Accessible.Button
+              Accessible.name: "Add tile"
 
-              PanelSectionHeader {
-                text: "ADD TILE"
-                  + (root.shownWebapps.length > 0 ? "  ·  1–" + Math.min(9, root.shownWebapps.length) + " WEB APP  ·  A ADDRESS" : "  ·  A")
-                foreground: root.foreground
-                fontFamily: root.fontFamily
+              MouseArea {
+                id: addMouse
+                anchors.fill: parent
+                hoverEnabled: true
+                onClicked: root.startAdding()
               }
 
-              Flow {
-                visible: root.shownWebapps.length > 0
-                width: parent.width
-                spacing: Style.space(6)
-                Repeater {
-                  model: root.shownWebapps
-                  WebappButton {
-                    required property var modelData
-                    required property int index
-                    app: modelData
-                    number: index + 1
+              RowLayout {
+                id: addRow
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                anchors.leftMargin: Style.space(8)
+                anchors.rightMargin: Style.space(8)
+                spacing: Style.space(10)
+                Rectangle {
+                  Layout.preferredWidth: Style.space(28)
+                  Layout.preferredHeight: Style.space(28)
+                  radius: Style.cornerRadius
+                  color: "transparent"
+                  border.width: 1
+                  border.color: Qt.darker(root.foreground, 2.2)
+                  Text {
+                    anchors.centerIn: parent
+                    text: "󰐕"
+                    color: root.foreground
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.body
                   }
                 }
+                Text {
+                  Layout.fillWidth: true
+                  textFormat: Text.PlainText
+                  text: "Add tile"
+                  color: root.foreground
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.body
+                }
+                KeyCap {
+                  label: "A"
+                  foreground: root.foreground
+                  fontFamily: root.fontFamily
+                }
+              }
+            }
+
+            Column {
+              visible: root.addOpen
+              width: parent.width
+              spacing: Style.space(8)
+
+              RowLayout {
+                width: parent.width
+                PanelSectionHeader {
+                  text: "ADD TILE"
+                  foreground: root.foreground
+                  fontFamily: root.fontFamily
+                  Layout.fillWidth: true
+                }
+                PanelActionButton {
+                  visible: root.tiles.length > 0
+                  iconText: "󰅖"
+                  tooltipText: "Close · Esc"
+                  foreground: root.foreground
+                  onClicked: { root.adding = false; root.leaveField() }
+                }
+              }
+
+              AppGrid {
+                width: parent.width
               }
 
               TextField {
@@ -1230,25 +1303,38 @@ Panel {
             warning: root.statusIsError
           }
 
-          Text {
+          // The keys for what's on screen, as key caps; ? shows the rest.
+          // The block is centred as a whole: Flow can't centre each line.
+          Item {
             width: parent.width
-            text: root.view === "extension"
-              ? (root.restartNeeded ? "B restart browser  ·  V verify  ·  H/L tabs"
-                : root.extensionState === "connected" ? "V verify  ·  H/L tabs" : "E enable  ·  V verify  ·  H/L tabs")
-              : root.view === "hidden"
-              ? "↑↓ select  ·  Enter show again  ·  H/L tabs  ·  R refresh"
-              : root.view === "layouts"
-              ? (root.layoutEditor
-                ? "←→ zone  ·  −/+ size  ·  S split beside  ·  B below  ·  X remove  ·  M main  ·  T preset  ·  N name  ·  F large  ·  Enter save  ·  Esc cancel"
-                : "↑↓ select  ·  Enter or G next layout  ·  0 Hyprland's  ·  W all workspaces  ·  N new  ·  E edit  ·  D delete  ·  H/L tabs")
-              : root.swapTile
-                ? "1–9 web app  ·  A edit the address  ·  Enter replace  ·  Esc cancel"
-                : "↑↓ select  ·  Enter focus  ·  S swap  ·  G layout  ·  M mute  ·  −/+ volume  ·  F focused only  ·  ⇧C keep contained  ·  X remove  ·  ⇧D close session  ·  H/L tabs  ·  R refresh"
-            color: root.dim
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.caption
-            horizontalAlignment: Text.AlignHCenter
-            wrapMode: Text.WordWrap
+            implicitHeight: keyBar.childrenRect.height
+          Flow {
+            id: keyBar
+            x: Math.max(0, (parent.width - childrenRect.width) / 2)
+            width: parent.width
+            spacing: Style.space(12)
+            Repeater {
+              model: Model.keyHints(root.keyContext, root.allKeys, root.shownWebapps.length)
+              Row {
+                required property var modelData
+                spacing: Style.space(5)
+                KeyCap {
+                  anchors.verticalCenter: parent.verticalCenter
+                  label: parent.modelData[0]
+                  foreground: root.foreground
+                  fontFamily: root.fontFamily
+                }
+                Text {
+                  anchors.verticalCenter: parent.verticalCenter
+                  textFormat: Text.PlainText
+                  text: parent.modelData[1]
+                  color: root.dim
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                }
+              }
+            }
+          }
           }
 
           Text {
@@ -1342,61 +1428,85 @@ Panel {
     }
   }
 
-  component WebappButton: CursorSurface {
-    id: webappButton
-    property var app: null
-    property int number: 0
-    // The tile being swapped already shows this web app.
-    property bool current: false
-    bordered: true
-    opacity: current ? 0.5 : 1.0
-    hasCursor: webappMouse.containsMouse
-    foreground: root.foreground
-    implicitWidth: webappRow.implicitWidth + Style.space(16)
-    implicitHeight: webappRow.implicitHeight + Style.space(10)
-    Accessible.role: Accessible.Button
-    Accessible.name: app ? "Add " + app.name : ""
+  // The web apps as an even grid, each with its number key: a click or the
+  // number adds it, or, while swapping, puts it in the tile. The one the
+  // tile already shows (`currentUrl`'s site) is dimmed. Right-click hides.
+  component AppGrid: GridLayout {
+    id: grid
+    property string currentUrl: ""
+    visible: root.shownWebapps.length > 0
+    columns: 3
+    columnSpacing: Style.space(6)
+    rowSpacing: Style.space(6)
 
-    Row {
-      id: webappRow
-      anchors.centerIn: parent
-      spacing: Style.space(6)
-      Image {
-        id: webappIcon
-        width: Style.space(16)
-        height: Style.space(16)
-        anchors.verticalCenter: parent.verticalCenter
-        source: webappButton.app ? root.iconSource(webappButton.app.icon) : ""
-        sourceSize.width: 64
-        sourceSize.height: 64
-        fillMode: Image.PreserveAspectFit
-        visible: status === Image.Ready
-      }
-      Text {
-        anchors.verticalCenter: parent.verticalCenter
-        textFormat: Text.PlainText
-        text: (webappButton.number <= 9 ? webappButton.number + "  " : "") + (webappButton.app ? webappButton.app.name : "")
-        color: root.foreground
-        font.family: root.fontFamily
-        font.pixelSize: Style.font.caption
-      }
-    }
+    Repeater {
+      model: root.shownWebapps
+      CursorSurface {
+        id: appTile
+        required property var modelData
+        required property int index
+        readonly property bool current: grid.currentUrl !== "" && Model.siteOf(modelData.url) === Model.siteOf(grid.currentUrl)
+        Layout.fillWidth: true
+        Layout.preferredWidth: 1
+        implicitHeight: appRow.implicitHeight + Style.space(12)
+        bordered: true
+        opacity: current ? 0.45 : 1.0
+        hasCursor: appMouse.containsMouse && !current
+        foreground: root.foreground
+        Accessible.role: Accessible.Button
+        Accessible.name: (root.swapTile ? "Swap to " : "Add ") + modelData.name
 
-    MouseArea {
-      id: webappMouse
-      anchors.fill: parent
-      hoverEnabled: true
-      acceptedButtons: Qt.LeftButton | Qt.RightButton
-      onClicked: function(mouse) {
-        if (mouse.button === Qt.RightButton) root.hideWebapp(webappButton.app)
-        else if (!webappButton.current) root.addWebapp(webappButton.app)
-      }
-    }
+        RowLayout {
+          id: appRow
+          anchors.left: parent.left
+          anchors.right: parent.right
+          anchors.verticalCenter: parent.verticalCenter
+          anchors.leftMargin: Style.space(8)
+          anchors.rightMargin: Style.space(6)
+          spacing: Style.space(6)
+          Image {
+            Layout.preferredWidth: Style.space(18)
+            Layout.preferredHeight: Style.space(18)
+            source: root.iconSource(appTile.modelData.icon)
+            sourceSize.width: 64
+            sourceSize.height: 64
+            fillMode: Image.PreserveAspectFit
+            visible: status === Image.Ready
+          }
+          Text {
+            Layout.fillWidth: true
+            textFormat: Text.PlainText
+            text: appTile.modelData.name
+            color: root.foreground
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+            elide: Text.ElideRight
+          }
+          KeyCap {
+            visible: appTile.index < 9
+            label: appTile.current ? "now" : String(appTile.index + 1)
+            foreground: root.foreground
+            fontFamily: root.fontFamily
+          }
+        }
 
-    PanelToolTip {
-      visible: webappMouse.containsMouse
-      text: !webappButton.app ? "" : webappButton.current ? "This tile already shows " + webappButton.app.name
-        : webappButton.app.url + "  ·  right-click to hide"
+        MouseArea {
+          id: appMouse
+          anchors.fill: parent
+          hoverEnabled: true
+          acceptedButtons: Qt.LeftButton | Qt.RightButton
+          onClicked: function(mouse) {
+            if (mouse.button === Qt.RightButton) root.hideWebapp(appTile.modelData)
+            else if (!appTile.current) root.addWebapp(appTile.modelData)
+          }
+        }
+
+        PanelToolTip {
+          visible: appMouse.containsMouse
+          text: appTile.current ? "This tile already shows " + appTile.modelData.name
+            : appTile.modelData.url + "  ·  right-click to hide"
+        }
+      }
     }
   }
 
@@ -1951,18 +2061,13 @@ Panel {
       anchors.left: parent.left
       anchors.right: parent.right
       anchors.verticalCenter: parent.verticalCenter
-      anchors.leftMargin: Style.space(10)
+      anchors.leftMargin: Style.space(8)
       anchors.rightMargin: Style.space(6)
-      spacing: Style.space(8)
+      spacing: Style.space(10)
 
-      Image {
-        Layout.preferredWidth: Style.space(16)
-        Layout.preferredHeight: Style.space(16)
+      SiteLogo {
         source: hiddenRow.entry && hiddenRow.entry.app ? root.iconSource(hiddenRow.entry.app.icon) : ""
-        sourceSize.width: 64
-        sourceSize.height: 64
-        fillMode: Image.PreserveAspectFit
-        visible: status === Image.Ready
+        initial: hiddenRow.entry ? String(hiddenRow.entry.label).charAt(0).toUpperCase() : ""
       }
 
       ColumnLayout {
@@ -1981,7 +2086,7 @@ Panel {
         Text {
           Layout.fillWidth: true
           textFormat: Text.PlainText
-          text: !hiddenRow.entry ? "" : hiddenRow.entry.app ? hiddenRow.entry.app.url : "No installed web app has this name"
+          text: !hiddenRow.entry ? "" : hiddenRow.entry.app ? Model.siteOf(hiddenRow.entry.app.url) : "No installed web app has this name"
           color: root.dim
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption
@@ -1998,6 +2103,63 @@ Panel {
     }
   }
 
+  // A small key label, like a key on the keyboard, as the swap card draws
+  // them.
+  component KeyCap: Rectangle {
+    property string label: ""
+    property color foreground: root.foreground
+    property string fontFamily: root.fontFamily
+    implicitWidth: Math.max(implicitHeight, capText.implicitWidth + Style.space(10))
+    implicitHeight: capText.implicitHeight + Style.space(4)
+    radius: Math.max(2, Style.cornerRadius / 2)
+    color: Qt.rgba(foreground.r, foreground.g, foreground.b, 0.06)
+    border.width: 1
+    border.color: Qt.rgba(foreground.r, foreground.g, foreground.b, 0.22)
+
+    Text {
+      id: capText
+      anchors.centerIn: parent
+      textFormat: Text.PlainText
+      text: parent.label
+      color: parent.foreground
+      font.family: parent.fontFamily
+      font.pixelSize: Style.font.caption
+    }
+  }
+
+  // A site's logo in a 28px square, or its initial when there is none.
+  component SiteLogo: Rectangle {
+    property alias source: logoImage.source
+    property string initial: ""
+    implicitWidth: Style.space(28)
+    implicitHeight: Style.space(28)
+    Layout.preferredWidth: implicitWidth
+    Layout.preferredHeight: implicitHeight
+    radius: Style.cornerRadius
+    color: logoImage.status === Image.Ready ? "transparent" : Style.selectedFillFor(root.foreground, Color.accent)
+
+    Image {
+      id: logoImage
+      anchors.fill: parent
+      anchors.margins: Style.space(2)
+      sourceSize.width: 64
+      sourceSize.height: 64
+      fillMode: Image.PreserveAspectFit
+      smooth: true
+      visible: status === Image.Ready
+    }
+    Text {
+      visible: logoImage.status !== Image.Ready
+      anchors.centerIn: parent
+      textFormat: Text.PlainText
+      text: parent.initial
+      color: root.foreground
+      font.family: root.fontFamily
+      font.pixelSize: Style.font.body
+      font.bold: true
+    }
+  }
+
   // A setting for the whole mosaic: an icon, what it does, and a switch.
   component SwitchRow: CursorSurface {
     id: switchRow
@@ -2006,6 +2168,7 @@ Panel {
     property string iconOff: ""
     property string text: ""
     property string tooltip: ""
+    property string keyLabel: ""
     signal toggled()
     foreground: root.foreground
     hasCursor: switchMouse.containsMouse
@@ -2043,6 +2206,10 @@ Panel {
         font.family: root.fontFamily
         font.pixelSize: Style.font.caption
         elide: Text.ElideRight
+      }
+      KeyCap {
+        visible: switchRow.keyLabel !== ""
+        label: switchRow.keyLabel
       }
       ToggleSwitch {
         checked: switchRow.checked
@@ -2179,35 +2346,11 @@ Panel {
         Layout.fillWidth: true
         spacing: Style.space(10)
 
-        Rectangle {
+        SiteLogo {
           id: logoBox
-          Layout.preferredWidth: Style.space(28)
-          Layout.preferredHeight: Style.space(28)
           Layout.alignment: Qt.AlignVCenter
-          radius: Style.cornerRadius
-          color: logoImage.status === Image.Ready ? "transparent" : Style.selectedFillFor(root.foreground, Color.accent)
-
-          Image {
-            id: logoImage
-            anchors.fill: parent
-            anchors.margins: Style.space(2)
-            source: row.logo
-            sourceSize.width: 64
-            sourceSize.height: 64
-            fillMode: Image.PreserveAspectFit
-            smooth: true
-            visible: status === Image.Ready
-          }
-          Text {
-            visible: logoImage.status !== Image.Ready
-            anchors.centerIn: parent
-            textFormat: Text.PlainText
-            text: row.tile ? Model.tileInitial(row.tile, row.app) : ""
-            color: root.foreground
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.body
-            font.bold: true
-          }
+          source: row.logo
+          initial: row.tile ? Model.tileInitial(row.tile, row.app) : ""
         }
 
         ColumnLayout {
@@ -2310,20 +2453,9 @@ Panel {
         sourceComponent: ColumnLayout {
           spacing: Style.space(6)
 
-          Flow {
-            visible: root.shownWebapps.length > 0
+          AppGrid {
             Layout.fillWidth: true
-            spacing: Style.space(6)
-            Repeater {
-              model: root.shownWebapps
-              WebappButton {
-                required property var modelData
-                required property int index
-                app: modelData
-                number: index + 1
-                current: row.tile !== null && Model.siteOf(modelData.url) === Model.siteOf(row.tile.url)
-              }
-            }
+            currentUrl: row.tile ? row.tile.url : ""
           }
 
           TextField {

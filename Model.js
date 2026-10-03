@@ -2016,3 +2016,34 @@ function audioIcon(entry) {
   if (!entry.audible) return "󰕿"
   return entry.volume !== undefined && entry.volume < 0.5 ? "󰖀" : "󰕾"
 }
+
+// The panel's key bar: [key, what it does] pairs for `context` (a tab, or
+// "swap", "adding", "editor", "extension-restart", "extension-off"). The
+// first few show at once; `all` shows the rest, which "?" toggles.
+// `apps` is how many web apps have number keys.
+var KEY_HINTS = {
+  tiles: { main: [["↑↓", "select"], ["Enter", "focus"], ["S", "swap"], ["A", "add"]],
+    more: [["M", "mute"], ["−/+", "volume"], ["G", "layout"], ["F", "focused only"], ["⇧C", "keep contained"],
+      ["C", "contain now"], ["X", "remove"], ["⇧D", "close session"], ["R", "refresh"], ["H/L", "tabs"]] },
+  swap: { main: [["#", "web app"], ["A", "address"], ["Enter", "replace"], ["Esc", "cancel"]], more: [] },
+  adding: { main: [["#", "web app"], ["Enter", "add"], ["Esc", "close"]], more: [] },
+  hidden: { main: [["↑↓", "select"], ["Enter", "show again"], ["H/L", "tabs"]], more: [["R", "refresh"]] },
+  layouts: { main: [["↑↓", "select"], ["Enter", "next layout"], ["N", "new"], ["E", "edit"]],
+    more: [["0", "Hyprland's"], ["W", "all workspaces"], ["D", "delete"], ["H/L", "tabs"]] },
+  editor: { main: [["←→", "zone"], ["Enter", "save"], ["Esc", "cancel"]],
+    more: [["−/+", "size"], ["S", "split beside"], ["B", "split below"], ["X", "remove"], ["M", "main"],
+      ["T", "preset"], ["N", "name"], ["F", "large"]] },
+  extension: { main: [["V", "verify"], ["H/L", "tabs"]], more: [] },
+  "extension-off": { main: [["E", "enable"], ["V", "verify"], ["H/L", "tabs"]], more: [] },
+  "extension-restart": { main: [["B", "restart browser"], ["V", "verify"], ["H/L", "tabs"]], more: [] }
+}
+
+function keyHints(context, all, apps) {
+  var hints = KEY_HINTS[context] || KEY_HINTS.tiles
+  var numbers = apps > 1 ? "1–" + Math.min(9, apps) : apps === 1 ? "1" : ""
+  var shown = (all ? hints.main.concat(hints.more) : hints.main).filter(function(hint) {
+    return hint[0] !== "#" || numbers !== ""
+  }).map(function(hint) { return hint[0] === "#" ? [numbers, hint[1]] : hint })
+  if (hints.more.length > 0) shown.push(["?", all ? "fewer" : "more"])
+  return shown
+}

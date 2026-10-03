@@ -16,6 +16,14 @@
   the cursor; the others show their level next to the mute button. The
   monitor and workspace moved to the session's header when all its tiles
   share them.
+- **Add tile folds away**: it is one row until A or a click opens it (it
+  stays open while there are no tiles), and its web apps are an even grid
+  with their number keys, the same grid that swapping a tile shows.
+- **A key bar instead of a key list**: the panel's footer shows the main
+  keys for what's on screen as key caps, on one line; ? shows the rest.
+  The Tiles tab's switches show their keys the same way.
+- **The Hidden tab matches**: the same icons as the tile rows, the site
+  instead of the whole address, and no leftover notice from another tab.
 - **Layouts drawn in the session header**: the layout button is a small
   picture of where the session's tiles go, at the monitor's shape, beside
   the layout's name.
