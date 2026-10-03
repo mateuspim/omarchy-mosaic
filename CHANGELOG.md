@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.2.0 (2026-10-03)
 
 - **Keep fullscreen in tiles**: a new switch on the Tiles tab (Shift+C)
   contains tiles on its own. A tile that loses its containment is
