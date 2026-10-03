@@ -24,6 +24,11 @@
   The Tiles tab's switches show their keys the same way.
 - **The Hidden tab matches**: the same icons as the tile rows, the site
   instead of the whole address, and no leftover notice from another tab.
+- **The Layouts and Extension tabs match**: each workspace row shows a
+  small picture of its layout at its monitor's shape, New layout is a row
+  like Add tile, and the Extension tab says how it stands in a chip
+  ("Connected", "Restart needed", "Not set up"). Buttons no longer carry
+  their keys in their labels; the key bar shows them.
 - **Layouts drawn in the session header**: the layout button is a small
   picture of where the session's tiles go, at the monitor's shape, beside
   the layout's name.

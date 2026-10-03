@@ -882,59 +882,12 @@ Panel {
 
             // Add tile: one row until A or a click opens it. Hidden while
             // swapping, since the tile's own card holds the picker then.
-            CursorSurface {
+            ActionRow {
               visible: root.swapTile === null && !root.addOpen
               width: parent.width
-              foreground: root.foreground
-              hasCursor: addMouse.containsMouse
-              implicitHeight: addRow.implicitHeight + Style.space(12)
-              Accessible.role: Accessible.Button
-              Accessible.name: "Add tile"
-
-              MouseArea {
-                id: addMouse
-                anchors.fill: parent
-                hoverEnabled: true
-                onClicked: root.startAdding()
-              }
-
-              RowLayout {
-                id: addRow
-                anchors.left: parent.left
-                anchors.right: parent.right
-                anchors.verticalCenter: parent.verticalCenter
-                anchors.leftMargin: Style.space(8)
-                anchors.rightMargin: Style.space(8)
-                spacing: Style.space(10)
-                Rectangle {
-                  Layout.preferredWidth: Style.space(28)
-                  Layout.preferredHeight: Style.space(28)
-                  radius: Style.cornerRadius
-                  color: "transparent"
-                  border.width: 1
-                  border.color: Qt.darker(root.foreground, 2.2)
-                  Text {
-                    anchors.centerIn: parent
-                    text: "󰐕"
-                    color: root.foreground
-                    font.family: root.fontFamily
-                    font.pixelSize: Style.font.body
-                  }
-                }
-                Text {
-                  Layout.fillWidth: true
-                  textFormat: Text.PlainText
-                  text: "Add tile"
-                  color: root.foreground
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.body
-                }
-                KeyCap {
-                  label: "A"
-                  foreground: root.foreground
-                  fontFamily: root.fontFamily
-                }
-              }
+              text: "Add tile"
+              keyLabel: "A"
+              onClicked: root.startAdding()
             }
 
             Column {
@@ -998,7 +951,7 @@ Panel {
             Button {
               visible: Model.anyUncontained(root.tiles)
               width: parent.width
-              text: "Contain fullscreen in every tile  C"
+              text: "Contain fullscreen in every tile"
               iconText: "󰊓"
               foreground: root.foreground
               onClicked: root.contain()
@@ -1102,11 +1055,10 @@ Panel {
               }
             }
 
-            Button {
+            ActionRow {
               width: parent.width
-              text: "New layout  N"
-              iconText: "󰐕"
-              foreground: root.foreground
+              text: "New layout"
+              keyLabel: "N"
               onClicked: root.newLayout()
             }
           }
@@ -1200,10 +1152,19 @@ Panel {
             width: parent.width
             spacing: Style.space(6)
 
-            PanelSectionHeader {
-              text: "BROWSER EXTENSION"
-              foreground: root.foreground
-              fontFamily: root.fontFamily
+            RowLayout {
+              width: parent.width
+              PanelSectionHeader {
+                text: "BROWSER EXTENSION"
+                foreground: root.foreground
+                fontFamily: root.fontFamily
+                Layout.fillWidth: true
+              }
+              StateChip {
+                good: root.extensionState === "connected" && !root.restartNeeded
+                text: root.restartNeeded ? "Restart needed" : root.extensionState === "connected" ? "Connected"
+                  : root.extensionState === "unknown" ? "Checking…" : "Not set up"
+              }
             }
 
             Notice {
@@ -1241,7 +1202,7 @@ Panel {
             Button {
               visible: root.restartNeeded
               width: parent.width
-              text: root.confirmRestart ? "Press again to restart" : "Restart the browser  B"
+              text: root.confirmRestart ? "Press again to restart" : "Restart the browser"
               iconText: "󰑓"
               foreground: root.foreground
               enabled: root.activity === ""
@@ -1254,7 +1215,7 @@ Panel {
               Button {
                 visible: root.extensionState === "off" || root.extensionState === "unknown"
                 Layout.fillWidth: true
-                text: "Enable  E"
+                text: "Enable"
                 iconText: "󰐕"
                 foreground: root.foreground
                 onClicked: root.enableExtension()
@@ -1269,7 +1230,7 @@ Panel {
               }
               Button {
                 Layout.fillWidth: true
-                text: root.service && root.service.verifying ? "Verifying…" : "Verify  V"
+                text: root.service && root.service.verifying ? "Verifying…" : "Verify"
                 iconText: "󰄬"
                 foreground: root.foreground
                 enabled: !(root.service && root.service.verifying)
@@ -1530,9 +1491,29 @@ Panel {
       anchors.left: parent.left
       anchors.right: parent.right
       anchors.verticalCenter: parent.verticalCenter
-      anchors.leftMargin: Style.space(10)
+      anchors.leftMargin: Style.space(8)
       anchors.rightMargin: Style.space(6)
-      spacing: Style.space(8)
+      spacing: Style.space(10)
+
+      // The layout with this workspace's windows (three, dimmed, when it
+      // has none), at its monitor's shape.
+      Rectangle {
+        readonly property real aspect: workspaceRow.entry && workspaceRow.entry.monitor !== "" ? root.monitorAspect(workspaceRow.entry.monitor) : 16 / 9
+        Layout.preferredWidth: Style.space(28)
+        Layout.preferredHeight: Style.space(28)
+        radius: Style.cornerRadius
+        color: "transparent"
+        border.width: 1
+        border.color: Qt.darker(root.foreground, 2.2)
+        LayoutThumb {
+          anchors.centerIn: parent
+          aspect: parent.aspect
+          width: Math.round(aspect >= 1 ? Style.space(20) : Style.space(20) * aspect)
+          height: Math.round(aspect >= 1 ? Style.space(20) / aspect : Style.space(20))
+          opacity: workspaceRow.entry && workspaceRow.entry.windows > 0 ? 1 : 0.45
+          boxes: workspaceRow.entry ? Model.layoutBoxes(workspaceRow.entry.choice, root.layoutCustom, workspaceRow.entry.windows > 0 ? workspaceRow.entry.windows : 3, aspect) : []
+        }
+      }
 
       ColumnLayout {
         id: workspaceContent
@@ -2127,6 +2108,87 @@ Panel {
     }
   }
 
+  // A row that does one thing, like Add tile: a + box, what it does, and
+  // its key.
+  component ActionRow: CursorSurface {
+    id: actionRow
+    property string iconText: "󰐕"
+    property string text: ""
+    property string keyLabel: ""
+    signal clicked()
+    foreground: root.foreground
+    hasCursor: actionMouse.containsMouse
+    implicitHeight: actionContent.implicitHeight + Style.space(12)
+    Accessible.role: Accessible.Button
+    Accessible.name: text
+
+    MouseArea {
+      id: actionMouse
+      anchors.fill: parent
+      hoverEnabled: true
+      onClicked: actionRow.clicked()
+    }
+
+    RowLayout {
+      id: actionContent
+      anchors.left: parent.left
+      anchors.right: parent.right
+      anchors.verticalCenter: parent.verticalCenter
+      anchors.leftMargin: Style.space(8)
+      anchors.rightMargin: Style.space(8)
+      spacing: Style.space(10)
+      Rectangle {
+        Layout.preferredWidth: Style.space(28)
+        Layout.preferredHeight: Style.space(28)
+        radius: Style.cornerRadius
+        color: "transparent"
+        border.width: 1
+        border.color: Qt.darker(root.foreground, 2.2)
+        Text {
+          anchors.centerIn: parent
+          text: actionRow.iconText
+          color: root.foreground
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.body
+        }
+      }
+      Text {
+        Layout.fillWidth: true
+        textFormat: Text.PlainText
+        text: actionRow.text
+        color: root.foreground
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.body
+        elide: Text.ElideRight
+      }
+      KeyCap {
+        visible: actionRow.keyLabel !== ""
+        label: actionRow.keyLabel
+      }
+    }
+  }
+
+  // A small pill with a state, accent-coloured when all is well, as the
+  // swap card's "In place".
+  component StateChip: Rectangle {
+    property string text: ""
+    property bool good: false
+    implicitWidth: chipText.implicitWidth + Style.space(14)
+    implicitHeight: chipText.implicitHeight + Style.space(6)
+    radius: height / 2
+    color: good ? Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, 0.16)
+      : Qt.rgba(root.urgent.r, root.urgent.g, root.urgent.b, 0.16)
+    Text {
+      id: chipText
+      anchors.centerIn: parent
+      textFormat: Text.PlainText
+      text: parent.text
+      color: parent.good ? Color.accent : root.urgent
+      font.family: root.fontFamily
+      font.pixelSize: Style.font.caption
+    }
+  }
+
   // A site's logo in a 28px square, or its initial when there is none.
   component SiteLogo: Rectangle {
     property alias source: logoImage.source
@@ -2243,10 +2305,10 @@ Panel {
       id: chipRow
       anchors.centerIn: parent
       spacing: Style.space(6)
-      // Fits a 22 × 14 box, so a portrait monitor's picture stays legible.
+      // Fits a 28 × 16 box, so a portrait monitor's picture stays legible.
       LayoutThumb {
         anchors.verticalCenter: parent.verticalCenter
-        height: Math.round(Math.min(Style.space(14), Style.space(22) / aspect))
+        height: Math.round(Math.min(Style.space(16), Style.space(28) / aspect))
         width: Math.round(height * aspect)
         aspect: chip.session && chip.session.tiles.length > 0 ? root.monitorAspect(chip.session.tiles[0].monitor) : 16 / 9
         boxes: Model.layoutBoxes(chip.choice, root.layoutCustom, chip.session ? chip.session.tiles.length : 0, aspect)
