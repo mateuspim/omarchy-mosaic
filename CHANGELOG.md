@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.1.1 (2026-10-02)
 
 - **A nicer swap card** (Super+Shift+S on a tile): the site's logo and
   address up top, an "In place" or "New window" chip, the web apps as a
