@@ -22,8 +22,9 @@ the CLI.
   session and address validation, web app URL extraction, list shaping, and
   the containment state.
 - **Hyprland is the source of truth.** Tags decide which windows are tiles.
-  The store only adds URLs and order. Nothing watches for lost containment
-  (see below); the engine only reacts to Hyprland events to refresh its model.
+  The store only adds URLs and order. The engine reacts to Hyprland events
+  to refresh its model, and, with the panel's "Keep fullscreen in tiles"
+  setting on, to contain tiles again (see "Keeping fullscreen in tiles").
 - **How the widget reaches the service.** Through the host's own-service
   facade: `bar.shell.serviceFor("pym.mosaic")`, held in a typed `QtObject`
   property that resets to null when the service is destroyed, and looked up
@@ -384,6 +385,25 @@ Hyprland restores the earlier state after a float or fullscreen round trip.
 Containment is lost only when the state is set directly, which emits no
 event, so a watcher would add nothing. `contain` re-applies `0/2` on request,
 and only to tagged tiles in the `uncontained` state.
+
+### Keeping fullscreen in tiles
+
+The panel's **Keep fullscreen in tiles** switch (Shift+C, the widget
+setting `autoContain`) makes the service contain tiles without being
+asked (`Model.planAutoContain`), every time its list is rebuilt:
+
+- a tile in the `uncontained` state is contained at once, focused or not;
+- a truly fullscreen tile (Super+F, or a video that went fullscreen in an
+  uncontained tile) stays big while it has focus, and is contained once
+  another window takes focus. Focus on a layer, such as the bar or a
+  launcher, doesn't count, so opening the panel leaves the video alone;
+- floating tiles are left alone, and so is a window an add or swap is
+  still placing.
+
+Since a state set directly (Super+Ctrl+F) emits no event, each
+`activewindowv2` also refreshes the clients, so such a tile is caught at the
+next focus change. Each dispatch is retried at most every two seconds per
+tile, so a tile Hyprland won't contain can't loop the service.
 
 ### Known side effects
 

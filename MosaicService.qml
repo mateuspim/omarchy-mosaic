@@ -162,6 +162,36 @@ Scope {
     return bridge.script !== root.extensionOnDisk.script
   })
 
+  // The widget's setting: keep fullscreen in every tile. A tile that lost
+  // its containment is contained again, and a truly fullscreen one once
+  // another window takes focus; see Model.planAutoContain.
+  property bool autoContain: false
+  // The last window to take focus. Focus on the bar or a launcher (no
+  // window) leaves it, so opening the panel doesn't shrink a video.
+  property string containFocus: ""
+  // When each expression was last sent (ms), so a tile Hyprland won't
+  // contain is retried every couple of seconds, not on every refresh.
+  property var autoContainAt: ({})
+
+  onAutoContainChanged: if (autoContain) refresh()
+
+  // Contains what the setting asks for in the current list; rebuild()
+  // calls it on every change. Not while an add or swap places its window,
+  // which gets its containment last.
+  function applyAutoContain() {
+    if (!autoContain || busy) return
+    var now = Date.now()
+    var fresh = Model.planAutoContain(list, containFocus).filter(function(expression) {
+      return root.restoreQueue.indexOf(expression) === -1 && !(now - (root.autoContainAt[expression] || 0) < 2000)
+    })
+    if (fresh.length === 0) return
+    var sent = Object.assign({}, autoContainAt)
+    fresh.forEach(function(expression) { sent[expression] = now })
+    autoContainAt = sent
+    restoreQueue = restoreQueue.concat(fresh)
+    restoreNext()
+  }
+
   onAudioFollowsFocusChanged: {
     if (audioFollowsFocus) {
       var focused = focusedTile()
@@ -206,6 +236,7 @@ Scope {
     if (JSON.stringify(counts) !== JSON.stringify(workspaceWindows)) workspaceWindows = counts
     var next = Model.buildList(clients, monitors, records)
     if (JSON.stringify(next) !== JSON.stringify(list)) list = next
+    applyAutoContain()
   }
 
   // `mosaic focus TILE`: a tile's number in the list, or its address.
@@ -1046,6 +1077,12 @@ Scope {
   function windowFocused(data) {
     var address = "0x" + String(data).trim()
     focusedWindow = address
+    // Unfocusing a window emits no fullscreen event, and a state set
+    // directly (Super+Ctrl+F) none at all, so read the states again.
+    if (Model.validAddress(address) && address !== containFocus) {
+      containFocus = address
+      if (autoContain) refresh()
+    }
     var isTile = Model.listTiles(list).some(function(tile) { return tile.address === address })
     if (isTile && bridges.length > 0 && extensionCheck && extensionCheck.tiles && !extensionCheck.tiles[address]) {
       focusProbe = address

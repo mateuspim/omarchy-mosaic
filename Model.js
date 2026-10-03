@@ -323,10 +323,126 @@ function tileLabel(tile) {
   return tile.url || "Tile " + tile.index
 }
 
-function tileMeta(tile) {
-  var parts = [tile.monitor + " · workspace " + tile.workspace]
-  if (tile.state && tile.state !== "contained") parts.push(stateLabel(tile.state))
-  return parts.join("  ·  ")
+// The line under a tile's name. `place` is its session's shared place
+// (see sessionPlace); when there is one, the tile leaves it to the header.
+function tileMeta(tile, place, app) {
+  // A problem comes first, where eliding cannot hide it.
+  var parts = tile.state && tile.state !== "contained" ? [stateLabel(tile.state)] : []
+  parts.push(place ? tileSubtitle(tile, app) : tile.monitor + " · workspace " + tile.workspace)
+  return parts.filter(function(part) { return part !== "" }).join("  ·  ")
+}
+
+// "DP-4 · workspace 10" when every tile of a session is there, else "".
+function sessionPlace(tiles) {
+  if (!tiles || tiles.length === 0) return ""
+  for (var i = 1; i < tiles.length; i++) {
+    if (tiles[i].monitor !== tiles[0].monitor || tiles[i].workspace !== tiles[0].workspace) return ""
+  }
+  return tiles[0].monitor + " · workspace " + tiles[0].workspace
+}
+
+// The web app showing the tile's site, or null.
+function tileApp(apps, tile) {
+  var site = tile ? siteOf(tile.url) : ""
+  for (var i = 0; site !== "" && apps && i < apps.length; i++) {
+    if (siteOf(apps[i].url) === site) return apps[i]
+  }
+  return null
+}
+
+// A tile's name: its web app's, else its site ("example.org"), else its
+// page title.
+function tileName(tile, app) {
+  if (app) return app.name
+  var site = siteOf(tile.url)
+  return site !== "" ? site : tileLabel(tile)
+}
+
+// What sets a tile apart from others on its site: the path of its
+// address ("twitch.tv/somechannel"), else the page's title without an
+// unread count or the site's name ("(5) Home / X" is "Home").
+function tileSubtitle(tile, app) {
+  var label = tileLabel(tile)
+  if (label.indexOf("/") !== -1) return label
+  var title = String(tile.title || "").trim().replace(/^\(\d+\+?\)\s*/, "")
+  var names = [label.split(".")[0]].concat(app ? [app.name] : [])
+  for (var i = 0; i < names.length; i++) {
+    var suffix = new RegExp("\\s+[-–—|/·:]\\s+" + names[i].replace(/[^a-z0-9]/gi, "\\$&") + "$", "i")
+    title = title.replace(suffix, "")
+  }
+  return title !== "" && title.toLowerCase() !== label.toLowerCase() && title.toLowerCase() !== (app ? app.name.toLowerCase() : "") ? title : ""
+}
+
+// One letter for a tile without an icon.
+function tileInitial(tile, app) {
+  var name = tileName(tile, app).replace(/^[^a-z0-9]+/i, "")
+  return name === "" ? "?" : name.charAt(0).toUpperCase()
+}
+
+// Where `n` windows go in a layout, as fractions of an area with `aspect`
+// (width / height), in fill order: the same arrangement `layouts.lua`
+// makes, for the panel's small picture of it. "default" is Hyprland's own
+// dwindle, which halves the last window along its longer side.
+function layoutBoxes(choice, custom, n, aspect) {
+  var area = { x: 0, y: 0, w: aspect > 0 ? aspect : 16 / 9, h: 1 }
+  var portrait = area.h > area.w
+  function box(x, y, w, h) { return { x: x, y: y, w: w, h: h } }
+  function rowsOf(count, cols) {
+    var rows = []
+    for (var left = count; left > 0; left -= Math.min(cols, left)) rows.push(Math.min(cols, left))
+    return rows
+  }
+  function lines(a, counts, vertical) {
+    var boxes = []
+    for (var l = 0; l < counts.length; l++) {
+      for (var c = 0; c < counts[l]; c++) {
+        if (vertical) boxes.push(box(a.x + l * a.w / counts.length, a.y + c * a.h / counts[l], a.w / counts.length, a.h / counts[l]))
+        else boxes.push(box(a.x + c * a.w / counts[l], a.y + l * a.h / counts.length, a.w / counts[l], a.h / counts.length))
+      }
+    }
+    return boxes
+  }
+  var boxes = []
+  var slug = customSlug(choice)
+  if (n <= 0) boxes = []
+  else if (slug !== "" && custom && custom[slug]) {
+    var zones = fillZones(custom[slug]).map(function(z) { return box(z.x * area.w, z.y, z.w * area.w, z.h) })
+    var own = Math.min(n, zones.length)
+    boxes = zones.slice(0, own - 1)
+    var last = zones[own - 1]
+    boxes = boxes.concat(lines(last, [n - own + 1], last.h > last.w))
+  } else if (choice === "stack") boxes = lines(area, [n], portrait)
+  else if (choice === "main") {
+    if (n === 1) boxes = [area]
+    else if (portrait) boxes = [box(0, 0, area.w, 0.7)].concat(lines(box(0, 0.7, area.w, 0.3), [n - 1], false))
+    else boxes = [box(0, 0, area.w * 0.7, 1)].concat(lines(box(area.w * 0.7, 0, area.w * 0.3, 1), [n - 1], true))
+  } else if (choice === "fit") {
+    var best = null
+    for (var cols = 1; cols <= n; cols++) {
+      var w = Math.min(area.w / cols, area.h / Math.ceil(n / cols) * 16 / 9)
+      if (!best || w > best.w + 0.001) best = { cols: cols, w: w }
+    }
+    var h = best.w * 9 / 16
+    var counts = rowsOf(n, best.cols)
+    var top = (area.h - counts.length * h) / 2
+    for (var r = 0; r < counts.length; r++) {
+      var left = (area.w - counts[r] * best.w) / 2
+      for (var c = 0; c < counts[r]; c++) boxes.push(box(left + c * best.w, top + r * h, best.w, h))
+    }
+  } else if (choice === "default") {
+    var rest = area
+    for (var i = 0; i < n; i++) {
+      if (i === n - 1) { boxes.push(rest); break }
+      if (rest.w >= rest.h) {
+        boxes.push(box(rest.x, rest.y, rest.w / 2, rest.h))
+        rest = box(rest.x + rest.w / 2, rest.y, rest.w / 2, rest.h)
+      } else {
+        boxes.push(box(rest.x, rest.y, rest.w, rest.h / 2))
+        rest = box(rest.x, rest.y + rest.h / 2, rest.w, rest.h / 2)
+      }
+    }
+  } else boxes = lines(area, rowsOf(n, Math.ceil(Math.sqrt(n))), portrait)
+  return boxes.map(function(b) { return box(b.x / area.w, b.y, b.w / area.w, b.h) })
 }
 
 function stateLabel(state) {
@@ -494,6 +610,18 @@ function planContain(list, session) {
     return (!session || tile.session === session) && tile.state === "uncontained"
   })
   return plan("contain", chosen, "Contained fullscreen in " + chosen.length + " tile(s).")
+}
+
+// What the "keep fullscreen in tiles" setting contains: every tile that
+// lost its containment, and a truly fullscreen one once `focused` (the
+// last focused window's address) is another window, so a tile made big on
+// purpose stays big while it has focus. Floating tiles are left alone.
+// Returns the dispatch expressions.
+function planAutoContain(list, focused) {
+  return listTiles(list).filter(function(tile) {
+    return tile.state === "uncontained" || (tile.state === "fullscreen" && tile.address !== focused)
+  }).map(function(tile) { return dispatchExpression("contain", tile.address) })
+    .filter(function(expression) { return expression !== "" })
 }
 
 // The fullscreen state to re-apply after Hyprland's `movewindowv2` event

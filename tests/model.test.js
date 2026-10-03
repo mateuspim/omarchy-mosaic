@@ -5,7 +5,7 @@ import vm from "node:vm"
 const source = fs.readFileSync(new URL("../Model.js", import.meta.url), "utf8")
   .replace(/^\.pragma library\s*/m, "")
 const model = {}
-vm.runInNewContext(source + "\nObject.assign(model, {  zoneCount, newCustom, zoneDividers, withDivider, withoutZone, withSplit, ordinal, reconcileVolumes, layoutWorkspaceRows, shownWorkspaceRows, windowCounts, customRows, freeLayoutName, layoutChoices, layoutLabel, nextLayout, parseLayoutName, hyprLayoutName, layoutSlug, normalizeCustom, visualZones, defineLua, withZoneSize, withMain, withName, customSummary, parseLayouts, serializeLayouts, layoutsLoadLua, layoutsLoaded, layoutRuleLua, sessionWorkspace, tileStates, planWorkspaceLayout, planSyncLayouts, planSaveCustom, planDeleteCustom, workspaceChoice, layoutsText, hiddenEntries, showWebapp, nameList, visibleWebapps, hideWebapp, sessionOf, clientFromIpc, parseStore, tileState, buildList, shapeList, parseClients, validAddress, dispatchExpression, listTiles, findTile, planFocus, planRemove, planClose, planContain, restoreAfterMove, monitorFromIpc, parseMonitors, resolveAddTargets, chooseWorkspace, desktopId, isChromiumFamily, isAppWindow, parseOpenWindow, tileDispatches, pruneRecords, serializeStore, planReplace, replaceRecord, parseCursorPos, cursorMoveExpression, parseKeySpec, bindConflict, tileRect, listText, webappsText, monitorsText, splitLines, parseBridgeMessage, browserLabel, bridgeWindows, siteOf, matchTiles, keepTabs, tileTab, navigationSettled, extensionState, extensionNotice, extensionSteps, browserClass, browserPids, tileAudio, focusMutes, audioIcon, extensionFromManifest, bridgeHas, stepVolume, parseVolume, swapBindLua, unbindLua, webappUrl, webappFromEntry, buildWebapps, shapeWebapps, findWebapp, resolveTarget, parseList, tileLabel, tileMeta, normalizeUrl, sessionName, summary, anyUncontained, parseManifest });", { model })
+vm.runInNewContext(source + "\nObject.assign(model, {  zoneCount, newCustom, zoneDividers, withDivider, withoutZone, withSplit, ordinal, reconcileVolumes, layoutWorkspaceRows, shownWorkspaceRows, windowCounts, customRows, freeLayoutName, layoutChoices, layoutLabel, nextLayout, parseLayoutName, hyprLayoutName, layoutSlug, normalizeCustom, visualZones, defineLua, withZoneSize, withMain, withName, customSummary, parseLayouts, serializeLayouts, layoutsLoadLua, layoutsLoaded, layoutRuleLua, sessionWorkspace, tileStates, planWorkspaceLayout, planSyncLayouts, planSaveCustom, planDeleteCustom, workspaceChoice, layoutsText, hiddenEntries, showWebapp, nameList, visibleWebapps, hideWebapp, sessionOf, clientFromIpc, parseStore, tileState, buildList, shapeList, parseClients, validAddress, dispatchExpression, listTiles, findTile, planFocus, planRemove, planClose, planContain, planAutoContain, restoreAfterMove, monitorFromIpc, parseMonitors, resolveAddTargets, chooseWorkspace, desktopId, isChromiumFamily, isAppWindow, parseOpenWindow, tileDispatches, pruneRecords, serializeStore, planReplace, replaceRecord, parseCursorPos, cursorMoveExpression, parseKeySpec, bindConflict, tileRect, listText, webappsText, monitorsText, splitLines, parseBridgeMessage, browserLabel, bridgeWindows, siteOf, matchTiles, keepTabs, tileTab, navigationSettled, extensionState, extensionNotice, extensionSteps, browserClass, browserPids, tileAudio, focusMutes, audioIcon, extensionFromManifest, bridgeHas, stepVolume, parseVolume, swapBindLua, unbindLua, webappUrl, webappFromEntry, buildWebapps, shapeWebapps, findWebapp, resolveTarget, parseList, tileLabel, tileMeta, sessionPlace, tileApp, tileName, tileSubtitle, tileInitial, layoutBoxes, normalizeUrl, sessionName, summary, anyUncontained, parseManifest });", { model })
 
 // Values built inside the VM belong to another realm, so compare copies.
 const plain = value => JSON.parse(JSON.stringify(value))
@@ -29,7 +29,40 @@ assert.equal(model.tileLabel({ url: "https://www.youtube.com/", title: "x", inde
 assert.equal(model.tileLabel({ url: "", title: "Some page", index: 4 }), "Some page")
 assert.equal(model.tileLabel({ url: "", title: "", index: 4 }), "Tile 4")
 assert.equal(model.tileMeta(list.tiles[0]), "DP-4 · workspace 10")
-assert.equal(model.tileMeta(list.tiles[2]), "DP-5 · workspace 1  ·  fullscreen not contained")
+assert.equal(model.tileMeta(list.tiles[2]), "fullscreen not contained  ·  DP-5 · workspace 1")
+assert.equal(model.sessionPlace(list.sessions[1].tiles), "DP-5 · workspace 1")
+assert.equal(model.sessionPlace([list.tiles[0], list.tiles[1]]), "")
+assert.equal(model.tileMeta(list.tiles[1], "DP-5 · workspace 1"), "twitch.tv/somechannel")
+assert.equal(model.tileMeta(list.tiles[2], "DP-5 · workspace 1"), "fullscreen not contained")
+const twitchApp = { name: "Twitch", url: "https://twitch.tv" }
+assert.equal(model.tileSubtitle({ url: "https://x.com/", title: "Home / X", index: 1 }), "Home")
+assert.equal(model.tileSubtitle({ url: "https://x.com/", title: "x.com", index: 1 }), "")
+assert.equal(model.tileSubtitle({ url: "https://x.com/", title: "(3) Home / X", index: 1 }, { name: "X" }), "Home")
+assert.equal(model.tileSubtitle({ url: "https://twitch.tv", title: "(5) Richellyna - Twitch", index: 1 }, twitchApp), "Richellyna")
+assert.equal(model.tileSubtitle({ url: "https://youtube.com/", title: "YouTube", index: 1 }, { name: "YouTube" }), "")
+assert.equal(model.tileSubtitle({ url: "https://kick.com/", title: "Kick: live - Kick", index: 1 }), "Kick: live")
+assert.equal(model.tileApp([twitchApp], list.tiles[1]).name, "Twitch")
+assert.equal(model.tileApp([twitchApp], list.tiles[0]), null)
+assert.equal(model.tileName(list.tiles[1], twitchApp), "Twitch")
+assert.equal(model.tileName(list.tiles[0], null), "bbc.com")
+assert.equal(model.tileName({ url: "", title: "Some page", index: 2 }, null), "Some page")
+assert.equal(model.tileInitial(list.tiles[0], null), "B")
+assert.equal(model.tileInitial({ url: "", title: "", index: 4 }, null), "T")
+
+// The panel's picture of a layout: fractions in fill order.
+const rounded = boxes => plain(boxes).map(b => [b.x, b.y, b.w, b.h].map(v => Math.round(v * 1000) / 1000))
+assert.deepEqual(rounded(model.layoutBoxes("stack", {}, 2, 16 / 9)), [[0, 0, 0.5, 1], [0.5, 0, 0.5, 1]])
+assert.deepEqual(rounded(model.layoutBoxes("grid", {}, 3, 16 / 9)), [[0, 0, 0.5, 0.5], [0.5, 0, 0.5, 0.5], [0, 0.5, 1, 0.5]])
+assert.deepEqual(rounded(model.layoutBoxes("main", {}, 3, 16 / 9)), [[0, 0, 0.7, 1], [0.7, 0, 0.3, 0.5], [0.7, 0.5, 0.3, 0.5]])
+assert.deepEqual(rounded(model.layoutBoxes("fit", {}, 1, 16 / 9)), [[0, 0, 1, 1]])
+assert.deepEqual(rounded(model.layoutBoxes("default", {}, 3, 16 / 9)), [[0, 0, 0.5, 1], [0.5, 0, 0.5, 0.5], [0.5, 0.5, 0.5, 0.5]])
+assert.deepEqual(rounded(model.layoutBoxes("custom:gone", {}, 2, 16 / 9)), [[0, 0, 0.5, 1], [0.5, 0, 0.5, 1]])
+const threeCols = model.newCustom("Three", "columns")
+assert.deepEqual(rounded(model.layoutBoxes("custom:three", { three: threeCols }, 4, 16 / 9)),
+  [[0.25, 0, 0.5, 1], [0, 0, 0.25, 1], [0.75, 0, 0.25, 0.5], [0.75, 0.5, 0.25, 0.5]])
+assert.equal(model.layoutBoxes("grid", {}, 0, 1).length, 0)
+assert.deepEqual(rounded(model.layoutBoxes("stack", {}, 2, 9 / 16)), [[0, 0, 1, 0.5], [0, 0.5, 1, 0.5]])
+assert.deepEqual(rounded(model.layoutBoxes("main", {}, 3, 9 / 16)), [[0, 0, 1, 0.7], [0, 0.7, 0.5, 0.3], [0.5, 0.7, 0.5, 0.3]])
 
 assert.equal(model.normalizeUrl(" twitch.tv/foo "), "https://twitch.tv/foo")
 assert.equal(model.normalizeUrl("https://kick.com"), "https://kick.com")
@@ -223,6 +256,17 @@ assert.equal(model.planContain(live, "news").expressions.length, 0)
 const forged = { version: 1, sessions: [{ name: "x", tiles: [{ index: 1, address: '0x1" }) os.exit() --', state: "uncontained" }] }] }
 assert.equal(model.planClose(forged, "").error.startsWith("Unexpected Hyprland window address"), true)
 assert.equal(model.planContain(forged, "").error.startsWith("Unexpected Hyprland window address"), true)
+// Keep fullscreen in tiles: lost containment always, true fullscreen once
+// another window has focus, never floating tiles or forged addresses.
+const states = { version: 1, sessions: [{ name: "x", tiles: [
+  { index: 1, address: "0xa", state: "contained" },
+  { index: 2, address: "0xb", state: "uncontained" },
+  { index: 3, address: "0xc", state: "fullscreen" },
+  { index: 4, address: "0xd", state: "floating" }] }] }
+const containOf = address => 'hl.dsp.window.fullscreen_state({ internal = 0, client = 2, window = "address:' + address + '" })'
+assert.deepEqual(plain(model.planAutoContain(states, "0xc")), [containOf("0xb")])
+assert.deepEqual(plain(model.planAutoContain(states, "0xb")), [containOf("0xb"), containOf("0xc")])
+assert.deepEqual(plain(model.planAutoContain(forged, "")), [])
 
 // `live`: 0x1 and 0x2 contained, 0x3 uncontained.
 assert.equal(model.restoreAfterMove(live, "1,10,10"), 'hl.dsp.window.fullscreen_state({ internal = 0, client = 2, window = "address:0x1" })')

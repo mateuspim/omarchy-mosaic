@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased
+
+- **Keep fullscreen in tiles**: a new switch on the Tiles tab (Shift+C)
+  contains tiles on its own. A tile that loses its containment is
+  contained again right away, and a tile made truly fullscreen (Super+F,
+  or a video that escaped) stays big only while it has focus: once another
+  window takes focus, it goes back into its tile.
+- **Tile rows that show what's in them**: each tile has its web app's icon
+  (or the site's favicon, or its first letter), its name, and what sets it
+  apart from the others: the page's title without unread counts or the
+  site's name, or its address's path. A warning, like "fullscreen not
+  contained", comes first so it is never cut off.
+- **Quieter Tiles tab**: the volume slider shows only on the tile under
+  the cursor; the others show their level next to the mute button. The
+  monitor and workspace moved to the session's header when all its tiles
+  share them.
+- **Layouts drawn in the session header**: the layout button is a small
+  picture of where the session's tiles go, at the monitor's shape, beside
+  the layout's name.
+
 ## 1.1.1 (2026-10-02)
 
 - **A nicer swap card** (Super+Shift+S on a tile): the site's logo and

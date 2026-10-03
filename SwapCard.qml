@@ -36,13 +36,7 @@ Scope {
   }
   readonly property string tileLabel: tile ? Model.tileLabel(tile) : ""
   // The web app the tile shows now, if any; its tile is dimmed.
-  readonly property var currentApp: {
-    var site = tile ? Model.siteOf(tile.url) : ""
-    for (var i = 0; site !== "" && i < allApps.length; i++) {
-      if (Model.siteOf(allApps[i].url) === site) return allApps[i]
-    }
-    return null
-  }
+  readonly property var currentApp: Model.tileApp(allApps, tile)
   // The site's logo: its web app's icon, else the tab's favicon from the
   // extension; "" when there is neither, and the header shows only the
   // title.

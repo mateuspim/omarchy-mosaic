@@ -63,6 +63,9 @@ Panel {
   readonly property var tileAudio: service ? service.tileAudio : ({})
   // The audioFollowsFocus setting: mute every tile but the focused one.
   readonly property bool audioFollowsFocus: setting("audioFollowsFocus", false) === true
+  // The autoContain setting: keep fullscreen in every tile, re-containing
+  // tiles that lose it; the service does the work.
+  readonly property bool autoContain: setting("autoContain", false) === true
   // Audio controls show on the Tiles tab once the extension is connected
   // and a tile is open.
   readonly property bool audioReady: extensionState === "connected" && tiles.length > 0
@@ -280,6 +283,10 @@ Panel {
     saveSetting("audioFollowsFocus", !audioFollowsFocus)
   }
 
+  function toggleAutoContain() {
+    saveSetting("autoContain", !autoContain)
+  }
+
   function hideWebapp(app) {
     if (app && saveHidden(Model.hideWebapp(setting("hiddenWebapps", ""), app)))
       showStatus("Hid " + app.name + ". The Hidden tab (L) brings it back.", false)
@@ -383,6 +390,15 @@ Panel {
 
   function layoutOf(name) {
     return service ? service.sessionChoice(name) : "default"
+  }
+
+  // Width over height of the monitor named `name`, as it is turned.
+  function monitorAspect(name) {
+    var screens = Quickshell.screens
+    for (var i = 0; i < screens.length; i++) {
+      if (screens[i].name === name && screens[i].height > 0) return screens[i].width / screens[i].height
+    }
+    return 16 / 9
   }
 
   function setWorkspaceLayout(row, choice) {
@@ -571,6 +587,13 @@ Panel {
 
   Binding {
     target: root.service
+    property: "autoContain"
+    value: root.autoContain
+    when: root.service !== null
+  }
+
+  Binding {
+    target: root.service
     property: "hiddenWebapps"
     value: String(root.setting("hiddenWebapps", ""))
     when: root.service !== null
@@ -679,7 +702,8 @@ Panel {
           else if ((t === "b" || t === "B") && root.restartNeeded) root.restartBrowser()
         }
         else if (root.view !== "tiles") return
-        else if (t === "c" || t === "C") root.contain()
+        else if (t === "C") root.toggleAutoContain()
+        else if (t === "c") root.contain()
         else if ((t === "s" || t === "S") && root.cursorActive) root.startSwap(root.selectedTile)
         else if ((t === "m" || t === "M") && root.cursorActive) root.toggleMute(root.selectedTile)
         else if ((t === "f" || t === "F") && root.audioReady) root.toggleAudioFocus()
@@ -771,51 +795,27 @@ Panel {
               onClicked: root.setView("extension")
             }
 
-            // Audio for the whole mosaic, kept to one line; each tile's own
+            // Switches for the whole mosaic, one line each; each tile's own
             // controls are on its row.
-            CursorSurface {
+            SwitchRow {
               visible: root.audioReady
               width: parent.width
-              foreground: root.foreground
-              hasCursor: focusAudioMouse.containsMouse
-              implicitHeight: focusAudioRow.implicitHeight + Style.space(6)
+              checked: root.audioFollowsFocus
+              iconOn: "󰕾"
+              iconOff: "󰖀"
+              text: "Only the focused tile plays  ·  F"
+              onToggled: root.toggleAudioFocus()
+            }
 
-              MouseArea {
-                id: focusAudioMouse
-                anchors.fill: parent
-                hoverEnabled: true
-                onClicked: root.toggleAudioFocus()
-              }
-
-              RowLayout {
-                id: focusAudioRow
-                anchors.left: parent.left
-                anchors.right: parent.right
-                anchors.verticalCenter: parent.verticalCenter
-                anchors.leftMargin: Style.space(10)
-                anchors.rightMargin: Style.space(6)
-                spacing: Style.space(8)
-                Text {
-                  text: root.audioFollowsFocus ? "󰕾" : "󰖀"
-                  color: root.audioFollowsFocus ? root.foreground : root.dim
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.body
-                }
-                Text {
-                  Layout.fillWidth: true
-                  textFormat: Text.PlainText
-                  text: "Only the focused tile plays  ·  F"
-                  color: root.audioFollowsFocus ? root.foreground : root.dim
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.caption
-                  elide: Text.ElideRight
-                }
-                ToggleSwitch {
-                  checked: root.audioFollowsFocus
-                  interactive: false
-                  foreground: root.foreground
-                }
-              }
+            SwitchRow {
+              visible: root.tiles.length > 0
+              width: parent.width
+              checked: root.autoContain
+              iconOn: "󰊓"
+              iconOff: "󰊔"
+              text: "Keep fullscreen in tiles  ·  Shift+C"
+              tooltip: "Contains a tile again whenever it loses containment, and shrinks a fullscreen tile back once another window takes focus"
+              onToggled: root.toggleAutoContain()
             }
 
             Repeater {
@@ -824,24 +824,22 @@ Panel {
               Column {
                 id: sessionColumn
                 required property var modelData
+                readonly property string place: Model.sessionPlace(modelData.tiles)
                 width: column.width
                 spacing: Style.space(6)
 
                 RowLayout {
                   width: parent.width
+                  spacing: Style.space(6)
                   PanelSectionHeader {
-                    text: sessionColumn.modelData.name.toUpperCase() + "  ·  " + sessionColumn.modelData.tiles.length
-                      + "  ·  " + Model.layoutLabel(root.layoutOf(sessionColumn.modelData.name), root.layoutCustom).toUpperCase()
+                    text: sessionColumn.modelData.name.toUpperCase()
+                      + (sessionColumn.place !== "" ? "  ·  " + sessionColumn.place.toUpperCase() : "")
                     foreground: root.foreground
                     fontFamily: root.fontFamily
                     Layout.fillWidth: true
                   }
-                  PanelActionButton {
-                    iconText: "󰕰"
-                    tooltipText: "Layout of this session's workspace: " + Model.layoutLabel(root.layoutOf(sessionColumn.modelData.name), root.layoutCustom)
-                      + ". Click for " + Model.layoutLabel(Model.nextLayout(root.layoutOf(sessionColumn.modelData.name), root.layoutCustom), root.layoutCustom) + " · G"
-                    foreground: root.foreground
-                    onClicked: root.cycleLayout(sessionColumn.modelData.name)
+                  LayoutChip {
+                    session: sessionColumn.modelData
                   }
                   PanelActionButton {
                     iconText: "󰅙"
@@ -858,6 +856,7 @@ Panel {
                     required property var modelData
                     width: sessionColumn.width
                     tile: modelData
+                    place: sessionColumn.place
                   }
                 }
               }
@@ -1244,7 +1243,7 @@ Panel {
                 : "↑↓ select  ·  Enter or G next layout  ·  0 Hyprland's  ·  W all workspaces  ·  N new  ·  E edit  ·  D delete  ·  H/L tabs")
               : root.swapTile
                 ? "1–9 web app  ·  A edit the address  ·  Enter replace  ·  Esc cancel"
-                : "↑↓ select  ·  Enter focus  ·  S swap  ·  G layout  ·  M mute  ·  −/+ volume  ·  F focused only  ·  X remove  ·  ⇧D close session  ·  H/L tabs  ·  R refresh"
+                : "↑↓ select  ·  Enter focus  ·  S swap  ·  G layout  ·  M mute  ·  −/+ volume  ·  F focused only  ·  ⇧C keep contained  ·  X remove  ·  ⇧D close session  ·  H/L tabs  ·  R refresh"
             color: root.dim
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
@@ -1999,11 +1998,157 @@ Panel {
     }
   }
 
+  // A setting for the whole mosaic: an icon, what it does, and a switch.
+  component SwitchRow: CursorSurface {
+    id: switchRow
+    property bool checked: false
+    property string iconOn: ""
+    property string iconOff: ""
+    property string text: ""
+    property string tooltip: ""
+    signal toggled()
+    foreground: root.foreground
+    hasCursor: switchMouse.containsMouse
+    implicitHeight: switchContent.implicitHeight + Style.space(6)
+    Accessible.role: Accessible.CheckBox
+    Accessible.name: text
+    Accessible.checked: checked
+
+    MouseArea {
+      id: switchMouse
+      anchors.fill: parent
+      hoverEnabled: true
+      onClicked: switchRow.toggled()
+    }
+
+    RowLayout {
+      id: switchContent
+      anchors.left: parent.left
+      anchors.right: parent.right
+      anchors.verticalCenter: parent.verticalCenter
+      anchors.leftMargin: Style.space(10)
+      anchors.rightMargin: Style.space(6)
+      spacing: Style.space(8)
+      Text {
+        text: switchRow.checked ? switchRow.iconOn : switchRow.iconOff
+        color: switchRow.checked ? root.foreground : root.dim
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.body
+      }
+      Text {
+        Layout.fillWidth: true
+        textFormat: Text.PlainText
+        text: switchRow.text
+        color: switchRow.checked ? root.foreground : root.dim
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.caption
+        elide: Text.ElideRight
+      }
+      ToggleSwitch {
+        checked: switchRow.checked
+        interactive: false
+        foreground: root.foreground
+      }
+    }
+
+    PanelToolTip {
+      visible: switchMouse.containsMouse && switchRow.tooltip !== ""
+      text: switchRow.tooltip
+    }
+  }
+
+  // A session's layout in its header: a small picture of where its tiles
+  // go, and the layout's name. A click (or G) moves to the next layout.
+  component LayoutChip: CursorSurface {
+    id: chip
+    property var session: null
+    readonly property string choice: session ? root.layoutOf(session.name) : "default"
+    readonly property string label: Model.layoutLabel(choice, root.layoutCustom)
+    hasCursor: chipMouse.containsMouse
+    bordered: true
+    foreground: root.foreground
+    implicitWidth: chipRow.implicitWidth + Style.space(14)
+    implicitHeight: Style.space(24)
+    Accessible.role: Accessible.Button
+    Accessible.name: "Layout: " + label
+
+    Row {
+      id: chipRow
+      anchors.centerIn: parent
+      spacing: Style.space(6)
+      // Fits a 22 × 14 box, so a portrait monitor's picture stays legible.
+      LayoutThumb {
+        anchors.verticalCenter: parent.verticalCenter
+        height: Math.round(Math.min(Style.space(14), Style.space(22) / aspect))
+        width: Math.round(height * aspect)
+        aspect: chip.session && chip.session.tiles.length > 0 ? root.monitorAspect(chip.session.tiles[0].monitor) : 16 / 9
+        boxes: Model.layoutBoxes(chip.choice, root.layoutCustom, chip.session ? chip.session.tiles.length : 0, aspect)
+      }
+      Text {
+        anchors.verticalCenter: parent.verticalCenter
+        textFormat: Text.PlainText
+        text: chip.label
+        color: root.foreground
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.caption
+      }
+    }
+
+    MouseArea {
+      id: chipMouse
+      anchors.fill: parent
+      hoverEnabled: true
+      onClicked: if (chip.session) root.cycleLayout(chip.session.name)
+    }
+
+    PanelToolTip {
+      visible: chipMouse.containsMouse
+      text: chip.session ? "Layout of this session's workspace. Click for "
+        + Model.layoutLabel(Model.nextLayout(chip.choice, root.layoutCustom), root.layoutCustom) + " · G" : ""
+    }
+  }
+
+  // Boxes from Model.layoutBoxes, drawn small; the first window's box,
+  // the main one, in the accent colour.
+  component LayoutThumb: Item {
+    id: thumb
+    property var boxes: []
+    property real aspect: 16 / 9
+    Repeater {
+      model: thumb.boxes.length
+      Rectangle {
+        required property int index
+        readonly property var cell: thumb.boxes[index] || ({ x: 0, y: 0, w: 0, h: 0 })
+        x: Math.round(cell.x * thumb.width) + 0.5
+        y: Math.round(cell.y * thumb.height) + 0.5
+        width: Math.max(1, Math.round(cell.w * thumb.width) - 1)
+        height: Math.max(1, Math.round(cell.h * thumb.height) - 1)
+        radius: 1
+        color: index === 0 ? Color.accent : root.foreground
+        opacity: index === 0 ? 0.9 : 0.45
+      }
+    }
+  }
+
   component TileRow: CursorSurface {
     id: row
     property var tile: null
+    // The session's shared monitor and workspace, which its header shows.
+    property string place: ""
     readonly property bool swapping: root.swapTile !== null && tile !== null && root.swapTile.address === tile.address
     readonly property var audio: tile ? root.tileAudio[tile.address] : undefined
+    readonly property var app: Model.tileApp(root.webapps, tile)
+    // The site's logo: its web app's icon, else the tab's favicon from the
+    // extension; without either, the row shows the name's first letter.
+    readonly property string logo: {
+      if (app && app.icon) return root.iconSource(app.icon)
+      var tab = root.service && tile ? Model.tileTab(root.service.extensionCheck, root.service.bridges, tile.address) : null
+      return tab && /^(https?|data):/.test(tab.favIconUrl || "") ? tab.favIconUrl : ""
+    }
+    readonly property string meta: tile ? Model.tileMeta(tile, place, app) : ""
+    // The volume slider shows on the row under the cursor only, so the
+    // list stays one line per tile.
+    readonly property bool showSlider: audio !== undefined && hasCursor && !swapping
     // The level the user set, which the slider shows right away; the
     // browser's report of it arrives a moment later.
     readonly property real volume: {
@@ -2026,13 +2171,44 @@ Panel {
       anchors.left: parent.left
       anchors.right: parent.right
       anchors.verticalCenter: parent.verticalCenter
-      anchors.leftMargin: Style.space(10)
+      anchors.leftMargin: Style.space(8)
       anchors.rightMargin: Style.space(6)
       spacing: Style.space(4)
 
       RowLayout {
         Layout.fillWidth: true
-        spacing: Style.space(8)
+        spacing: Style.space(10)
+
+        Rectangle {
+          id: logoBox
+          Layout.preferredWidth: Style.space(28)
+          Layout.preferredHeight: Style.space(28)
+          Layout.alignment: Qt.AlignVCenter
+          radius: Style.cornerRadius
+          color: logoImage.status === Image.Ready ? "transparent" : Style.selectedFillFor(root.foreground, Color.accent)
+
+          Image {
+            id: logoImage
+            anchors.fill: parent
+            anchors.margins: Style.space(2)
+            source: row.logo
+            sourceSize.width: 64
+            sourceSize.height: 64
+            fillMode: Image.PreserveAspectFit
+            smooth: true
+            visible: status === Image.Ready
+          }
+          Text {
+            visible: logoImage.status !== Image.Ready
+            anchors.centerIn: parent
+            textFormat: Text.PlainText
+            text: row.tile ? Model.tileInitial(row.tile, row.app) : ""
+            color: root.foreground
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.body
+            font.bold: true
+          }
+        }
 
         ColumnLayout {
           id: content
@@ -2041,21 +2217,35 @@ Panel {
           Text {
             Layout.fillWidth: true
             textFormat: Text.PlainText
-            text: row.tile ? (row.swapping ? "󰓡  " : "") + Model.tileLabel(row.tile) : ""
+            text: row.tile ? (row.swapping ? "󰓡  " : "") + Model.tileName(row.tile, row.app) : ""
             color: root.foreground
             font.family: root.fontFamily
             font.pixelSize: Style.font.body
             elide: Text.ElideRight
           }
           Text {
+            visible: row.meta !== ""
             Layout.fillWidth: true
             textFormat: Text.PlainText
-            text: row.tile ? Model.tileMeta(row.tile) : ""
+            text: row.meta
             color: row.tile && row.tile.state === "uncontained" ? root.urgent : root.dim
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
             elide: Text.ElideRight
           }
+        }
+
+        Text {
+          visible: row.audio !== undefined
+          textFormat: Text.PlainText
+          text: row.audio ? Math.round(row.volume * 100) + "%" : ""
+          color: root.dim
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
+          font.bold: true
+          horizontalAlignment: Text.AlignRight
+          Layout.preferredWidth: Style.space(36)
+          opacity: row.audio && row.audio.muted ? 0.5 : 1.0
         }
 
         PanelActionButton {
@@ -2096,33 +2286,19 @@ Panel {
 
       // The tile's own volume, as the built-in audio panel shows app
       // streams: right-click mutes, and a muted tile's slider is dimmed.
-      RowLayout {
-        visible: row.audio !== undefined
+      PanelSlider {
+        visible: row.showSlider
+        bar: root.bar
         Layout.fillWidth: true
-        spacing: Style.space(8)
-        PanelSlider {
-          bar: root.bar
-          Layout.fillWidth: true
-          minimum: 0
-          maximum: 1
-          step: 0.05
-          value: row.volume
-          opacity: row.audio && row.audio.muted ? 0.5 : 1.0
-          onMoved: function(v) { root.dragVolume(row.tile, v, false) }
-          onReleased: function(v) { root.dragVolume(row.tile, v, true) }
-          onRightClicked: root.toggleMute(row.tile)
-        }
-        Text {
-          textFormat: Text.PlainText
-          text: row.audio ? Math.round(row.volume * 100) + "%" : ""
-          color: root.dim
-          font.family: root.fontFamily
-          font.pixelSize: Style.font.caption
-          font.bold: true
-          Layout.preferredWidth: Style.space(36)
-          horizontalAlignment: Text.AlignRight
-          opacity: row.audio && row.audio.muted ? 0.5 : 1.0
-        }
+        Layout.leftMargin: logoBox.width + Style.space(10)
+        minimum: 0
+        maximum: 1
+        step: 0.05
+        value: row.volume
+        opacity: row.audio && row.audio.muted ? 0.5 : 1.0
+        onMoved: function(v) { root.dragVolume(row.tile, v, false) }
+        onReleased: function(v) { root.dragVolume(row.tile, v, true) }
+        onRightClicked: root.toggleMute(row.tile)
       }
 
       // Swapping: what replaces this tile, right on its card.
