@@ -70,6 +70,8 @@ Panel {
   // Swap mode: the tile ({ address, label }) that the next web app or
   // address replaces, or null.
   property var swapTile: null
+  // The address field on the tile being swapped, while it shows.
+  property var swapField: null
   property string status: ""
   property bool statusIsError: false
   // What the service is doing right now.
@@ -101,7 +103,7 @@ Panel {
   readonly property var selectedWorkspace: view === "layouts" && !layoutEditor && cursor >= 0 && cursor < workspaceRows.length ? workspaceRows[cursor] : null
   readonly property var selectedCustom: view === "layouts" && !layoutEditor && cursor >= workspaceRows.length
     && cursor < workspaceRows.length + customRows.length ? customRows[cursor - workspaceRows.length] : null
-  readonly property bool editing: urlField.activeFocus || sessionField.activeFocus || layoutNameField.activeFocus || dropdownOpen
+  readonly property bool editing: urlField.activeFocus || sessionField.activeFocus || (swapField !== null && swapField.activeFocus) || layoutNameField.activeFocus || dropdownOpen
 
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
@@ -206,6 +208,21 @@ Panel {
 
   function addWebapp(app) {
     if (app) addUrl(app.url, app.name)
+  }
+
+  function leaveField() {
+    keyCatcher.forceActiveFocus()
+  }
+
+  // Enter in the swap field: a web app's name or an address.
+  function swapToAddress(text) {
+    var url = Model.resolveTarget(text, webapps)
+    if (url === "") {
+      showStatus("Enter a web address or web app name, such as twitch.tv/name", true)
+      return
+    }
+    keyCatcher.forceActiveFocus()
+    addUrl(url, text.trim())
   }
 
   // Saves one widget setting; the shell writes it to shell.json.
@@ -319,6 +336,11 @@ Panel {
   }
 
   function startAdding() {
+    if (swapTile && swapField) {
+      swapField.forceActiveFocus()
+      swapField.selectAll()
+      return
+    }
     setView("tiles")
     if (selectedTile && sessionField.text === "") sessionField.text = selectedTile.session
     urlField.forceActiveFocus()
@@ -331,7 +353,7 @@ Panel {
     setView("tiles")
     cursorActive = true
     cursor = tile.position
-    swapTile = { address: tile.address, label: Model.tileLabel(tile) }
+    swapTile = { address: tile.address, label: Model.tileLabel(tile), url: tile.url || "" }
     status = ""
   }
 
@@ -663,7 +685,10 @@ Panel {
         else if ((t === "f" || t === "F") && root.audioReady) root.toggleAudioFocus()
         else if (t === "-" && root.cursorActive) root.stepVolume(root.selectedTile, -0.1)
         else if ((t === "+" || t === "=") && root.cursorActive) root.stepVolume(root.selectedTile, 0.1)
-        else if (t >= "1" && t <= "9") root.addWebapp(root.shownWebapps[Number(t) - 1])
+        else if (t >= "1" && t <= "9") {
+          var app = root.shownWebapps[Number(t) - 1]
+          if (!(root.swapTile && app && Model.siteOf(app.url) === Model.siteOf(root.swapTile.url))) root.addWebapp(app)
+        }
       }
 
       Flickable {
@@ -744,12 +769,6 @@ Panel {
                 : "Audio control is off: the Mosaic browser extension is not set up. Click here or open the Extension tab."
               clickable: true
               onClicked: root.setView("extension")
-            }
-
-            Notice {
-              visible: root.swapTile !== null
-              warning: false
-              text: root.swapTile ? "Replacing " + root.swapTile.label + ". Pick a web app, or press A and type an address. Esc cancels." : ""
             }
 
             // Audio for the whole mosaic, kept to one line; each tile's own
@@ -844,12 +863,14 @@ Panel {
               }
             }
 
+            // Hidden while swapping: the tile's own card holds the picker.
             Column {
+              visible: root.swapTile === null
               width: parent.width
               spacing: Style.space(6)
 
               PanelSectionHeader {
-                text: (root.swapTile ? "REPLACE WITH" : "ADD TILE")
+                text: "ADD TILE"
                   + (root.shownWebapps.length > 0 ? "  ·  1–" + Math.min(9, root.shownWebapps.length) + " WEB APP  ·  A ADDRESS" : "  ·  A")
                 foreground: root.foreground
                 fontFamily: root.fontFamily
@@ -885,8 +906,6 @@ Panel {
                 spacing: Style.space(6)
                 TextField {
                   id: sessionField
-                  // A replacement keeps the old tile's session.
-                  visible: root.swapTile === null
                   Layout.fillWidth: true
                   placeholderText: "Session (" + (root.selectedTile ? root.selectedTile.session : "default") + ")"
                   foreground: root.foreground
@@ -894,13 +913,9 @@ Panel {
                   onAccepted: root.addTile()
                   Keys.onEscapePressed: keyCatcher.forceActiveFocus()
                 }
-                Item {
-                  visible: root.swapTile !== null
-                  Layout.fillWidth: true
-                }
                 Button {
-                  text: root.swapTile ? "Replace" : "Add"
-                  iconText: root.swapTile ? "󰓡" : "󰐕"
+                  text: "Add"
+                  iconText: "󰐕"
                   foreground: root.foreground
                   enabled: root.activity === ""
                   onClicked: root.addTile()
@@ -1228,7 +1243,7 @@ Panel {
                 ? "←→ zone  ·  −/+ size  ·  S split beside  ·  B below  ·  X remove  ·  M main  ·  T preset  ·  N name  ·  F large  ·  Enter save  ·  Esc cancel"
                 : "↑↓ select  ·  Enter or G next layout  ·  0 Hyprland's  ·  W all workspaces  ·  N new  ·  E edit  ·  D delete  ·  H/L tabs")
               : root.swapTile
-                ? "1–9 or A pick the replacement  ·  Esc cancel"
+                ? "1–9 web app  ·  A edit the address  ·  Enter replace  ·  Esc cancel"
                 : "↑↓ select  ·  Enter focus  ·  S swap  ·  G layout  ·  M mute  ·  −/+ volume  ·  F focused only  ·  X remove  ·  ⇧D close session  ·  H/L tabs  ·  R refresh"
             color: root.dim
             font.family: root.fontFamily
@@ -1332,7 +1347,10 @@ Panel {
     id: webappButton
     property var app: null
     property int number: 0
+    // The tile being swapped already shows this web app.
+    property bool current: false
     bordered: true
+    opacity: current ? 0.5 : 1.0
     hasCursor: webappMouse.containsMouse
     foreground: root.foreground
     implicitWidth: webappRow.implicitWidth + Style.space(16)
@@ -1372,13 +1390,14 @@ Panel {
       acceptedButtons: Qt.LeftButton | Qt.RightButton
       onClicked: function(mouse) {
         if (mouse.button === Qt.RightButton) root.hideWebapp(webappButton.app)
-        else root.addWebapp(webappButton.app)
+        else if (!webappButton.current) root.addWebapp(webappButton.app)
       }
     }
 
     PanelToolTip {
       visible: webappMouse.containsMouse
-      text: webappButton.app ? webappButton.app.url + "  ·  right-click to hide" : ""
+      text: !webappButton.app ? "" : webappButton.current ? "This tile already shows " + webappButton.app.name
+        : webappButton.app.url + "  ·  right-click to hide"
     }
   }
 
@@ -2103,6 +2122,58 @@ Panel {
           Layout.preferredWidth: Style.space(36)
           horizontalAlignment: Text.AlignRight
           opacity: row.audio && row.audio.muted ? 0.5 : 1.0
+        }
+      }
+
+      // Swapping: what replaces this tile, right on its card.
+      Loader {
+        active: row.swapping
+        visible: active
+        Layout.fillWidth: true
+        Layout.topMargin: Style.space(4)
+        sourceComponent: ColumnLayout {
+          spacing: Style.space(6)
+
+          Flow {
+            visible: root.shownWebapps.length > 0
+            Layout.fillWidth: true
+            spacing: Style.space(6)
+            Repeater {
+              model: root.shownWebapps
+              WebappButton {
+                required property var modelData
+                required property int index
+                app: modelData
+                number: index + 1
+                current: row.tile !== null && Model.siteOf(modelData.url) === Model.siteOf(row.tile.url)
+              }
+            }
+          }
+
+          TextField {
+            id: swapAddress
+            Layout.fillWidth: true
+            text: row.tile && row.tile.url ? row.tile.url : ""
+            placeholderText: "Web address or web app name"
+            foreground: root.foreground
+            font.family: root.fontFamily
+            onAccepted: root.swapToAddress(text)
+            Keys.onEscapePressed: root.leaveField()
+            Component.onCompleted: root.swapField = swapAddress
+            Component.onDestruction: if (root.swapField === swapAddress) root.swapField = null
+          }
+
+          Text {
+            Layout.fillWidth: true
+            textFormat: Text.PlainText
+            text: root.service && row.tile && root.service.canNavigate(row.tile.address)
+              ? "Changes the page in place: same window, slot, and volume."
+              : "Opens a new window in this slot, since the browser extension has not found this tile."
+            color: root.dim
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+            wrapMode: Text.WordWrap
+          }
         }
       }
     }

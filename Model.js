@@ -1593,11 +1593,13 @@ function siteOf(url) {
 }
 
 // Which extension window each tile is: `bridges` are the connected
-// extensions ({ windows }). A tile is the one app window whose tab has the
-// tile's title (Hyprland's title is the page's), else the one left on the
-// tile's site. Returns { total, matched, tiles: { ADDRESS: { bridge,
-// window, tab } }, missing: [labels] }.
-function matchTiles(tiles, bridges) {
+// extensions ({ windows }). A tile keeps the tab it had in `previous` (an
+// earlier result's `tiles`, optional) while that tab is still there, since
+// a swap in place or the user browsing changes its title and site. Else it
+// is the one app window whose tab has the tile's title (Hyprland's title
+// is the page's), else the one left on the tile's site. Returns { total,
+// matched, tiles: { ADDRESS: { bridge, window, tab } }, missing: [labels] }.
+function matchTiles(tiles, bridges, previous) {
   var candidates = []
   for (var b = 0; b < bridges.length; b++) {
     var windows = bridges[b].windows || []
@@ -1614,6 +1616,11 @@ function matchTiles(tiles, bridges) {
     taken.push(hits[0])
     found[tile.address] = { bridge: hits[0].bridge, window: hits[0].window, tab: hits[0].tab.id }
   }
+  var known = previous || {}
+  tiles.forEach(function(tile) {
+    var had = known[tile.address]
+    if (had) claim(tile, function(candidate) { return candidate.bridge === had.bridge && candidate.tab.id === had.tab })
+  })
   tiles.forEach(function(tile) {
     claim(tile, function(candidate) { return tile.title !== "" && candidate.tab.title === tile.title })
   })
@@ -1798,6 +1805,28 @@ function reconcileVolumes(volumes, audio, live, follows, recent) {
     next[address] = level
   })
   return { volumes: next, resend: resend }
+}
+
+// The extension's report of a tile's tab ({ url, title, … }), or null.
+function tileTab(check, bridges, address) {
+  var found = check && check.tiles ? check.tiles[address] : null
+  var bridge = found ? bridges[found.bridge] : null
+  if (!bridge) return null
+  for (var w = 0; w < bridge.windows.length; w++) {
+    var tabs = bridge.windows[w].tabs
+    for (var t = 0; t < tabs.length; t++) if (tabs[t].id === found.tab) return tabs[t]
+  }
+  return null
+}
+
+// Whether a tab sent to `url` has arrived: it is on that site and shows a
+// title of its own, other than `oldTitle`, the page it left.
+function navigationSettled(tab, url, oldTitle) {
+  if (!tab || siteOf(tab.url) !== siteOf(url)) return false
+  var title = String(tab.title || "")
+  // Before the page sets one, Chromium shows the address as the title.
+  var bare = title.toLowerCase().replace(/^[a-z]+:\/\//, "").replace(/^www\./, "").split("/")[0]
+  return title !== "" && title !== String(oldTitle || "") && bare !== siteOf(url)
 }
 
 function tileAudio(check, bridges) {

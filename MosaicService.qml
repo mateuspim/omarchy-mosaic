@@ -335,15 +335,19 @@ Scope {
     return ""
   }
 
-  // `mosaic replace TILE TARGET`: opens TARGET (a URL or web app) in the
-  // tile's place. The new window joins the old tile's session and
-  // workspace, takes its store position, and is swapped into its slot
-  // before the old window closes, so the layout doesn't shift. `options`
-  // may hold `browser`, as for add.
+  // `mosaic replace TILE TARGET`: puts TARGET (a URL or web app) in the
+  // tile's place. When the browser extension has found the tile, its page
+  // just changes in place (see navigateTile). Otherwise a new window opens,
+  // joins the old tile's session and workspace, takes its store position,
+  // and is swapped into its slot before the old window closes, so the
+  // layout doesn't shift. `options` may hold `browser`, as for add.
   function replace(tile, target, options, label) {
     if (busy) return "Still busy: " + busyLabel
     var resolved = Model.resolveAddTargets([target], Model.shapeWebapps(webapps).apps)
     if (resolved.error) return resolved.error
+    var planned = Model.planReplace(list, tile)
+    if (!planned.error && canNavigate(planned.tile.address))
+      return navigateTile(planned.tile, resolved.urls[0], label || "Replacing tile " + tile + " with " + target)
     var given = options || {}
     addState = {
       replacing: String(tile),
@@ -362,6 +366,34 @@ Scope {
     begin(label || "Replacing tile " + tile + " with " + target)
     phase = "add-clients"
     runStep(["hyprctl", "-j", "clients"])
+    return ""
+  }
+
+  // Whether a replace of this tile changes its page in place: the
+  // extension has found its tab and can navigate it.
+  function canNavigate(address) {
+    var entry = tileAudio[address]
+    var bridge = entry ? bridges[entry.bridge] : null
+    return !!bridge && Model.bridgeHas(bridge, "navigate")
+  }
+
+  // A replace in place: the extension loads `url` in the tile's own tab,
+  // so the window, its slot, containment, and volume all stay, and nothing
+  // opens or moves. Only the store record's URL changes. The swap veil
+  // covers the tile until the new page is in.
+  function navigateTile(tile, url, label) {
+    var error = tileCommand(tile.address, "navigate", { url: url })
+    if (error) return error
+    swapVeil.show(tile, url)
+    begin(label)
+    pendingMessage = "Replaced tile " + tile.index + " with " + url + "."
+    records = Model.replaceRecord(records, tile.address, { address: tile.address, session: tile.session, url: url })
+    rebuild()
+    phase = "add-save"
+    afterQueue = function() { root.finishAction("") }
+    actionTimeout.interval = 5000
+    actionTimeout.restart()
+    store.setText(Model.serializeStore(records))
     return ""
   }
 
@@ -838,6 +870,11 @@ Scope {
     return ""
   }
 
+  // The tabs tiles were matched to last time, for Model.matchTiles.
+  function knownTabs() {
+    return extensionCheck && extensionCheck.tiles ? extensionCheck.tiles : null
+  }
+
   function finishVerify() {
     verifyTimeout.stop()
     var silent = pingWaiting.length
@@ -847,7 +884,7 @@ Scope {
       extensionCheck = { error: "The browser extension did not answer" }
       return
     }
-    extensionCheck = Model.matchTiles(Model.shapeList(list).tiles, bridges)
+    extensionCheck = Model.matchTiles(Model.shapeList(list).tiles, bridges, knownTabs())
   }
 
   function bridgeOpened(socket) {
@@ -900,7 +937,7 @@ Scope {
   // to check.
   function autoCheck() {
     if (verifying) return
-    extensionCheck = bridges.length > 0 ? Model.matchTiles(Model.shapeList(list).tiles, bridges) : null
+    extensionCheck = bridges.length > 0 ? Model.matchTiles(Model.shapeList(list).tiles, bridges, knownTabs()) : null
     applyAudioFocus()
     keepVolumes()
   }
@@ -1187,6 +1224,12 @@ Scope {
     id: verifyTimeout
     interval: 3000
     onTriggered: root.finishVerify()
+  }
+
+  // Covers a tile while a swap in place loads its new page.
+  SwapVeil {
+    id: swapVeil
+    service: root
   }
 
   SwapCard {

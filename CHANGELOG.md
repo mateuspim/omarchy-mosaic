@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- **Swaps change the page in place**: with the browser extension
+  connected, swapping a tile (S in the panel, Super+Shift+S on the tile,
+  `mosaic replace`) now loads the new address in the tile's own window
+  instead of opening a new one and closing the old, so nothing flickers,
+  moves, or warps the cursor, and the tile keeps its mute and volume.
+  Without the extension it opens a new window in the slot, as before. In
+  the panel, the picker now opens on the tile's own card, with its address
+  ready to edit and the web app it already shows dimmed, instead of a
+  notice at the top and the Add tile section turned into "Replace with".
+  While the new page loads, the tile shows the Omarchy logo with a
+  progress bar, like the boot screen, in your theme's colours.
+  Tiles also keep the browser tab they were matched to, so two tiles on
+  the same site (say, after swapping one to YouTube) stay told apart.
+
 - **Layouts per workspace, and your own**: layouts now belong to
   workspaces (workspace 8 on Grid, 9 on a layout of yours), set from the
   panel's new **Layouts** tab (a dropdown per workspace) or a session's

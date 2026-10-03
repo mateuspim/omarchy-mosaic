@@ -5,7 +5,7 @@ import vm from "node:vm"
 const source = fs.readFileSync(new URL("../Model.js", import.meta.url), "utf8")
   .replace(/^\.pragma library\s*/m, "")
 const model = {}
-vm.runInNewContext(source + "\nObject.assign(model, {  zoneCount, newCustom, zoneDividers, withDivider, withoutZone, withSplit, ordinal, reconcileVolumes, layoutWorkspaceRows, shownWorkspaceRows, windowCounts, customRows, freeLayoutName, layoutChoices, layoutLabel, nextLayout, parseLayoutName, hyprLayoutName, layoutSlug, normalizeCustom, visualZones, defineLua, withZoneSize, withMain, withName, customSummary, parseLayouts, serializeLayouts, layoutsLoadLua, layoutsLoaded, layoutRuleLua, sessionWorkspace, tileStates, planWorkspaceLayout, planSyncLayouts, planSaveCustom, planDeleteCustom, workspaceChoice, layoutsText, hiddenEntries, showWebapp, nameList, visibleWebapps, hideWebapp, sessionOf, clientFromIpc, parseStore, tileState, buildList, shapeList, parseClients, validAddress, dispatchExpression, listTiles, findTile, planFocus, planRemove, planClose, planContain, restoreAfterMove, monitorFromIpc, parseMonitors, resolveAddTargets, chooseWorkspace, desktopId, isChromiumFamily, isAppWindow, parseOpenWindow, tileDispatches, pruneRecords, serializeStore, planReplace, replaceRecord, parseCursorPos, cursorMoveExpression, parseKeySpec, bindConflict, tileRect, listText, webappsText, monitorsText, splitLines, parseBridgeMessage, browserLabel, bridgeWindows, siteOf, matchTiles, extensionState, extensionNotice, extensionSteps, browserClass, browserPids, tileAudio, focusMutes, audioIcon, extensionFromManifest, bridgeHas, stepVolume, parseVolume, swapBindLua, unbindLua, webappUrl, webappFromEntry, buildWebapps, shapeWebapps, findWebapp, resolveTarget, parseList, tileLabel, tileMeta, normalizeUrl, sessionName, summary, anyUncontained, parseManifest });", { model })
+vm.runInNewContext(source + "\nObject.assign(model, {  zoneCount, newCustom, zoneDividers, withDivider, withoutZone, withSplit, ordinal, reconcileVolumes, layoutWorkspaceRows, shownWorkspaceRows, windowCounts, customRows, freeLayoutName, layoutChoices, layoutLabel, nextLayout, parseLayoutName, hyprLayoutName, layoutSlug, normalizeCustom, visualZones, defineLua, withZoneSize, withMain, withName, customSummary, parseLayouts, serializeLayouts, layoutsLoadLua, layoutsLoaded, layoutRuleLua, sessionWorkspace, tileStates, planWorkspaceLayout, planSyncLayouts, planSaveCustom, planDeleteCustom, workspaceChoice, layoutsText, hiddenEntries, showWebapp, nameList, visibleWebapps, hideWebapp, sessionOf, clientFromIpc, parseStore, tileState, buildList, shapeList, parseClients, validAddress, dispatchExpression, listTiles, findTile, planFocus, planRemove, planClose, planContain, restoreAfterMove, monitorFromIpc, parseMonitors, resolveAddTargets, chooseWorkspace, desktopId, isChromiumFamily, isAppWindow, parseOpenWindow, tileDispatches, pruneRecords, serializeStore, planReplace, replaceRecord, parseCursorPos, cursorMoveExpression, parseKeySpec, bindConflict, tileRect, listText, webappsText, monitorsText, splitLines, parseBridgeMessage, browserLabel, bridgeWindows, siteOf, matchTiles, tileTab, navigationSettled, extensionState, extensionNotice, extensionSteps, browserClass, browserPids, tileAudio, focusMutes, audioIcon, extensionFromManifest, bridgeHas, stepVolume, parseVolume, swapBindLua, unbindLua, webappUrl, webappFromEntry, buildWebapps, shapeWebapps, findWebapp, resolveTarget, parseList, tileLabel, tileMeta, normalizeUrl, sessionName, summary, anyUncontained, parseManifest });", { model })
 
 // Values built inside the VM belong to another realm, so compare copies.
 const plain = value => JSON.parse(JSON.stringify(value))
@@ -419,6 +419,27 @@ const twins = model.matchTiles(
   [{ windows: [tab(1, "https://twitch.tv/a", "Twitch"), tab(2, "https://kick.com/b", "Twitch")] }])
 assert.deepEqual(plain(twins.tiles), { "0xa": { bridge: 0, window: 1, tab: 101 }, "0xb": { bridge: 0, window: 2, tab: 102 } })
 assert.equal(model.matchTiles([extensionTiles[0]], [{ windows: [tab(1, "https://twitch.tv/x", "x"), tab(2, "https://twitch.tv/y", "y")] }]).matched, 0)
+// Two tiles on one site after a swap in place: each keeps its earlier tab,
+// which neither title nor site could tell apart.
+const sameSite = [{ address: "0xa", url: "https://youtube.com", title: "YouTube", index: 1 }, { address: "0xb", url: "https://youtube.com/", title: "YouTube", index: 2 }]
+const sameTabs = [{ windows: [tab(1, "https://youtube.com/", "YouTube"), tab(2, "https://youtube.com/", "YouTube")] }]
+assert.equal(model.matchTiles(sameSite, sameTabs).matched, 0)
+assert.deepEqual(plain(model.matchTiles(sameSite, sameTabs, { "0xa": { bridge: 0, window: 2, tab: 102 }, "0xb": { bridge: 0, window: 1, tab: 101 } }).tiles),
+  { "0xa": { bridge: 0, window: 2, tab: 102 }, "0xb": { bridge: 0, window: 1, tab: 101 } })
+// A tab that is gone, or now another bridge's, is matched afresh.
+assert.deepEqual(plain(model.matchTiles([extensionTiles[0]], [{ windows: [tab(1, "https://www.twitch.tv/chan", "(4) chan - Twitch")] }], { "0xa": { bridge: 1, window: 1, tab: 101 } }).tiles),
+  { "0xa": { bridge: 0, window: 1, tab: 101 } })
+
+const navBridges = [{ windows: [tab(1, "https://kick.com/", "Kick")] }]
+assert.equal(model.tileTab({ tiles: { "0xa": { bridge: 0, window: 1, tab: 101 } } }, navBridges, "0xa").title, "Kick")
+assert.equal(model.tileTab({ tiles: {} }, navBridges, "0xa"), null)
+assert.equal(model.tileTab(null, navBridges, "0xa"), null)
+assert.equal(model.navigationSettled({ url: "https://kick.com/", title: "Kick" }, "https://kick.com", "YouTube"), true)
+// Still on the old site, still the old title, or only the address as title.
+assert.equal(model.navigationSettled({ url: "https://youtube.com/", title: "Kick" }, "https://kick.com", "YouTube"), false)
+assert.equal(model.navigationSettled({ url: "https://kick.com/", title: "YouTube" }, "https://kick.com", "YouTube"), false)
+assert.equal(model.navigationSettled({ url: "https://kick.com/", title: "kick.com" }, "https://kick.com", "YouTube"), false)
+assert.equal(model.navigationSettled(null, "https://kick.com", "YouTube"), false)
 
 const setupOff = { browsers: [{ name: "Brave Origin", registered: false }, { name: "Chromium", registered: false }], flags: [{ file: "/h/.config/brave-origin-flags.conf", loaded: false }] }
 const setupOn = { browsers: [{ name: "Brave Origin", registered: true }, { name: "Chromium", registered: true }], flags: [{ file: "/h/.config/brave-origin-flags.conf", loaded: true }, { file: "/h/.config/chromium-flags.conf", loaded: true }] }

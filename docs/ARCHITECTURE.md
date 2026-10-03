@@ -125,9 +125,24 @@ logins and memory; the user chose an extension instead.
   `service_worker` (`extensionOutdated`); the panel then asks for a browser
   restart, and `mute` needs a script that reports its name
   (`Model.canMute`). **Rename the worker on every extension change.**
-- **Finding tiles.** A tile is the extension window whose one tab has the
-  tile's Hyprland title (`Model.matchTiles`), else the one left on its
-  site. Verify reports how many tiles were found.
+- **Swap in place.** `replace` (the panel's S, the swap card, `mosaic
+  replace`) sends `navigate { url }` when the extension has found the tile
+  and can navigate, then rewrites only the tile's store record's URL. The
+  window, its slot, containment, mute, and volume stay, and no window
+  opens, so no cursor warp or screen jump. Without the extension, or for
+  a tile it hasn't found, a new window still opens in the old one's slot.
+  While the page loads, `SwapVeil.qml` covers the tile with a click-through
+  overlay layer (`pym-mosaic-veil`, no keyboard): the Omarchy wordmark
+  (`$OMARCHY_PATH/logo.svg`, tinted to the theme) over a bar like the boot
+  screen's, lifted once the extension reports the tab on the new site with a
+  title of its own (`Model.navigationSettled`), after 0.9 s at least and 6 s
+  at most.
+  The window keeps the Hyprland class from its first URL (Chromium names
+  app windows after it), and nothing in Mosaic reads that class.
+- **Finding tiles.** A tile keeps the tab it was matched to while that
+  tab exists (a swap in place can leave two tiles on one site with one
+  title); else it is the extension window whose one tab has the tile's
+  Hyprland title (`Model.matchTiles`), else the one left on its site. Verify reports how many tiles were found.
 - **Quickshell facts.** A `SocketServer` makes one handler `Socket` per
   connection; writes before `connected` turns true are lost; a closed
   handler socket is never destroyed and `destroy()` refuses it

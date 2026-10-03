@@ -45,7 +45,7 @@ Click the icon, or middle-click it to refresh.
 | F | Turn "Only the focused tile plays" on or off |
 | − and + (or =) | Turn the selected tile's volume down or up by 10% |
 | G | Cycle the selected tile's session through the layouts: Grid, Stack, Main + small, 16:9 fit, and back to Hyprland's own |
-| S | Swap the selected tile's web app: pick a web app (1–9) or type an address (A), and it replaces the tile in place. Esc cancels |
+| S | Swap the selected tile's web app: the tile's card opens a picker: a web app (1–9), or its address to edit (A, then Enter). Esc cancels |
 | X or D | Remove the selected tile |
 | Shift+D | Close the selected tile's session |
 | 1–9 | Add that web app to the session |
@@ -73,9 +73,10 @@ Change the key in the widget's **Swap key** setting (written like
 `SUPER + SHIFT + S`), or clear it to have none; a key another binding
 already uses is refused, and the panel says why. The key runs
 `omarchy-shell pym.mosaic swap`, which you can also call yourself; the
-panel's own swap mode (S) works as before. The
-replacement keeps the old tile's session, workspace, slot, and place in the
-list.
+panel's own swap mode (S) opens the same picker on the tile's card. With
+the browser extension connected, the tile's page just changes in place: same
+window, slot, mute, and volume. Without it, a new window opens and takes
+the old tile's session, workspace, slot, and place in the list.
 
 ## Layouts
 
