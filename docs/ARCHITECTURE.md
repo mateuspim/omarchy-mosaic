@@ -414,9 +414,60 @@ tile, so a tile Hyprland won't contain can't loop the service.
 - Tiles share the workspace with any windows already on it, and the
   workspace's layout (dwindle by default, or a Mosaic layout; see
   "Layouts") decides their sizes.
-- The user confirmed containment on the Twitch and YouTube home pages. Real
-  players (fullscreen button, `f`, double-click, theater mode) still need a
-  check per site before the site is called supported.
+- YouTube, Twitch, and Kick players stay in their tiles; see "Real
+  players" below.
+
+### Real players, 2026-10-06
+
+Tested with Chromium (`/usr/bin/chromium`, Omarchy's wrapper, a throwaway
+profile, `--mute-audio`) on live pages: a YouTube video, two live Twitch
+channels, and two live Kick channels. Two tiles were stacked on a visible
+workspace of a portrait 1080×1920 monitor, each 1056×696 and contained
+`0/2`. Input was real mouse and key events sent through the DevTools
+protocol (`Input.dispatchMouseEvent`, `Input.dispatchKeyEvent`), so the
+pages saw trusted gestures.
+
+| Site | Fullscreen button | `f` | Double-click | Theater mode | Fullscreen from theater |
+| --- | --- | --- | --- | --- | --- |
+| YouTube | in the tile | in and out | in and out | `t` and the button | — |
+| Twitch | in the tile | in and out | in and out | Alt+T | in the tile |
+| Kick | in the tile | in and out | in and out | the button | `f` and double-click |
+
+- "In the tile": the fullscreen element filled the page at 1056×696, and
+  both windows stayed `fullscreen 0`, `fullscreenClient 2` at unchanged
+  positions. No Hyprland window event fired during the toggles.
+- Theater modes are page layouts only: the window never changes.
+- Escape wasn't tested. Chromium handles it in the browser before the page
+  sees it, so a DevTools key event can't stand in for it. Check it by hand.
+- Test on a **visible** workspace. On a hidden one, a window opened there
+  never answers Hyprland's resize, so YouTube reported the window's first
+  size (1056×1406 in a 1056×696 tile) and didn't believe it was fullscreen
+  until the workspace was shown.
+- Kick covers its player with a cookie-consent overlay on a fresh profile,
+  and its player buttons have no labels: fullscreen is the second from the
+  right, and theater the third.
+- Once during the Twitch run, a tile briefly halved in width (a third window
+  on the workspace?); a rerun with Hyprland's events recorded didn't repeat
+  it.
+
+**Load, same machine** (Ryzen 9 9900X, RTX 4080 plus the Radeon iGPU).
+Chromium's `VaapiVideoDecoder` decoded every stream in hardware: H.264 on
+Twitch and Kick, AV1 on YouTube. 30 s per step, while the user's own game
+and streams ran:
+
+| Tiles | Probe browser CPU | Dropped frames per stream |
+| --- | --- | --- |
+| 2 (Kick ×2, 720p60) | 44% of one core | 0 |
+| 4 (+ Twitch ×2, 720p60) | 88% of one core | 0–2 of ~1,850 |
+| 6 (+ YouTube ×2, 480p, tiny tiles) | 98–118% of one core | 0–2 of ~1,850 |
+
+- Six streams cost about one CPU core of 24 threads, with no visible frame
+  loss. The GPU busy figures were swamped by the user's game (NVIDIA 81% and
+  the iGPU 40% with no probes), so they say nothing about the tiles; the
+  NVIDIA decoder went from 0% without probes to 5–11% with them.
+- On a portrait monitor, six dwindle tiles are small (256×167 for the last
+  two), so YouTube picked 480p. A landscape monitor with a grid layout would
+  pick higher qualities and cost more; that wasn't measured.
 
 ## Compared approaches
 

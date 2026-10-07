@@ -39,7 +39,11 @@ roughly in order of value; confirm priorities with the user before starting:
 
 - **Real players.** Check YouTube, Twitch, and Kick fullscreen buttons, `f`,
   double-click, and theater modes; then 4–6 simultaneous streams for CPU/GPU
-  load. Record results per site.
+  load. Record results per site. **Done (2026-10-06):** every check stays
+  in the tile on all three sites, and six streams cost about one CPU core
+  with no frame loss (see "Real players" in `docs/ARCHITECTURE.md`).
+  **Still open:** Escape by hand, and load at higher qualities on a
+  landscape monitor.
 - **Layouts.** A dedicated workspace per session, and layouts the user picks:
   balanced grid, vertical stack, one large plus several small, and a 16:9
   fit. Prefer Hyprland layout settings or split ratios over floating
