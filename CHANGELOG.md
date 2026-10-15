@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.4.0 (2026-10-15)
 
 - **Save a tile as a web app**: a tile opened from a typed address, such
   as `music.youtube.com`, shows its site as its name. Press I on it (or
