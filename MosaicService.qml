@@ -59,12 +59,23 @@ Scope {
   property string hiddenWebapps: ""
   property string boundSwapKey: ""
   property string swapKeyError: ""
+  // The swap key error last sent as a notification, so a key that stays
+  // taken across config reloads is reported once, not on every reload.
+  property string notifiedKeyError: ""
   property var keyThen: null
   // The card the swap key opens over a tile.
   readonly property alias swapCard: swapCard
 
   onSwapKeyChanged: keySync.restart()
   onPanelChanged: keySync.restart()
+  // The panel shows the error too, but someone who never opens it would
+  // otherwise not know why the key does nothing.
+  onSwapKeyErrorChanged: {
+    if (swapKeyError === "" || swapKeyError === notifiedKeyError) return
+    notifiedKeyError = swapKeyError
+    Quickshell.execDetached(["notify-send", "--app-name=Mosaic", "Mosaic", swapKeyError])
+  }
+  onBoundSwapKeyChanged: if (boundSwapKey !== "") notifiedKeyError = ""
   // Fullscreen state dispatches waiting to run after tiles moved.
   property var restoreQueue: []
 
@@ -1074,7 +1085,7 @@ Scope {
     runKeyStep(["hyprctl", "-j", "binds"], function(output) {
       var taken = Model.bindConflict(output, parsed)
       if (taken !== "") {
-        root.swapKeyError = parsed.spec + " is already bound to " + taken + ". Pick another swap key in the widget settings."
+        root.swapKeyError = parsed.spec + " is already bound to " + taken + ". Pick another swap key in the widget settings, or clear it and bind omarchy-shell pym.mosaic swap yourself."
         return
       }
       // A bind this service left behind, say before a shell restart, is

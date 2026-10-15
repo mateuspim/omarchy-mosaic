@@ -38,7 +38,7 @@
         "type": "string",
         "label": "Swap key",
         "defaultValue": "SUPER + SHIFT + S",
-        "description": "Key that opens a swap card over the focused tile, to pick another web app or edit its address, written like SUPER + SHIFT + S. Leave empty for no key. A key another binding already uses is refused."
+        "description": "Key that opens a swap card over the focused tile, to pick another web app or edit its address, written like SUPER + SHIFT + S. Leave empty to bind none and use your own Hyprland bind to omarchy-shell pym.mosaic swap instead. A key another binding already uses is refused, with a notification."
       },
       {
         "key": "hiddenWebapps",

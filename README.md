@@ -74,9 +74,15 @@ switch to another site or just another channel; Esc or a click on the tile
 closes it. Errors arrive as a notification.
 Change the key in the widget's **Swap key** setting (written like
 `SUPER + SHIFT + S`), or clear it to have none; a key another binding
-already uses is refused, and the panel says why. The key runs
-`omarchy-shell pym.mosaic swap`, which you can also call yourself; the
-panel's own swap mode (S) opens the same picker on the tile's card. With
+already uses is refused, and a notification and the panel say why. The key
+runs `omarchy-shell pym.mosaic swap`. To keep the bind in your own config
+instead, clear the setting and add it to `~/.config/hypr/bindings.lua`:
+
+```lua
+hl.bind("SUPER + ALT + S", hl.dsp.exec_cmd("omarchy-shell pym.mosaic swap"), { description = "Mosaic: swap tile" })
+```
+
+The panel's own swap mode (S) opens the same picker on the tile's card. With
 the browser extension connected, the tile's page just changes in place: same
 window, slot, mute, and volume. Without it, a new window opens and takes
 the old tile's session, workspace, slot, and place in the list.

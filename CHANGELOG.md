@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- **A taken swap key is reported**: when the swap key can't be bound,
+  say because another binding already uses it, a notification says so,
+  not only the panel. Clear the **Swap key** setting to bind
+  `omarchy-shell pym.mosaic swap` in your own Hyprland config instead; the
+  README shows how.
+
 ## 1.4.0 (2026-10-15)
 
 - **Save a tile as a web app**: a tile opened from a typed address, such
