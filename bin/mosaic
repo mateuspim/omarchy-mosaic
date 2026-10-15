@@ -21,6 +21,7 @@ Usage: mosaic [add] [--session NAME] [--monitor NAME] [--browser CMD] URL|WEBAPP
        mosaic forget NAME
        mosaic login NAME on|off
        mosaic reload TILE
+       mosaic save-app TILE [NAME]
        mosaic streams
        mosaic webapps [--json]
        mosaic monitors
@@ -46,6 +47,9 @@ Usage: mosaic [add] [--session NAME] [--monitor NAME] [--browser CMD] URL|WEBAPP
   forget    Delete a saved session
   login     Choose whether a saved session opens by itself at login
   reload    Reload a tile's page in place (needs the browser extension)
+  save-app  Save a tile that no web app matches, such as one opened from a
+            typed address, as an Omarchy web app for its site, with the
+            site's icon. NAME defaults to the site's name in the page title
   streams   Show how each tile's stream plays and the recent recoveries:
             tiles whose stream drops on the panel's recovery sites are
             reloaded
@@ -101,7 +105,7 @@ run() {
 
 command=add
 case ${1:-} in
-  add | list | remove | focus | close | contain | layout | webapps | monitors | save | restore | saved | forget | login | reload | streams)
+  add | list | remove | focus | close | contain | layout | webapps | monitors | save | restore | saved | forget | login | reload | save-app | streams)
     command=$1
     shift
     ;;
@@ -154,6 +158,7 @@ case $command in
   remove) ((count >= 1)) || fail "Pass the tiles to remove" usage ;;
   focus) ((count == 1)) || fail "Pass one tile to focus" usage ;;
   reload) ((count == 1)) || fail "Pass one tile to reload" usage ;;
+  save-app) ((count == 1 || count == 2)) || fail "Pass one tile and, optionally, a name" usage ;;
   layout) ((count <= 1)) || fail "Pass one layout" usage ;;
   save | restore | forget) ((count == 1)) || fail "Pass one session name" usage ;;
   login) ((count == 2)) && [[ ${targets[1]} == on || ${targets[1]} == off ]] || fail "Pass a session name and on or off" usage ;;
@@ -216,5 +221,6 @@ case $command in
     [[ $answer == "error: "* ]] && fail "${answer#error: }"
     echo "Reloading tile ${targets[0]}."
     ;;
+  save-app) run saveApp "${targets[0]}" "${targets[1]:-}" ;;
   streams) call streams; echo ;;
 esac

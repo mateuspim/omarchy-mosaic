@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- **Save a tile as a web app**: a tile opened from a typed address, such
+  as `music.youtube.com`, shows its site as its name. Press I on it (or
+  its 󰆓 button) and name it, prefilled from the page title, to install an
+  Omarchy web app for the site, with its icon: the tile takes the app's
+  name and icon, and the app gets a button in Add tile and a launcher.
+  From scripts: `mosaic save-app TILE [NAME]`.
+
 ## 1.3.0 (2026-10-15)
 
 - **Saved sessions**: save a session (its 󰆓 button, or W) to keep its

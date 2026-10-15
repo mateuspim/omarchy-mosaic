@@ -5,7 +5,7 @@ import vm from "node:vm"
 const source = fs.readFileSync(new URL("../Model.js", import.meta.url), "utf8")
   .replace(/^\.pragma library\s*/m, "")
 const model = {}
-vm.runInNewContext(source + "\nObject.assign(model, {  parseSaved, serializeSaved, snapshotSession, missingTiles, parseWorkspaces, parseWorkspaceRules, restoreWorkspace, restoreLayout, savedRows, loginSessions, savedText, zoneCount, newCustom, zoneDividers, withDivider, withoutZone, withSplit, ordinal, reconcileVolumes, layoutWorkspaceRows, shownWorkspaceRows, windowCounts, customRows, freeLayoutName, layoutChoices, layoutLabel, nextLayout, parseLayoutName, hyprLayoutName, layoutSlug, normalizeCustom, visualZones, defineLua, withZoneSize, withMain, withName, customSummary, parseLayouts, serializeLayouts, layoutsLoadLua, layoutsLoaded, layoutRuleLua, sessionWorkspace, tileStates, planWorkspaceLayout, planSyncLayouts, planSaveCustom, planDeleteCustom, workspaceChoice, layoutsText, hiddenEntries, showWebapp, nameList, visibleWebapps, hideWebapp, sessionOf, clientFromIpc, parseStore, tileState, buildList, shapeList, parseClients, validAddress, dispatchExpression, listTiles, findTile, planFocus, planRemove, planClose, planContain, planAutoContain, restoreAfterMove, monitorFromIpc, parseMonitors, resolveAddTargets, chooseWorkspace, desktopId, isChromiumFamily, isAppWindow, parseOpenWindow, tileDispatches, pruneRecords, serializeStore, planReplace, replaceRecord, parseCursorPos, cursorMoveExpression, parseKeySpec, bindConflict, tileRect, listText, webappsText, monitorsText, splitLines, parseBridgeMessage, browserLabel, bridgeWindows, siteOf, matchTiles, otherTitles, keepTabs, tileTab, navigationSettled, extensionState, extensionNotice, extensionSteps, browserClass, browserPids, tileAudio, focusMutes, audioIcon, extensionFromManifest, parseStream, recoverySite, planRecovery, streamStatus, recoveryLog, streamsText, bridgeHas, stepVolume, parseVolume, swapBindLua, unbindLua, webappUrl, webappFromEntry, buildWebapps, shapeWebapps, findWebapp, resolveTarget, parseList, tileLabel, tileMeta, sessionPlace, tileApp, tileName, tileSubtitle, tileInitial, layoutBoxes, keyHints, normalizeUrl, sessionName, summary, anyUncontained, parseManifest });", { model })
+vm.runInNewContext(source + "\nObject.assign(model, {  parseSaved, serializeSaved, snapshotSession, missingTiles, parseWorkspaces, parseWorkspaceRules, restoreWorkspace, restoreLayout, savedRows, loginSessions, savedText, zoneCount, newCustom, zoneDividers, withDivider, withoutZone, withSplit, ordinal, reconcileVolumes, layoutWorkspaceRows, shownWorkspaceRows, windowCounts, customRows, freeLayoutName, layoutChoices, layoutLabel, nextLayout, parseLayoutName, hyprLayoutName, layoutSlug, normalizeCustom, visualZones, defineLua, withZoneSize, withMain, withName, customSummary, parseLayouts, serializeLayouts, layoutsLoadLua, layoutsLoaded, layoutRuleLua, sessionWorkspace, tileStates, planWorkspaceLayout, planSyncLayouts, planSaveCustom, planDeleteCustom, workspaceChoice, layoutsText, hiddenEntries, showWebapp, nameList, visibleWebapps, hideWebapp, sessionOf, clientFromIpc, parseStore, tileState, buildList, shapeList, parseClients, validAddress, dispatchExpression, listTiles, findTile, planFocus, planRemove, planClose, planContain, planAutoContain, restoreAfterMove, monitorFromIpc, parseMonitors, resolveAddTargets, chooseWorkspace, desktopId, isChromiumFamily, isAppWindow, parseOpenWindow, tileDispatches, pruneRecords, serializeStore, planReplace, replaceRecord, parseCursorPos, cursorMoveExpression, parseKeySpec, bindConflict, tileRect, listText, webappsText, monitorsText, splitLines, parseBridgeMessage, browserLabel, bridgeWindows, siteOf, matchTiles, otherTitles, keepTabs, tileTab, navigationSettled, extensionState, extensionNotice, extensionSteps, browserClass, browserPids, tileAudio, focusMutes, audioIcon, extensionFromManifest, parseStream, recoverySite, planRecovery, streamStatus, recoveryLog, streamsText, bridgeHas, stepVolume, parseVolume, swapBindLua, unbindLua, webappUrl, webappFromEntry, buildWebapps, shapeWebapps, findWebapp, resolveTarget, parseList, tileLabel, tileMeta, sessionPlace, tileApp, tileName, webappName, webappNameError, siteRoot, planSaveWebapp, tileSubtitle, tileInitial, layoutBoxes, keyHints, normalizeUrl, sessionName, summary, anyUncontained, parseManifest });", { model })
 
 // Values built inside the VM belong to another realm, so compare copies.
 const plain = value => JSON.parse(JSON.stringify(value))
@@ -346,7 +346,7 @@ assert.equal(model.serializeStore([]), '{\n  "tiles": []\n}')
 
 // Replacing: `live` has 0x1 (news, workspace 10), 0x2 and 0x3 (streams, workspace 1).
 const old = model.planReplace(live, "2").tile
-assert.deepEqual(plain(old), { session: "streams", index: 2, address: "0x2", state: "contained", workspace: 1, url: "https://www.twitch.tv/somechannel/" })
+assert.deepEqual(plain(old), { session: "streams", index: 2, address: "0x2", state: "contained", workspace: 1, url: "https://www.twitch.tv/somechannel/", title: "somechannel - Twitch" })
 assert.equal(model.planReplace(live, "0x3").tile.index, 3)
 assert.equal(model.planReplace(live, "9").error, 'No mosaic tile "9"; see `mosaic list`')
 assert.equal(model.planReplace(model.buildList([client("0x8", ["mosaic"], { fullscreen: 1 })], [], []), "0x8").error,
@@ -842,11 +842,10 @@ assert.equal(model.audioIcon({ audible: true, muted: false, volume: 0.3 }), "�
   assert.match(model.savedText({}, live, {}), /No saved sessions/)
 }
 
-console.log("model tests passed")
 
 // The key bar: a few keys per context, the rest behind "?".
 assert.deepEqual(plain(model.keyHints("tiles", false, 6)), [["↑↓", "select"], ["Enter", "focus"], ["S", "swap"], ["A", "add"], ["?", "more"]])
-assert.equal(model.keyHints("tiles", true, 6).length, 18)
+assert.equal(model.keyHints("tiles", true, 6).length, 19)
 assert.deepEqual(plain(model.keyHints("swap", false, 12))[0], ["1–9", "web app"])
 assert.deepEqual(plain(model.keyHints("adding", false, 0)), [["Enter", "add"], ["Esc", "close"]])
 assert.deepEqual(plain(model.keyHints("extension", false, 3)), [["V", "verify"], ["H/L", "tabs"]])
@@ -926,3 +925,41 @@ assert.equal(streamsOut[0], "1  twitch.tv/a  dropped (error: MEDIA_ERR_DECODE), 
 assert.equal(streamsOut[1], "2  youtube.com  playing  (not recovered here)")
 assert.equal(streamsOut.at(-1), "No recoveries yet.")
 assert.equal(model.streamsText({ version: 1, sessions: [] }, {}, {}, [], sites).split("\n")[0], "No tiles open")
+
+// Saving a tile as a web app.
+assert.equal(model.webappName({ url: "https://music.youtube.com/watch?v=1", title: "Song • Artist - YouTube Music" }), "YouTube Music")
+assert.equal(model.webappName({ url: "https://music.youtube.com/", title: "YouTube Music" }), "YouTube Music")
+assert.equal(model.webappName({ url: "https://x.com/", title: "(3) Home / X" }), "x.com")
+assert.equal(model.webappName({ url: "https://www.example.org/a", title: "" }), "example.org")
+assert.equal(model.webappName({ url: "https://example.org/", title: ".hidden" }), "example.org")
+assert.equal(model.webappNameError("YouTube Music"), "")
+assert.equal(model.webappNameError("  "), "Enter a name for the web app")
+assert.equal(model.webappNameError("a/b"), "A web app's name can't contain /")
+assert.equal(model.webappNameError("a\nExec=x"), "A web app's name can't contain control characters")
+assert.equal(model.webappNameError(".."), "A web app's name can't start with .")
+assert.equal(model.webappNameError("x".repeat(65)), "Use a name of up to 64 characters")
+assert.equal(model.siteRoot("https://Music.YouTube.com/watch?v=1"), "https://music.youtube.com/")
+assert.equal(model.siteRoot("http://localhost:8080"), "http://localhost:8080/")
+assert.equal(model.siteRoot("https://user@evil.example/"), "")
+assert.equal(model.siteRoot("file:///etc/passwd"), "")
+assert.equal(model.siteRoot(null), "")
+{
+  const saveList = model.buildList([], [], [])
+  saveList.sessions = [{ name: "music", tiles: [
+    { index: 1, address: "0x1", url: "https://music.youtube.com/watch?v=1", title: "Song - YouTube Music", state: "contained", workspace: 3 },
+    { index: 2, address: "0x2", url: "https://www.twitch.tv/somechannel", title: "somechannel - Twitch", state: "contained", workspace: 3 },
+    { index: 3, address: "0x3", url: null, title: "Kick", state: "contained", workspace: 3 }] }]
+  const apps = [twitchApp, { name: "Kick", url: "https://kick.com" }]
+  assert.deepEqual(plain(model.planSaveWebapp(saveList, apps, "1", "")), {
+    tile: { session: "music", index: 1, address: "0x1", state: "contained", workspace: 3, url: "https://music.youtube.com/watch?v=1", title: "Song - YouTube Music" },
+    name: "YouTube Music", url: "https://music.youtube.com/",
+    command: ["omarchy-webapp-install", "YouTube Music", "https://music.youtube.com/", ""],
+    message: "Saved music.youtube.com as the web app YouTube Music" })
+  assert.equal(model.planSaveWebapp(saveList, apps, "0x1", "  YT Music ").name, "YT Music")
+  assert.equal(model.planSaveWebapp(saveList, apps, "2", "").error, "twitch.tv is already the web app Twitch")
+  assert.equal(model.planSaveWebapp(saveList, apps, "3", "").error, "Only http and https tiles can be saved as web apps")
+  assert.equal(model.planSaveWebapp(saveList, apps, "1", "twitch").error, "There's already a web app called Twitch")
+  assert.equal(model.planSaveWebapp(saveList, apps, "1", "a/b").error, "A web app's name can't contain /")
+  assert.equal(model.planSaveWebapp(saveList, apps, "9", "").error, 'No mosaic tile "9"; see `mosaic list`')
+}
+console.log("model tests passed")

@@ -363,6 +363,17 @@ bring back web apps the user removed. `add` accepts a web app's name or id
 (case-insensitive) in place of a URL, and resolves every target before
 opening any tile.
 
+`save-app` (I in the panel) saves a tile that no web app matches as one:
+it runs `omarchy-webapp-install NAME URL ""` with an argv list, where URL is
+the root of the tile's site (`https://music.youtube.com/`) and the empty
+icon makes the installer fetch the site's own. The name defaults to the
+last part of the page title ("Song - YouTube Music" is "YouTube Music");
+it may not contain `/` or control characters, start with `.`, or exceed 64
+characters, and a launcher of that name in `~/.local/share/applications`
+is never overwritten. `DesktopEntries` picks up the new launcher within a
+second, so the tile takes the app's name and icon, provided that folder
+existed when the shell started (its watcher can't watch a missing folder).
+
 The service builds this list from Quickshell's `DesktopEntries`, which
 already applies the rules above: it reads `$XDG_DATA_HOME` and
 `$XDG_DATA_DIRS` (not the Omarchy templates), lets a user entry hide a

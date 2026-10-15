@@ -83,6 +83,11 @@ Panel {
   // Swap mode: the tile ({ address, label }) that the next web app or
   // address replaces, or null.
   property var swapTile: null
+  // The tile ({ address, label, url }) being saved as a web app, whose
+  // row then asks for the name (I), or null.
+  property var appTile: null
+  // The name field on that row, while it shows.
+  property var appField: null
   // The Add tile section is open (A); it is always open without tiles.
   property bool adding: false
   readonly property bool addOpen: swapTile === null && (adding || tiles.length === 0)
@@ -93,7 +98,7 @@ Panel {
     : view === "layouts" ? (layoutEditor ? "editor" : "layouts")
     : view === "hidden" ? "hidden"
     : view === "saved" ? "saved"
-    : swapTile ? "swap" : addOpen && tiles.length > 0 ? "adding" : "tiles"
+    : appTile ? "naming" : swapTile ? "swap" : addOpen && tiles.length > 0 ? "adding" : "tiles"
   // The address field on the tile being swapped, while it shows.
   property var swapField: null
   property string status: ""
@@ -129,7 +134,7 @@ Panel {
   readonly property var selectedWorkspace: view === "layouts" && !layoutEditor && cursor >= 0 && cursor < workspaceRows.length ? workspaceRows[cursor] : null
   readonly property var selectedCustom: view === "layouts" && !layoutEditor && cursor >= workspaceRows.length
     && cursor < workspaceRows.length + customRows.length ? customRows[cursor - workspaceRows.length] : null
-  readonly property bool editing: urlField.activeFocus || sessionField.activeFocus || (swapField !== null && swapField.activeFocus) || layoutNameField.activeFocus || dropdownOpen
+  readonly property bool editing: urlField.activeFocus || sessionField.activeFocus || (swapField !== null && swapField.activeFocus) || (appField !== null && appField.activeFocus) || layoutNameField.activeFocus || dropdownOpen
 
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
@@ -145,6 +150,7 @@ Panel {
       if (!back) status = ""
       confirmRestart = false
       swapTile = null
+      appTile = null
       if (!back) layoutEditor = null
       confirmDelete = ""
       view = back ? "layouts" : "tiles"
@@ -334,6 +340,7 @@ Panel {
   function setView(name) {
     if (view === name) return
     if (name !== "tiles") swapTile = null
+    appTile = null
     layoutEditor = null
     confirmDelete = ""
     adding = false
@@ -379,6 +386,7 @@ Panel {
   }
 
   function startAdding() {
+    appTile = null
     if (swapTile && swapField) {
       swapField.forceActiveFocus()
       swapField.selectAll()
@@ -397,8 +405,41 @@ Panel {
     setView("tiles")
     cursorActive = true
     cursor = tile.position
+    appTile = null
     swapTile = { address: tile.address, label: Model.tileLabel(tile), url: tile.url || "" }
     status = ""
+  }
+
+  // Asks for a name on the tile's row, to save it as a web app; only for
+  // tiles that no web app matches.
+  function startSaveApp(tile) {
+    if (!tile) return
+    var app = Model.tileApp(webapps, tile)
+    if (app) return showStatus(Model.tileLabel(tile) + " is already the web app " + app.name, true)
+    if (Model.siteRoot(tile.url) === "") return showStatus("Only http and https tiles can be saved as web apps", true)
+    setView("tiles")
+    cursorActive = true
+    cursor = tile.position
+    swapTile = null
+    adding = false
+    appTile = { address: tile.address, label: Model.tileLabel(tile), url: tile.url }
+    status = ""
+  }
+
+  // Enter in the name field.
+  function saveApp(name) {
+    var tile = appTile
+    if (!tile) return
+    var error = Model.webappNameError(name)
+    if (error) return showStatus(error, true)
+    appTile = null
+    keyCatcher.forceActiveFocus()
+    runService(function(engine) { return engine.saveWebapp(tile.address, name.trim(), "Saving " + name.trim() + " as a web app") })
+  }
+
+  function cancelSaveApp() {
+    appTile = null
+    keyCatcher.forceActiveFocus()
   }
 
   function focusTile(tile) {
@@ -778,6 +819,7 @@ Panel {
       }
       onCloseRequested: {
         if (root.layoutEditor) root.layoutEditor = null
+        else if (root.appTile) root.appTile = null
         else if (root.swapTile) root.swapTile = null
         else if (root.adding) root.adding = false
         else root.close()
@@ -808,6 +850,7 @@ Panel {
         else if (t === "c") root.contain()
         else if ((t === "s" || t === "S") && root.cursorActive) root.startSwap(root.selectedTile)
         else if ((t === "w" || t === "W") && root.cursorActive && root.selectedTile) root.saveSession(root.selectedTile.session)
+        else if ((t === "i" || t === "I") && root.cursorActive) root.startSaveApp(root.selectedTile)
         else if ((t === "m" || t === "M") && root.cursorActive) root.toggleMute(root.selectedTile)
         else if ((t === "p" || t === "P") && root.cursorActive) root.reloadTile(root.selectedTile)
         else if ((t === "f" || t === "F") && root.audioReady) root.toggleAudioFocus()
@@ -2604,6 +2647,7 @@ Panel {
     // The session's shared monitor and workspace, which its header shows.
     property string place: ""
     readonly property bool swapping: root.swapTile !== null && tile !== null && root.swapTile.address === tile.address
+    readonly property bool naming: root.appTile !== null && tile !== null && root.appTile.address === tile.address
     readonly property var audio: tile ? root.tileAudio[tile.address] : undefined
     readonly property var app: Model.tileApp(root.webapps, tile)
     // The site's logo: its web app's icon, else the tab's favicon from the
@@ -2621,14 +2665,14 @@ Panel {
       : ({ text: "", warn: false })
     // The volume slider shows on the row under the cursor only, so the
     // list stays one line per tile.
-    readonly property bool showSlider: audio !== undefined && hasCursor && !swapping
+    readonly property bool showSlider: audio !== undefined && hasCursor && !swapping && !naming
     // The level the user set, which the slider shows right away; the
     // browser's report of it arrives a moment later.
     readonly property real volume: {
       var set = root.service && tile ? root.service.tileVolumes[tile.address] : undefined
       return set !== undefined ? set : (audio ? audio.volume : 1)
     }
-    hasCursor: swapping || (root.cursorActive && tile !== null && root.cursor === tile.position)
+    hasCursor: swapping || naming || (root.cursorActive && tile !== null && root.cursor === tile.position)
     foreground: root.foreground
     implicitHeight: rowColumn.implicitHeight + Style.spacing.rowPaddingX
 
@@ -2666,7 +2710,7 @@ Panel {
           Text {
             Layout.fillWidth: true
             textFormat: Text.PlainText
-            text: row.tile ? (row.swapping ? "󰓡  " : "") + Model.tileName(row.tile, row.app) : ""
+            text: row.tile ? (row.swapping ? "󰓡  " : row.naming ? "󰆓  " : "") + Model.tileName(row.tile, row.app) : ""
             color: root.foreground
             font.family: root.fontFamily
             font.pixelSize: Style.font.body
@@ -2724,6 +2768,17 @@ Panel {
         }
 
         PanelActionButton {
+          visible: row.app === null && row.tile !== null && Model.siteRoot(row.tile.url) !== ""
+          iconText: "󰆓"
+          tooltipText: "Save as a web app, with a name and icon · I"
+          foreground: root.foreground
+          onClicked: {
+            if (row.naming) root.cancelSaveApp()
+            else root.startSaveApp(row.tile)
+          }
+        }
+
+        PanelActionButton {
           iconText: "󰓡"
           tooltipText: "Swap this tile's web app · S"
             + (root.service && root.service.boundSwapKey !== "" ? " here, " + root.service.boundSwapKey + " on the tile" : "")
@@ -2758,6 +2813,45 @@ Panel {
         onMoved: function(v) { root.dragVolume(row.tile, v, false) }
         onReleased: function(v) { root.dragVolume(row.tile, v, true) }
         onRightClicked: root.toggleMute(row.tile)
+      }
+
+      // Saving as a web app: its name, right on its card.
+      Loader {
+        active: row.naming
+        visible: active
+        Layout.fillWidth: true
+        Layout.topMargin: Style.space(4)
+        sourceComponent: ColumnLayout {
+          spacing: Style.space(6)
+
+          TextField {
+            id: appName
+            Layout.fillWidth: true
+            text: row.tile ? Model.webappName(row.tile) : ""
+            placeholderText: "Web app name"
+            foreground: root.foreground
+            font.family: root.fontFamily
+            onAccepted: root.saveApp(text)
+            Keys.onEscapePressed: root.cancelSaveApp()
+            Component.onCompleted: {
+              root.appField = appName
+              forceActiveFocus()
+              selectAll()
+            }
+            Component.onDestruction: if (root.appField === appName) root.appField = null
+          }
+
+          Text {
+            Layout.fillWidth: true
+            textFormat: Text.PlainText
+            text: "Saves " + (row.tile ? Model.siteRoot(row.tile.url) : "")
+              + " as an Omarchy web app with the site's icon, in Add tile and the app launcher."
+            color: root.dim
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+            wrapMode: Text.WordWrap
+          }
+        }
       }
 
       // Swapping: what replaces this tile, right on its card.

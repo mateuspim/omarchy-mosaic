@@ -46,6 +46,7 @@ Click the icon, or middle-click it to refresh.
 | − and + (or =) | Turn the selected tile's volume down or up by 10% |
 | G | Cycle the selected tile's session through the layouts: Grid, Stack, Main + small, 16:9 fit, and back to Hyprland's own |
 | S | Swap the selected tile's web app: the tile's card opens a picker: a web app (1–9), or its address to edit (A, then Enter). Esc cancels |
+| I | Save the selected tile as a web app, when no web app matches it (a tile opened from a typed address, such as `music.youtube.com`): its card asks for the name, prefilled from the page title, and Enter installs an Omarchy web app for the site with its icon. Esc cancels |
 | X or D | Remove the selected tile |
 | Shift+D | Close the selected tile's session |
 | 1–9 | Add that web app to the session |
@@ -227,6 +228,7 @@ mosaic saved           # or: mosaic saved --json
 mosaic login streams on                # open it at login (or off)
 mosaic forget streams
 mosaic reload 2                        # reload a tile's page
+mosaic save-app 3 "YouTube Music"      # save a tile as a web app
 mosaic streams                         # each tile's stream, recent recoveries
 mosaic webapps         # or: mosaic webapps --json
 mosaic monitors

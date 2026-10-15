@@ -36,6 +36,8 @@ Scope {
   property string pendingMessage: ""
   property bool stepStarted: false
   property var addState: null
+  // The omarchy-webapp-install command of a saveWebapp under way.
+  property var webappCommand: []
   // What to do with the browser once it is known: function(program, id).
   property var browserChosen: null
   // restartBrowser's state: { browser, clientsText, program, name, pids }.
@@ -639,6 +641,23 @@ Scope {
     return ""
   }
 
+  // Saves a tile with no web app as an Omarchy web app, so it gets a name,
+  // the site's icon, and a button in Add tile (see Model.planSaveWebapp).
+  // omarchy-webapp-install overwrites a launcher of the same name, so an
+  // existing one is checked for first.
+  function saveWebapp(target, name, label) {
+    if (busy) return "Still busy: " + busyLabel
+    var planned = Model.planSaveWebapp(list, Model.shapeWebapps(webapps).apps, target, name)
+    if (planned.error) return planned.error
+    if (DesktopEntries.byId(planned.name)) return "An app called " + planned.name + " already exists"
+    begin(label || "Saving " + planned.name + " as a web app")
+    pendingMessage = planned.message
+    webappCommand = planned.command
+    phase = "webapp-check"
+    runStep(["test", "-e", Quickshell.env("HOME") + "/.local/share/applications/" + planned.name + ".desktop"])
+    return ""
+  }
+
   // Whether a replace of this tile changes its page in place: the
   // extension has found its tab and can navigate it.
   function canNavigate(address) {
@@ -769,6 +788,15 @@ Scope {
         return finishAction("Cannot load the layouts: " + (text + " " + String(errors)).trim())
       return runQueue(pendingQueue, afterQueue)
     }
+    if (phase === "webapp-check") {
+      if (exitCode === 0) return finishAction("An app called " + webappCommand[1] + " already exists")
+      phase = "webapp-install"
+      // Fetching the site's icon tries up to four addresses, 5 to 10 s each.
+      return runStep(webappCommand, {}, 45000)
+    }
+    if (phase === "webapp-install" && exitCode !== 0)
+      return finishAction((String(errors).trim() || text.trim()).replace(/^Error:\s*/, "") || "omarchy-webapp-install failed")
+    if (phase === "webapp-install") return finishAction("")
     if (exitCode !== 0) return finishAction(String(errors).trim() || stepProcess.command[0] + " failed")
     if (phase === "plan") {
       var clients = Model.parseClients(text)
@@ -1414,6 +1442,8 @@ Scope {
     function replace(tile: string, target: string, browser: string): string {
       return root.started(root.replace(tile, target, { browser: browser || root.browser }))
     }
+    // `mosaic save-app TILE [NAME]`.
+    function saveApp(tile: string, name: string): string { return root.started(root.saveWebapp(tile, name)) }
     // `mosaic remove TILE...`.
     function remove(tiles: string): string { return root.started(root.remove(Model.splitLines(tiles))) }
     // `mosaic focus TILE`.

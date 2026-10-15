@@ -358,6 +358,53 @@ function tileName(tile, app) {
   return site !== "" ? site : tileLabel(tile)
 }
 
+// A name for a tile saved as a web app: the site's name at the end of its
+// page title ("Song - YouTube Music" is "YouTube Music"), else its site.
+function webappName(tile) {
+  var title = String(tile && tile.title || "").trim().replace(/^\(\d+\+?\)\s*/, "")
+  var parts = title.split(/\s+[-–—|·•]\s+/).filter(function(part) { return part.trim() !== "" })
+  var name = parts.length > 0 ? parts[parts.length - 1].trim() : ""
+  return name !== "" && webappNameError(name) === "" ? name : siteOf(tile ? tile.url : "")
+}
+
+// Why `name` can't name a web app, or "". omarchy-webapp-install makes it
+// the launcher's file name.
+function webappNameError(name) {
+  var text = String(name || "")
+  if (text.trim() === "") return "Enter a name for the web app"
+  if (text.indexOf("/") !== -1) return "A web app's name can't contain /"
+  if (/[\x00-\x1f\x7f]/.test(text)) return "A web app's name can't contain control characters"
+  if (text.charAt(0) === ".") return "A web app's name can't start with ."
+  if (text.length > 64) return "Use a name of up to 64 characters"
+  return ""
+}
+
+// The root of an http(s) address ("https://music.youtube.com/"), or "".
+function siteRoot(url) {
+  var match = /^(https?):\/\/([^\/?#\s@\\]+)(?:[\/?#]|$)/i.exec(String(url || ""))
+  return match ? match[1].toLowerCase() + "://" + match[2].toLowerCase() + "/" : ""
+}
+
+// `mosaic save-app TILE [NAME]`: the omarchy-webapp-install command that
+// saves a tile with no web app as one, opening its site's root; NAME
+// defaults to webappName. An empty icon makes it fetch the site's own.
+function planSaveWebapp(list, apps, target, name) {
+  var tile = findTile(listTiles(list), target)
+  if (!tile) return { error: "No mosaic tile " + JSON.stringify(String(target)) + "; see `mosaic list`" }
+  var app = tileApp(apps, tile)
+  if (app) return { error: siteOf(tile.url) + " is already the web app " + app.name }
+  var url = siteRoot(tile.url)
+  if (url === "") return { error: "Only http and https tiles can be saved as web apps" }
+  var chosen = String(name || "").trim() || webappName(tile)
+  var error = webappNameError(chosen)
+  if (error) return { error: error }
+  for (var i = 0; apps && i < apps.length; i++) {
+    if (apps[i].name.toLowerCase() === chosen.toLowerCase()) return { error: "There's already a web app called " + apps[i].name }
+  }
+  return { tile: tile, name: chosen, url: url, command: ["omarchy-webapp-install", chosen, url, ""],
+    message: "Saved " + siteOf(url) + " as the web app " + chosen }
+}
+
 // What sets a tile apart from others on its site: the path of its
 // address ("twitch.tv/somechannel"), else the page's title without an
 // unread count or the site's name ("(5) Home / X" is "Home").
@@ -537,7 +584,8 @@ function listTiles(list) {
     var sessionTiles = Array.isArray(sessions[i].tiles) ? sessions[i].tiles : []
     for (var j = 0; j < sessionTiles.length; j++) {
       tiles.push({ session: sessions[i].name, index: sessionTiles[j].index, address: sessionTiles[j].address,
-        state: sessionTiles[j].state, workspace: sessionTiles[j].workspace, url: sessionTiles[j].url })
+        state: sessionTiles[j].state, workspace: sessionTiles[j].workspace, url: sessionTiles[j].url,
+        title: sessionTiles[j].title })
     }
   }
   return tiles
@@ -2396,8 +2444,9 @@ function streamsText(list, audio, recovery, log, sitesText) {
 // `apps` is how many web apps have number keys.
 var KEY_HINTS = {
   tiles: { main: [["↑↓", "select"], ["Enter", "focus"], ["S", "swap"], ["A", "add"]],
-    more: [["M", "mute"], ["−/+", "volume"], ["G", "layout"], ["W", "save session"], ["F", "focused only"], ["⇧C", "keep contained"],
+    more: [["M", "mute"], ["−/+", "volume"], ["G", "layout"], ["W", "save session"], ["I", "save as web app"], ["F", "focused only"], ["⇧C", "keep contained"],
       ["C", "contain now"], ["P", "reload page"], ["⇧R", "recover streams"], ["X", "remove"], ["⇧D", "close session"], ["R", "refresh"], ["H/L", "tabs"]] },
+  naming: { main: [["Enter", "save web app"], ["Esc", "cancel"]], more: [] },
   swap: { main: [["#", "web app"], ["A", "address"], ["Enter", "replace"], ["Esc", "cancel"]], more: [] },
   adding: { main: [["#", "web app"], ["Enter", "add"], ["Esc", "close"]], more: [] },
   hidden: { main: [["↑↓", "select"], ["Enter", "show again"], ["H/L", "tabs"]], more: [["R", "refresh"]] },
