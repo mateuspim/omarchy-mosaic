@@ -21,7 +21,9 @@
       "browser": "",
       "swapKey": "SUPER + SHIFT + S",
       "hiddenWebapps": "",
-      "audioFollowsFocus": false
+      "audioFollowsFocus": false,
+      "recoverStreams": true,
+      "recoverSites": "twitch.tv, kick.com"
     },
     "schema": [
       {
@@ -44,6 +46,13 @@
         "label": "Hidden web apps",
         "defaultValue": "",
         "description": "Web app names or ids to leave out of the panel's buttons, separated by commas, for example: Tailscale, WhatsApp. Right-clicking a button adds it here. Hidden web apps can still be added by typing their name."
+      },
+      {
+        "key": "recoverSites",
+        "type": "string",
+        "label": "Stream recovery sites",
+        "defaultValue": "twitch.tv, kick.com",
+        "description": "Sites whose tiles are reloaded when their stream drops (the video freezes or fails), separated by commas. Their subdomains count too. The panel's Recover dropped streams switch turns it on or off."
       }
     ]
   }

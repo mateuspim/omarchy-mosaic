@@ -5,7 +5,7 @@ import vm from "node:vm"
 const source = fs.readFileSync(new URL("../Model.js", import.meta.url), "utf8")
   .replace(/^\.pragma library\s*/m, "")
 const model = {}
-vm.runInNewContext(source + "\nObject.assign(model, {  zoneCount, newCustom, zoneDividers, withDivider, withoutZone, withSplit, ordinal, reconcileVolumes, layoutWorkspaceRows, shownWorkspaceRows, windowCounts, customRows, freeLayoutName, layoutChoices, layoutLabel, nextLayout, parseLayoutName, hyprLayoutName, layoutSlug, normalizeCustom, visualZones, defineLua, withZoneSize, withMain, withName, customSummary, parseLayouts, serializeLayouts, layoutsLoadLua, layoutsLoaded, layoutRuleLua, sessionWorkspace, tileStates, planWorkspaceLayout, planSyncLayouts, planSaveCustom, planDeleteCustom, workspaceChoice, layoutsText, hiddenEntries, showWebapp, nameList, visibleWebapps, hideWebapp, sessionOf, clientFromIpc, parseStore, tileState, buildList, shapeList, parseClients, validAddress, dispatchExpression, listTiles, findTile, planFocus, planRemove, planClose, planContain, planAutoContain, restoreAfterMove, monitorFromIpc, parseMonitors, resolveAddTargets, chooseWorkspace, desktopId, isChromiumFamily, isAppWindow, parseOpenWindow, tileDispatches, pruneRecords, serializeStore, planReplace, replaceRecord, parseCursorPos, cursorMoveExpression, parseKeySpec, bindConflict, tileRect, listText, webappsText, monitorsText, splitLines, parseBridgeMessage, browserLabel, bridgeWindows, siteOf, matchTiles, keepTabs, tileTab, navigationSettled, extensionState, extensionNotice, extensionSteps, browserClass, browserPids, tileAudio, focusMutes, audioIcon, extensionFromManifest, bridgeHas, stepVolume, parseVolume, swapBindLua, unbindLua, webappUrl, webappFromEntry, buildWebapps, shapeWebapps, findWebapp, resolveTarget, parseList, tileLabel, tileMeta, sessionPlace, tileApp, tileName, tileSubtitle, tileInitial, layoutBoxes, keyHints, normalizeUrl, sessionName, summary, anyUncontained, parseManifest });", { model })
+vm.runInNewContext(source + "\nObject.assign(model, {  parseSaved, serializeSaved, snapshotSession, missingTiles, parseWorkspaces, parseWorkspaceRules, restoreWorkspace, restoreLayout, savedRows, loginSessions, savedText, zoneCount, newCustom, zoneDividers, withDivider, withoutZone, withSplit, ordinal, reconcileVolumes, layoutWorkspaceRows, shownWorkspaceRows, windowCounts, customRows, freeLayoutName, layoutChoices, layoutLabel, nextLayout, parseLayoutName, hyprLayoutName, layoutSlug, normalizeCustom, visualZones, defineLua, withZoneSize, withMain, withName, customSummary, parseLayouts, serializeLayouts, layoutsLoadLua, layoutsLoaded, layoutRuleLua, sessionWorkspace, tileStates, planWorkspaceLayout, planSyncLayouts, planSaveCustom, planDeleteCustom, workspaceChoice, layoutsText, hiddenEntries, showWebapp, nameList, visibleWebapps, hideWebapp, sessionOf, clientFromIpc, parseStore, tileState, buildList, shapeList, parseClients, validAddress, dispatchExpression, listTiles, findTile, planFocus, planRemove, planClose, planContain, planAutoContain, restoreAfterMove, monitorFromIpc, parseMonitors, resolveAddTargets, chooseWorkspace, desktopId, isChromiumFamily, isAppWindow, parseOpenWindow, tileDispatches, pruneRecords, serializeStore, planReplace, replaceRecord, parseCursorPos, cursorMoveExpression, parseKeySpec, bindConflict, tileRect, listText, webappsText, monitorsText, splitLines, parseBridgeMessage, browserLabel, bridgeWindows, siteOf, matchTiles, otherTitles, keepTabs, tileTab, navigationSettled, extensionState, extensionNotice, extensionSteps, browserClass, browserPids, tileAudio, focusMutes, audioIcon, extensionFromManifest, parseStream, recoverySite, planRecovery, streamStatus, recoveryLog, streamsText, bridgeHas, stepVolume, parseVolume, swapBindLua, unbindLua, webappUrl, webappFromEntry, buildWebapps, shapeWebapps, findWebapp, resolveTarget, parseList, tileLabel, tileMeta, sessionPlace, tileApp, tileName, tileSubtitle, tileInitial, layoutBoxes, keyHints, normalizeUrl, sessionName, summary, anyUncontained, parseManifest });", { model })
 
 // Values built inside the VM belong to another realm, so compare copies.
 const plain = value => JSON.parse(JSON.stringify(value))
@@ -437,7 +437,7 @@ assert.equal(model.browserLabel(""), "the browser")
 assert.deepEqual(plain(model.bridgeWindows([
   { id: 1, type: "app", focused: true, tabs: [{ id: 2, url: "https://twitch.tv/a", title: "a", audible: true, muted: false }, { url: "x" }] },
   { id: "3", tabs: [] }, null
-])), [{ id: 1, type: "app", focused: true, tabs: [{ id: 2, url: "https://twitch.tv/a", title: "a", favIconUrl: "", audible: true, muted: false, volume: 1 }] }])
+])), [{ id: 1, type: "app", focused: true, tabs: [{ id: 2, url: "https://twitch.tv/a", title: "a", favIconUrl: "", audible: true, muted: false, volume: 1, stream: null }] }])
 assert.equal(model.bridgeWindows([{ id: 1, tabs: [{ id: 2, volume: 0.25 }, { id: 3, volume: 7 }] }])[0].tabs.map(tab => tab.volume).join(), "0.25,1")
 assert.deepEqual(plain(model.bridgeWindows("nope")), [])
 
@@ -479,6 +479,22 @@ assert.equal(model.matchTiles([{ address: "0xa", url: "https://twitch.tv", title
 // A tab that is gone, or now another bridge's, is matched afresh.
 assert.deepEqual(plain(model.matchTiles([extensionTiles[0]], [{ windows: [tab(1, "https://www.twitch.tv/chan", "(4) chan - Twitch")] }], { "0xa": { bridge: 1, window: 1, tab: 101 } }).tiles),
   { "0xa": { bridge: 0, window: 1, tab: 101 } })
+
+// A tab showing a window that is not a tile is never a tile's: not by
+// site, and not even when an earlier match paired them (a tile left on a
+// stale pairing would have a swap in place navigate the other window).
+const stray = [{ windows: [tab(1, "https://www.twitch.tv/b", "(10) b - Twitch"), tab(2, "https://youtube.com/watch?v=1", "(14) live - YouTube")] }]
+const youtubeTile = [{ address: "0xa", url: "https://twitch.tv", title: "(14) live - YouTube", index: 1 }]
+assert.deepEqual(plain(model.matchTiles(youtubeTile, stray, { "0xa": { bridge: 0, window: 1, tab: 101 } }, "", ["(10) b - Twitch"]).tiles),
+  { "0xa": { bridge: 0, window: 2, tab: 102 } })
+assert.equal(model.matchTiles([{ address: "0xa", url: "https://twitch.tv", title: "Loading", index: 1 }], stray, null, "", ["(10) b - Twitch"]).matched, 0)
+// A title a tile shares with another window proves nothing.
+assert.deepEqual(plain(model.matchTiles(sameSite, sameTabs, { "0xa": { bridge: 0, window: 2, tab: 102 }, "0xb": { bridge: 0, window: 1, tab: 101 } }, "", ["YouTube"]).tiles),
+  { "0xa": { bridge: 0, window: 2, tab: 102 }, "0xb": { bridge: 0, window: 1, tab: 101 } })
+assert.deepEqual(plain(model.otherTitles([
+  { address: "0x1", title: "b", tags: [] }, { address: "0x2", title: "t", tags: ["mosaic", "mosaic-default"] },
+  { address: "0x3", title: "a", tags: ["default-opacity*"] }, { address: "0x4", title: "b", tags: [] }, { address: "0x5", title: "", tags: [] }
+])), ["a", "b"])
 
 // Saved pairings are updated by a check, and dropped with their tiles.
 assert.deepEqual(plain(model.keepTabs({ "0xa": { bridge: 0, window: 1, tab: 101 }, "0xgone": { bridge: 0, window: 9, tab: 109 } },
@@ -549,8 +565,8 @@ const audioBridges = [{ windows: [
 const audioCheck = { total: 3, matched: 2, tiles: { "0xa": { bridge: 0, window: 1, tab: 101 }, "0xb": { bridge: 0, window: 2, tab: 102 }, "0xc": { bridge: 3, window: 9, tab: 9 } }, missing: [] }
 const audio = model.tileAudio(audioCheck, audioBridges)
 assert.deepEqual(plain(audio), {
-  "0xa": { bridge: 0, tab: 101, audible: true, muted: false, volume: 1 },
-  "0xb": { bridge: 0, tab: 102, audible: false, muted: true, volume: 0.5 }
+  "0xa": { bridge: 0, tab: 101, audible: true, muted: false, volume: 1, url: "", stream: null },
+  "0xb": { bridge: 0, tab: 102, audible: false, muted: true, volume: 0.5, url: "", stream: null }
 })
 assert.deepEqual(plain(model.tileAudio(null, audioBridges)), {})
 assert.deepEqual(plain(model.focusMutes(audio, "0xb")), [{ bridge: 0, tab: 101, muted: true }, { bridge: 0, tab: 102, muted: false }])
@@ -753,12 +769,160 @@ assert.equal(model.audioIcon({ audible: true, muted: false, volume: 0.3 }), "�
     { volumes: { "0x1": 0.8 }, resend: [] })
 }
 
+// Saved sessions.
+{
+  const live = { version: 1, sessions: [
+    { name: "streams", tiles: [
+      { index: 1, address: "0xa1", url: "https://twitch.tv/one", title: "One", monitor: "DP-4", workspace: 10, state: "contained" },
+      { index: 2, address: "0xa2", url: "https://kick.com/two", title: "Two", monitor: "DP-4", workspace: 10, state: "contained" },
+      { index: 3, address: "0xa3", url: null, title: "?", monitor: "DP-4", workspace: 10, state: "contained" }] },
+    { name: "news", tiles: [
+      { index: 4, address: "0xb1", url: "https://youtube.com/", title: "YT", monitor: "DP-5", workspace: 2, state: "floating" }] }] }
+  const layouts = { workspaces: { 10: { layout: "stack", before: "" } }, custom: { mine: { name: "Mine" } }, legacy: {} }
+  const snap = model.snapshotSession(live, "streams", layouts, { "0xa1": 0.4 }, { "0xa2": { muted: true } }, false, { login: true })
+  assert.equal(snap.skipped, 1)
+  assert.deepEqual(plain(snap.entry), { monitor: "DP-4", workspace: 10, layout: "stack", login: true, tiles: [
+    { url: "https://twitch.tv/one", volume: 0.4, muted: false }, { url: "https://kick.com/two", volume: 1, muted: true }] })
+  // Focus mode's mutes aren't kept; a floating-only session still has a place.
+  assert.equal(model.snapshotSession(live, "streams", layouts, {}, { "0xa2": { muted: true } }, true, null).entry.tiles[1].muted, false)
+  assert.deepEqual(plain(model.snapshotSession(live, "news", layouts, {}, {}, false, null).entry),
+    { monitor: "DP-5", workspace: 2, layout: "default", login: false, tiles: [{ url: "https://youtube.com/", volume: 1, muted: false }] })
+  assert.match(model.snapshotSession(live, "gone", layouts, {}, {}, false, null).error, /No session/)
+
+  // The file round-trips; bad names, URLs, and fields are dropped or reset.
+  const saved = { streams: snap.entry }
+  assert.deepEqual(plain(model.parseSaved(model.serializeSaved(saved))), plain(saved))
+  assert.deepEqual(plain(model.parseSaved(JSON.stringify({ version: 1, sessions: {
+    "Bad Name": { tiles: [{ url: "https://a.com" }] },
+    empty: { tiles: [{ url: "javascript:alert(1)" }] },
+    odd: { monitor: "DP-4; rm", workspace: 3.5, layout: "lua:evil", login: "yes", tiles: [{ url: "https://a.com", volume: 7 }] } } }))),
+    { odd: { monitor: "", workspace: 0, layout: "default", login: false, tiles: [{ url: "https://a.com", volume: 1, muted: false }] } })
+  assert.deepEqual(plain(model.parseSaved("nope")), {})
+  assert.deepEqual(plain(model.parseSaved('{"version":2,"sessions":{}}')), {})
+
+  // Only what isn't open: a URL saved twice and open once opens once more.
+  const twice = [{ url: "https://twitch.tv/one" }, { url: "https://twitch.tv/one" }, { url: "https://x.com/" }]
+  assert.deepEqual(plain(model.missingTiles(live, "streams", twice)), [{ url: "https://twitch.tv/one" }, { url: "https://x.com/" }])
+  assert.equal(model.missingTiles(live, "news", twice).length, 3)
+
+  assert.deepEqual(plain(model.parseWorkspaces('[{"id":10,"monitor":"DP-4"},{"id":-98,"monitor":"DP-5"},{}]')),
+    [{ id: 10, monitor: "DP-4" }, { id: -98, monitor: "DP-5" }])
+  assert.equal(model.parseWorkspaces("x"), null)
+  assert.deepEqual(plain(model.parseWorkspaceRules('[{"workspaceString":"6","monitor":"DP-4"},{"monitor":"x"}]')), [{ workspace: "6", monitor: "DP-4" }])
+
+  // Where a restore goes.
+  const monitors = [{ name: "DP-4", activeWorkspace: 10, focused: false }, { name: "DP-5", activeWorkspace: 1, focused: true }]
+  const empty = { version: 1, sessions: [] }
+  const entry = { monitor: "DP-4", workspace: 7, tiles: [] }
+  const rules = [{ workspace: "7", monitor: "DP-4" }]
+  assert.deepEqual(plain(model.restoreWorkspace(live, monitors, [], [], "streams", entry)), { workspace: 10, moved: true })
+  assert.deepEqual(plain(model.restoreWorkspace(empty, monitors, [{ id: 7, monitor: "DP-4" }], [], "streams", entry)), { workspace: 7, moved: false })
+  assert.deepEqual(plain(model.restoreWorkspace(empty, monitors, [], rules, "streams", entry)), { workspace: 7, moved: false })
+  assert.deepEqual(plain(model.restoreWorkspace(empty, monitors, [], [], "streams", entry)), { workspace: 10, moved: true })
+  assert.deepEqual(plain(model.restoreWorkspace(empty, monitors, [{ id: 7, monitor: "DP-5" }], rules, "streams", entry)), { workspace: 10, moved: true })
+  assert.deepEqual(plain(model.restoreWorkspace(empty, monitors, [], [], "streams", { monitor: "HDMI-A-1", workspace: 3 })), { workspace: 1, moved: true })
+  assert.match(model.restoreWorkspace(empty, [], [], [], "streams", entry).error, /No active/)
+
+  assert.deepEqual(plain(model.restoreLayout({ layout: "default" }, layouts, 10)), { layout: "" })
+  assert.deepEqual(plain(model.restoreLayout({ layout: "stack" }, layouts, 10)), { layout: "" })
+  assert.deepEqual(plain(model.restoreLayout({ layout: "grid" }, layouts, 10)), { layout: "grid" })
+  assert.deepEqual(plain(model.restoreLayout({ layout: "custom:mine" }, layouts, 3)), { layout: "custom:mine" })
+  assert.deepEqual(plain(model.restoreLayout({ layout: "custom:gone" }, layouts, 3)), { layout: "", missing: "gone" })
+
+  const all = { streams: Object.assign({}, snap.entry, { tiles: snap.entry.tiles.concat([{ url: "https://www.twitch.tv/three", volume: 1, muted: false }]) }),
+    late: { monitor: "", workspace: 0, layout: "default", login: false, tiles: [{ url: "https://x.com/", volume: 1, muted: false }] } }
+  const rows = model.savedRows(all, live, layouts.custom)
+  assert.deepEqual(plain(rows.map(row => [row.name, row.open, row.total, row.sites, row.detail])), [
+    ["late", 0, 1, ["x.com"], "1 tile"],
+    ["streams", 2, 3, ["twitch.tv", "kick.com"], "3 tiles · DP-4 · workspace 10 · Stack"]])
+  assert.deepEqual(plain(model.loginSessions(all)), ["streams"])
+  assert.equal(model.savedText(all, live, layouts.custom).split("\n")[2],
+    "streams  3 tiles · DP-4 · workspace 10 · Stack · opens at login  (2 of 3 open)")
+  assert.equal(model.savedText(all, live, layouts.custom).split("\n")[3], "  https://twitch.tv/one  40%")
+  assert.match(model.savedText({}, live, {}), /No saved sessions/)
+}
+
 console.log("model tests passed")
 
 // The key bar: a few keys per context, the rest behind "?".
 assert.deepEqual(plain(model.keyHints("tiles", false, 6)), [["↑↓", "select"], ["Enter", "focus"], ["S", "swap"], ["A", "add"], ["?", "more"]])
-assert.equal(model.keyHints("tiles", true, 6).length, 15)
+assert.equal(model.keyHints("tiles", true, 6).length, 18)
 assert.deepEqual(plain(model.keyHints("swap", false, 12))[0], ["1–9", "web app"])
 assert.deepEqual(plain(model.keyHints("adding", false, 0)), [["Enter", "add"], ["Esc", "close"]])
 assert.deepEqual(plain(model.keyHints("extension", false, 3)), [["V", "verify"], ["H/L", "tabs"]])
 assert.deepEqual(plain(model.keyHints("nonsense", false, 0)).at(-1), ["?", "more"])
+
+// Stream recovery.
+assert.deepEqual(plain(model.parseStream({ state: "dropped", reason: "error", detail: "MEDIA_ERR_DECODE", since: 5 })),
+  { state: "dropped", reason: "error", detail: "MEDIA_ERR_DECODE", since: 5 })
+assert.equal(model.parseStream({ state: "exploded" }), null)
+assert.equal(model.parseStream("playing"), null)
+assert.equal(model.parseStream({ state: "idle", since: -3 }).since, 0)
+assert.equal(model.bridgeWindows([{ id: 1, tabs: [{ id: 2, stream: { state: "playing" } }] }])[0].tabs[0].stream.state, "playing")
+
+const sites = "twitch.tv, https://www.kick.com/"
+assert.equal(model.recoverySite("https://www.twitch.tv/chan", sites), true)
+assert.equal(model.recoverySite("https://m.twitch.tv/chan", sites), true)
+assert.equal(model.recoverySite("https://kick.com/chan", sites), true)
+assert.equal(model.recoverySite("https://nottwitch.tv/chan", sites), false)
+assert.equal(model.recoverySite("https://youtube.com/watch", sites), false)
+assert.equal(model.recoverySite("https://twitch.tv/chan", ""), false)
+assert.equal(model.recoverySite("", sites), false)
+
+const dropped = { state: "dropped", reason: "error", detail: "MEDIA_ERR_DECODE", since: 1 }
+const streamAudio = (stream, url, tab) => ({ "0xa": { bridge: 0, tab: tab || 7, url: url || "https://twitch.tv/a", stream: stream } })
+let plan = model.planRecovery(streamAudio(dropped), {}, sites, ["0xa"], 1000)
+assert.deepEqual(plain(plan.reload), ["0xa"])
+assert.deepEqual(plain(plan.events), [{ address: "0xa", action: "reloaded", reason: "error", detail: "MEDIA_ERR_DECODE", url: "https://twitch.tv/a" }])
+assert.equal(plan.recovery["0xa"].waiting, 1000)
+// Still dropped right after: the second try waits 30 s.
+plan = model.planRecovery(streamAudio(dropped), plan.recovery, sites, ["0xa"], 20000)
+assert.deepEqual(plain(plan.reload), [])
+// Back to playing: recovered.
+let back = model.planRecovery(streamAudio({ state: "playing", reason: "", detail: "", since: 2 }), plan.recovery, sites, ["0xa"], 25000)
+assert.deepEqual(plain(back.events.map(event => event.action)), ["recovered"])
+assert.equal(back.recovery["0xa"].recovered, 1)
+assert.equal(back.recovery["0xa"].waiting, 0)
+assert.deepEqual(plain(model.streamStatus(streamAudio({ state: "playing" })["0xa"], back.recovery["0xa"], true, 26000)), { text: "stream recovered", warn: false })
+// Three tries in ten minutes, then stalled, once.
+plan = model.planRecovery(streamAudio(dropped), plan.recovery, sites, ["0xa"], 31000)
+assert.deepEqual(plain(plan.reload), ["0xa"])
+plan = model.planRecovery(streamAudio(dropped), plan.recovery, sites, ["0xa"], 31000 + 119000)
+assert.deepEqual(plain(plan.reload), [])
+plan = model.planRecovery(streamAudio(dropped), plan.recovery, sites, ["0xa"], 31000 + 120000)
+assert.deepEqual(plain(plan.reload), ["0xa"])
+plan = model.planRecovery(streamAudio(dropped), plan.recovery, sites, ["0xa"], 400000)
+assert.deepEqual(plain(plan.reload), [])
+assert.deepEqual(plain(plan.events.map(event => event.action)), ["stalled"])
+assert.equal(plan.recovery["0xa"].stalled, true)
+assert.deepEqual(plain(model.planRecovery(streamAudio(dropped), plan.recovery, sites, ["0xa"], 500000).events), [])
+assert.deepEqual(plain(model.streamStatus(streamAudio(dropped)["0xa"], plan.recovery["0xa"], true, 500000)), { text: "stream stalled; P reloads it", warn: true })
+// Playing again clears stalled.
+assert.equal(model.planRecovery(streamAudio({ state: "playing" }), plan.recovery, sites, ["0xa"], 500000).recovery["0xa"].stalled, false)
+// Old tries leave the window.
+assert.deepEqual(plain(model.planRecovery(streamAudio(dropped), Object.assign({}, plan.recovery, { "0xa": Object.assign({}, plan.recovery["0xa"], { stalled: false }) }), sites, ["0xa"], 2000000).reload), ["0xa"])
+// Other sites, recovery off, a new tab, a tile the extension lost, a tile gone.
+assert.deepEqual(plain(model.planRecovery(streamAudio(dropped, "https://youtube.com/watch"), {}, sites, ["0xa"], 1000).reload), [])
+assert.deepEqual(plain(model.planRecovery(streamAudio(dropped), {}, "", ["0xa"], 1000).reload), [])
+assert.equal(model.planRecovery(streamAudio(dropped, "", 8), plan.recovery, sites, ["0xa"], 500000).recovery["0xa"].stalled, false)
+assert.equal(model.planRecovery({}, plan.recovery, sites, ["0xa"], 500000).recovery["0xa"].stalled, true)
+assert.deepEqual(plain(model.planRecovery({}, plan.recovery, sites, [], 500000).recovery), {})
+// The panel's line.
+assert.deepEqual(plain(model.streamStatus(streamAudio(dropped)["0xa"], undefined, true, 0)), { text: "stream dropped; reloading", warn: true })
+assert.deepEqual(plain(model.streamStatus(streamAudio(dropped)["0xa"], undefined, false, 0)), { text: "stream dropped", warn: true })
+assert.equal(model.streamStatus(undefined, undefined, true, 0).text, "")
+assert.equal(model.streamStatus(streamAudio(null)["0xa"], { waiting: 1000, recovered: 0 }, true, 30000).text, "reloading the stream")
+assert.equal(model.streamStatus(streamAudio(null)["0xa"], { waiting: 1000, recovered: 0 }, true, 70000).text, "")
+assert.equal(model.streamStatus(streamAudio(null)["0xa"], { waiting: 0, recovered: 3 }, true, 0).text, "stream recovered 3×")
+// The log, newest first, and `mosaic streams`.
+const log = model.recoveryLog([], [{ address: "0xa", action: "reloaded", reason: "error", detail: "MEDIA_ERR_DECODE", url: "u" }], 0, { "0xa": "twitch.tv/a" })
+assert.deepEqual(plain(log), [{ time: 0, tile: "twitch.tv/a", address: "0xa", action: "reloaded", reason: "error", detail: "MEDIA_ERR_DECODE", url: "u" }])
+assert.equal(model.recoveryLog(log, [{ address: "0xb", action: "stalled" }], 1, {})[0].tile, "0xb")
+assert.equal(model.recoveryLog(new Array(60).fill(log[0]), [], 0, {}).length, 50)
+const streamsList = { version: 1, sessions: [{ name: "s", tiles: [{ index: 1, address: "0xa", url: "https://twitch.tv/a" }, { index: 2, address: "0xb", url: "https://youtube.com/" }] }] }
+const streamsOut = model.streamsText(streamsList, Object.assign(streamAudio(dropped), { "0xb": { tab: 9, url: "https://youtube.com/", stream: { state: "playing" } } }),
+  { "0xa": { stalled: true } }, [], sites).split("\n")
+assert.equal(streamsOut[0], "1  twitch.tv/a  dropped (error: MEDIA_ERR_DECODE), stalled")
+assert.equal(streamsOut[1], "2  youtube.com  playing  (not recovered here)")
+assert.equal(streamsOut.at(-1), "No recoveries yet.")
+assert.equal(model.streamsText({ version: 1, sessions: [] }, {}, {}, [], sites).split("\n")[0], "No tiles open")

@@ -1,5 +1,30 @@
 # Changelog
 
+## Unreleased
+
+- **Saved sessions**: save a session (its 󰆓 button, or W) to keep its
+  tiles, their monitor and workspace, the workspace's layout, and each
+  tile's volume and mute. The new **Saved** tab opens them again (Enter),
+  opening only the tiles that aren't open yet, and each has an **Open at
+  login** switch (O). From scripts: `mosaic save`, `restore`, `saved`,
+  `forget`, and `login`. They are kept in
+  `~/.local/state/mosaic/saved.json`.
+- **Recover dropped streams**: when a Twitch or Kick tile's stream drops
+  (its video fails with a decode error, the player shows its error, or the
+  picture stands still), Mosaic reloads the tile's page. It retries after
+  30 seconds and 2 minutes, then marks the tile **stream stalled** after
+  three tries in ten minutes. A switch on the Tiles tab (Shift+R) turns it
+  off, P reloads a tile by hand, and the **Stream recovery sites** setting
+  picks the sites. `mosaic streams` shows each tile's stream and the
+  recent recoveries, and `mosaic reload TILE` reloads one. Needs extension
+  0.5.1 (`background-6.js`): restart the browser once (B on the Extension
+  tab).
+- **Fixed**: with a plain web app window open on the same site as a tile,
+  Mosaic could take that window's tab for the tile's and keep it, so the
+  tile's stream status and volume showed the other window, and swapping
+  the tile changed the other window's page instead. A tab showing another
+  window's title is no longer paired with a tile.
+
 ## 1.2.0 (2026-10-03)
 
 - **Keep fullscreen in tiles**: a new switch on the Tiles tab (Shift+C)

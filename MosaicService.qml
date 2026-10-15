@@ -135,6 +135,9 @@ Scope {
   property string focusedWindow: ""
   property string focusProbe: ""
   property bool tabsLoaded: false
+  // The titles of windows that are not tiles (Model.otherTitles), so a
+  // tile is never paired with one of their tabs.
+  property var otherTitles: []
   // Open bridge connections, and the ones a verify still waits for.
   property var bridgeSockets: []
   property var pingWaiting: []
@@ -175,6 +178,61 @@ Scope {
 
   onAutoContainChanged: if (autoContain) refresh()
 
+  // The widget's settings: reload tiles whose stream dropped, on these
+  // sites; see Model.planRecovery. The extension's "stream" feature
+  // reports each page's video.
+  property bool recoverStreams: true
+  property string recoverSites: Model.RECOVERY_SITES
+  readonly property string recoveringSites: recoverStreams ? recoverSites : ""
+  // Model.planRecovery's state by address, and its events, newest first
+  // (Model.recoveryLog), for the panel and `mosaic streams`.
+  property var recovery: ({})
+  property var recoveryLog: []
+
+  onRecoveringSitesChanged: applyRecovery()
+
+  // Reloads the tiles whose stream dropped, as Model.planRecovery says;
+  // autoCheck runs it on every report, and recoveryTimer while a reload
+  // waits for its turn.
+  function applyRecovery() {
+    var audio = Model.tileAudio(extensionCheck, bridges)
+    var now = Date.now()
+    var tiles = Model.listTiles(list)
+    var result = Model.planRecovery(audio, recovery, recoveringSites, tiles.map(function(tile) { return tile.address }), now)
+    result.reload.forEach(function(address) {
+      var entry = audio[address]
+      if (Model.bridgeHas(root.bridges[entry.bridge], "reload")) root.sendBridge(entry.bridge, { type: "reload", tab: entry.tab })
+    })
+    if (result.events.length > 0) {
+      var labels = {}
+      // The tab's address names the channel; the store's may not.
+      tiles.forEach(function(tile) {
+        labels[tile.address] = Model.tileLabel(audio[tile.address] ? { url: audio[tile.address].url, index: tile.index } : tile)
+      })
+      result.events.forEach(function(event) {
+        console.log("Mosaic: stream " + event.action + ": " + (labels[event.address] || event.address)
+          + (event.reason ? " (" + event.reason + (event.detail ? ": " + event.detail : "") + ")" : ""))
+      })
+      recoveryLog = Model.recoveryLog(recoveryLog, result.events, now, labels)
+    }
+    if (JSON.stringify(result.recovery) !== JSON.stringify(recovery)) recovery = result.recovery
+    recoveryTimer.running = recoveringSites !== "" && Object.keys(audio).some(function(address) {
+      var stream = audio[address].stream
+      return stream !== null && stream.state === "dropped" && !(result.recovery[address] && result.recovery[address].stalled)
+    })
+  }
+
+  // Reloads a tile's page by hand, which also gives a stalled tile its
+  // tries back.
+  function reloadTile(address) {
+    var error = tileCommand(address, "reload", {})
+    if (error) return error
+    var next = Object.assign({}, recovery)
+    delete next[address]
+    recovery = next
+    return ""
+  }
+
   // Contains what the setting asks for in the current list; rebuild()
   // calls it on every change. Not while an add or swap places its window,
   // which gets its containment last.
@@ -204,6 +262,23 @@ Scope {
       })
     }
   }
+
+  // Saved sessions (Model.parseSaved), kept in saved.json beside
+  // tiles.json; see restore. `savedError` is why the last write failed.
+  property var savedSessions: ({})
+  property bool savedRead: false
+  property string savedError: ""
+  readonly property string savedPath: storePath.replace(/tiles\.json$/, "saved.json")
+  // Volume and mute for tiles a restore opened, until the extension finds
+  // them: { ADDRESS: { volume, muted, until } }.
+  property var pendingAudio: ({})
+  // Sessions still to open at login, one action at a time.
+  property var loginQueue: []
+  // Whether this login's restore has run: "" until the marker file is
+  // read, then "pending" or "done". The marker lives in the runtime
+  // directory, so it is gone at the next login but survives shell restarts.
+  property string loginState: ""
+  readonly property string loginMarkerPath: bridgePath.replace(/\.sock$/, "") + "-login"
 
   // Emitted when an action ends. `error` is "" on success, and `message`
   // then says what was done, like the CLI's output.
@@ -236,6 +311,8 @@ Scope {
     if (JSON.stringify(counts) !== JSON.stringify(workspaceWindows)) workspaceWindows = counts
     var next = Model.buildList(clients, monitors, records)
     if (JSON.stringify(next) !== JSON.stringify(list)) list = next
+    var others = Model.otherTitles(clients)
+    if (JSON.stringify(others) !== JSON.stringify(otherTitles)) otherTitles = others
     applyAutoContain()
   }
 
@@ -374,6 +451,159 @@ Scope {
     runStep(["hyprctl", "-j", "clients"])
     return ""
   }
+
+  // `mosaic save SESSION`: keeps a live session's tiles, place, layout, and
+  // audio as a saved session of the same name, replacing an older save but
+  // keeping its login switch. Returns "" once written, else why not.
+  function saveSession(session) {
+    var name = String(session || "")
+    if (Model.sessionName(name) !== name) return "Invalid session name " + JSON.stringify(name)
+    if (!savedRead) return "Saved sessions are still loading"
+    var snap = Model.snapshotSession(list, name, layoutState, tileVolumes, tileAudio, audioFollowsFocus, savedSessions[name])
+    if (snap.error) return snap.error
+    var next = Object.assign({}, savedSessions)
+    next[name] = snap.entry
+    writeSaved(next)
+    return ""
+  }
+
+  // `mosaic forget NAME`.
+  function forgetSaved(name) {
+    if (!savedSessions[name]) return "No saved session " + JSON.stringify(String(name))
+    var next = Object.assign({}, savedSessions)
+    delete next[name]
+    writeSaved(next)
+    return ""
+  }
+
+  // Whether a saved session opens by itself at login.
+  function setSavedLogin(name, on) {
+    if (!savedSessions[name]) return "No saved session " + JSON.stringify(String(name))
+    var next = Object.assign({}, savedSessions)
+    next[name] = Object.assign({}, next[name], { login: on === true })
+    writeSaved(next)
+    return ""
+  }
+
+  function writeSaved(next) {
+    savedSessions = next
+    savedError = ""
+    savedFile.setText(Model.serializeSaved(next))
+  }
+
+  // `mosaic restore NAME`: opens a saved session's tiles that aren't open,
+  // like add (see restoreWorkspace for where), then gives the workspace the
+  // saved layout, and each new tile its volume and mute once the extension
+  // finds it. `options` may hold `browser`, as for add.
+  function restore(name, options, label) {
+    if (busy) return "Still busy: " + busyLabel
+    var entry = savedSessions[name]
+    if (!entry) return "No saved session " + JSON.stringify(String(name))
+    var given = options || {}
+    addState = {
+      restoring: entry,
+      session: String(name),
+      monitor: "",
+      browser: given.browser ? String(given.browser) : "",
+      urls: [],
+      tiles: [],
+      opened: [],
+      monitors: [],
+      workspaces: [],
+      moved: false,
+      next: 0,
+      clients: [],
+      seen: [],
+      workspace: 0,
+      program: "",
+      address: ""
+    }
+    begin(label || "Restoring " + name)
+    phase = "add-clients"
+    runStep(["hyprctl", "-j", "clients"])
+    return ""
+  }
+
+  // The rest of a restore once its tiles are open: the message, the
+  // tiles' audio, and the layout, which needs fresh clients to keep the
+  // tiles contained (see Model.layoutSteps).
+  function finishRestore() {
+    var state = addState
+    var entry = state.restoring
+    var now = Date.now()
+    var audio = Object.assign({}, pendingAudio)
+    state.opened.forEach(function(address, i) {
+      var tile = state.tiles[i]
+      if (tile && (tile.volume < 1 || tile.muted)) audio[address] = { volume: tile.volume, muted: tile.muted, until: now + Model.SAVED_AUDIO_WAIT_MS }
+    })
+    pendingAudio = audio
+    var message = state.urls.length === 0 ? "Session " + state.session + " is already open."
+      : "Session " + state.session + ": " + state.urls.length + " tile(s) restored on workspace " + state.workspace
+        + (state.moved ? " (it was saved on " + [entry.monitor, entry.workspace > 0 ? "workspace " + entry.workspace : ""].filter(Boolean).join(" · ") + ")" : "") + "."
+    var layout = Model.restoreLayout(entry, layoutState, state.workspace)
+    if (layout.missing) message += " Its layout " + layout.missing + " no longer exists."
+    if (layout.layout === "" || state.workspace === 0) {
+      pendingMessage = message
+      return finishAction("")
+    }
+    var workspace = state.workspace
+    pendingPlan = function(fresh) {
+      var planned = root.layoutPlan(Model.planWorkspaceLayout(fresh, root.layoutState, workspace, layout.layout,
+        root.workspaceLayout(workspace), root.layoutsLua), false)
+      if (!planned.error) planned.message = message + " " + planned.message
+      return planned
+    }
+    phase = "plan"
+    runStep(["hyprctl", "-j", "clients"])
+  }
+
+  // Gives restored tiles their saved volume and mute once the extension
+  // has found them; gives up on tiles that are gone or never found. While
+  // only the focused tile plays, that mode decides mutes.
+  function applyPendingAudio() {
+    var addresses = Object.keys(pendingAudio)
+    if (addresses.length === 0) return
+    var now = Date.now()
+    var live = Model.listTiles(list).map(function(tile) { return tile.address })
+    var next = {}
+    var audio = tileAudio
+    addresses.forEach(function(address) {
+      var wanted = root.pendingAudio[address]
+      if (live.indexOf(address) === -1 || now > wanted.until) return
+      if (!audio[address]) {
+        next[address] = wanted
+        return
+      }
+      if (wanted.volume < 1) root.setTileVolume(address, wanted.volume)
+      if (wanted.muted && !root.audioFollowsFocus) root.setTileMuted(address, true)
+    })
+    if (JSON.stringify(next) !== JSON.stringify(pendingAudio)) pendingAudio = next
+  }
+
+  // At most once per login, a moment after the shell starts: opens the
+  // saved sessions whose login switch is on. The marker is written first,
+  // so a shell that keeps restarting doesn't open them again.
+  function restoreAtLogin() {
+    if (loginState !== "pending") return
+    if (!savedRead) return loginTimer.restart()
+    loginState = "done"
+    loginMarker.setText(new Date().toISOString() + "\n")
+    loginQueue = Model.loginSessions(savedSessions)
+    restoreNextLogin()
+  }
+
+  function restoreNextLogin() {
+    if (loginQueue.length === 0 || busy) return
+    var name = loginQueue[0]
+    loginQueue = loginQueue.slice(1)
+    var error = restore(name, { browser: browser }, "Opening " + name + " at login")
+    if (error) {
+      console.warn("pym.mosaic: cannot open " + name + " at login: " + error)
+      Qt.callLater(restoreNextLogin)
+    }
+  }
+
+  onActionFinished: if (loginQueue.length > 0) Qt.callLater(restoreNextLogin)
 
   // `mosaic replace TILE TARGET`: puts TARGET (a URL or web app) in the
   // tile's place. When the browser extension has found the tile, its page
@@ -576,10 +806,40 @@ Scope {
       var monitors = Model.parseMonitors(text)
       if (monitors === null) return finishAction("Unexpected hyprctl monitors output")
       records = Model.pruneRecords(records, addState.clients)
+      if (addState.restoring) {
+        addState.monitors = monitors
+        var restoreList = Model.buildList(addState.clients, monitors, records)
+        addState.tiles = Model.missingTiles(restoreList, addState.session, addState.restoring.tiles)
+        addState.urls = addState.tiles.map(function(tile) { return tile.url })
+        if (addState.urls.length === 0) {
+          var openOn = Model.sessionWorkspace(restoreList, addState.session)
+          addState.workspace = openOn === null ? 0 : openOn
+          return finishRestore()
+        }
+        phase = "restore-workspaces"
+        return runStep(["hyprctl", "-j", "workspaces"])
+      }
       var chosen = Model.chooseWorkspace(Model.buildList(addState.clients, monitors, records), monitors,
         addState.session, addState.monitor)
       if (chosen.error) return finishAction(chosen.error)
       addState.workspace = chosen.workspace
+      return chooseBrowser()
+    }
+    if (phase === "restore-workspaces") {
+      var workspaces = Model.parseWorkspaces(text)
+      if (workspaces === null) return finishAction("Unexpected hyprctl workspaces output")
+      addState.workspaces = workspaces
+      phase = "restore-rules"
+      return runStep(["hyprctl", "-j", "workspacerules"])
+    }
+    if (phase === "restore-rules") {
+      var rules = Model.parseWorkspaceRules(text)
+      if (rules === null) return finishAction("Unexpected hyprctl workspacerules output")
+      var place = Model.restoreWorkspace(Model.buildList(addState.clients, addState.monitors, records),
+        addState.monitors, addState.workspaces, rules, addState.session, addState.restoring)
+      if (place.error) return finishAction(place.error)
+      addState.workspace = place.workspace
+      addState.moved = place.moved
       return chooseBrowser()
     }
     // A dispatch.
@@ -619,6 +879,7 @@ Scope {
   // it. `uwsm-app` starts it in its own scope, as Omarchy's launchers do,
   // and the argv list means a URL can never reach a shell.
   function launchNext() {
+    if (addState.next >= addState.urls.length && addState.restoring) return finishRestore()
     if (addState.next >= addState.urls.length) {
       pendingMessage = addState.old
         ? "Replaced tile " + addState.old.index + " with " + addState.urls[0] + "."
@@ -643,6 +904,7 @@ Scope {
     windowTimeout.stop()
     addState.seen.push(opened.address)
     addState.address = opened.address
+    if (addState.opened) addState.opened.push(opened.address)
     var steps = Model.tileDispatches(opened.address, addState.session, addState.workspace, addState.old)
     if (steps.error) return finishAction(steps.error)
     // Undo the cursor warp to the new window. Hyprland warps a moment after
@@ -934,7 +1196,7 @@ Scope {
     }
     var probe = focusProbe !== "" && focusProbe === focusedWindow ? focusProbe : ""
     focusProbe = ""
-    extensionCheck = Model.matchTiles(Model.shapeList(list).tiles, bridges, knownTabs(), probe)
+    extensionCheck = Model.matchTiles(Model.shapeList(list).tiles, bridges, knownTabs(), probe, otherTitles)
   }
 
   function bridgeOpened(socket) {
@@ -987,9 +1249,11 @@ Scope {
   // to check.
   function autoCheck() {
     if (verifying) return
-    extensionCheck = bridges.length > 0 ? Model.matchTiles(Model.shapeList(list).tiles, bridges, knownTabs()) : null
+    extensionCheck = bridges.length > 0 ? Model.matchTiles(Model.shapeList(list).tiles, bridges, knownTabs(), "", otherTitles) : null
     applyAudioFocus()
     keepVolumes()
+    applyPendingAudio()
+    applyRecovery()
   }
 
   // Forgets volumes of tiles that are gone, follows the levels an up to
@@ -1093,6 +1357,8 @@ Scope {
     applyAudioFocus()
   }
 
+  onOtherTitlesChanged: autoCheck()
+
   onListChanged: {
     autoCheck()
     layoutSync.restart()
@@ -1175,6 +1441,21 @@ Scope {
     }
     function layoutDelete(slug: string): string { return root.started(root.deleteCustomLayout(slug)) }
 
+    // Saved sessions: `mosaic save`, `restore`, `saved`, `forget`, and
+    // `login`. save, forget, and login answer at once: "" or "error: …".
+    function saved(): string { return Model.serializeSaved(root.savedSessions).trim() }
+    function savedText(): string { return Model.savedText(root.savedSessions, root.list, root.layoutState.custom) }
+    function save(session: string): string { var error = root.saveSession(session); return error ? "error: " + error : "" }
+    function forget(name: string): string { var error = root.forgetSaved(name); return error ? "error: " + error : "" }
+    function login(name: string, state: string): string {
+      if (state !== "on" && state !== "off") return "error: Pass on or off"
+      var error = root.setSavedLogin(name, state === "on")
+      return error ? "error: " + error : ""
+    }
+    function restore(name: string, browser: string): string {
+      return root.started(root.restore(name, { browser: browser || root.browser }))
+    }
+
     // How action JOB went: "running", "done" or "error" on the first line,
     // then the CLI's message or the error; "unknown" for an old number.
     function result(job: int): string {
@@ -1226,8 +1507,13 @@ Scope {
     function reloadTile(tile: string): string {
       var found = Model.findTile(Model.listTiles(root.list), tile)
       if (!found) return "error: No tile " + tile
-      var error = root.tileCommand(found.address, "reload", {})
+      var error = root.reloadTile(found.address)
       return error ? "error: " + error : "ok"
+    }
+    // `mosaic streams`: each tile's stream and the recent recoveries.
+    function streams(): string {
+      var text = Model.streamsText(root.list, root.tileAudio, root.recovery, root.recoveryLog, root.recoverSites)
+      return (root.recoverStreams ? "Recovering streams on " + root.recoverSites : "Stream recovery is off") + "\n\n" + text
     }
     function mute(tile: string, state: string): string {
       var found = Model.findTile(Model.listTiles(root.list), tile)
@@ -1285,6 +1571,14 @@ Scope {
     id: focusProbeTimer
     interval: 300
     onTriggered: if (root.focusProbe === root.focusedWindow) root.verifyExtension()
+  }
+
+  // Retries a dropped stream's reload once its wait is over.
+  Timer {
+    id: recoveryTimer
+    interval: 5000
+    repeat: true
+    onTriggered: root.applyRecovery()
   }
 
   Timer {
@@ -1554,6 +1848,40 @@ Scope {
       layoutSync.restart()
     }
     onSaveFailed: function(error) { root.layoutError = "Cannot write " + root.layoutsPath + ": " + error }
+  }
+
+  FileView {
+    id: savedFile
+    path: root.savedPath
+    watchChanges: true
+    printErrors: false
+    onFileChanged: reload()
+    onLoaded: {
+      var parsed = Model.parseSaved(text())
+      if (JSON.stringify(parsed) !== JSON.stringify(root.savedSessions)) root.savedSessions = parsed
+      root.savedRead = true
+    }
+    onLoadFailed: root.savedRead = true
+    onSaveFailed: function(error) { root.savedError = "Cannot write " + root.savedPath + ": " + error }
+  }
+
+  FileView {
+    id: loginMarker
+    path: root.loginMarkerPath
+    printErrors: false
+    onLoaded: if (root.loginState === "") root.loginState = "done"
+    onLoadFailed: if (root.loginState === "") {
+      root.loginState = "pending"
+      loginTimer.restart()
+    }
+  }
+
+  // Lets Hyprland, the monitors, and the tile list settle after a start
+  // before opening sessions at login.
+  Timer {
+    id: loginTimer
+    interval: 5000
+    onTriggered: root.restoreAtLogin()
   }
 
   FileView {

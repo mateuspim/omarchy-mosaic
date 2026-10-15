@@ -144,6 +144,11 @@ logins and memory; the user chose an extension instead.
   tab exists (a swap in place can leave two tiles on one site with one
   title); else it is the extension window whose one tab has the tile's
   Hyprland title (`Model.matchTiles`), else the one left on its site.
+  A tab showing the title of a window that is not a tile (and no tile's)
+  is that window's: no step pairs a tile with it, and a tile paired with
+  it before is matched afresh. Without this, a stale pairing to a plain
+  app window on the same site stuck, and a swap in place navigated that
+  window instead of the tile (seen 2026-10-11).
   Pairings are saved beside the socket (`pym-mosaic-tabs.json` in
   `$XDG_RUNTIME_DIR`), since tab ids outlive a shell restart. Tiles alike
   in title and site, never paired before, are told apart by focus: when one
@@ -155,6 +160,61 @@ logins and memory; the user chose an extension instead.
   ("indestructible object"), so the service drops its references. The
   server deletes a stale socket file itself. Unix socket paths are limited
   to 108 bytes.
+
+## Stream recovery
+
+Twitch streams sometimes drop for good, most likely when video decoding
+fails, and only a page reload brings them back (the user's report,
+2026-10-07). Mosaic notices and reloads the tile.
+
+- **Detection is in the page (extension 0.5.1, `background-6.js`, feature
+  `stream`).** The worker injects `pageStream` into each tile's main frame
+  when it finishes loading (and into open tiles when the worker starts,
+  asking for a fresh report). Every 2 s it looks at the largest video
+  with a source. Once that video has played (its time moved while not
+  paused), a problem counts: the element's `error` (other than aborted),
+  Twitch's error overlay (`[data-a-target="player-overlay-content-gate"]`
+  with "Error #N"), time standing still while not paused or ended, no new
+  decoded frames while the page is visible and time runs (the picture
+  froze but audio didn't), or the video gone. An error counts after 4 s
+  and the others after 12 s, so a normal rebuffer doesn't. A video counts
+  only on the path where it played: Twitch changes pages without loading
+  one, so leaving a channel for its directory once read as "gone" and
+  reloaded the directory (seen live 2026-10-08; fixed in 0.5.1). The page
+  reports `{ state: playing | idle | dropped, reason, detail, since }`
+  only when it changes, and the worker carries it as `stream` on the
+  tab in its `windows` reports. A new page starts without one (the worker
+  forgets it on `loading`).
+- **Deciding is in the service.** `Model.planRecovery` (unit-tested)
+  reloads a dropped tile on a site in the **Stream recovery sites**
+  setting (`twitch.tv, kick.com`; subdomains count) with the existing
+  `reload` command: at once, then after 30 s and 2 min, at most three
+  tries in ten minutes. After that the tile is `stalled` until its
+  stream plays again or the user reloads it by hand (P, `mosaic reload`,
+  `reloadTile`), which also gives its tries back. A tile whose stream
+  plays again after a reload counts as recovered. The service runs the
+  plan on every report and every 5 s while a reload waits its turn, logs
+  each event to the journal ("Mosaic: stream reloaded: …"), and keeps the
+  last 50 for `mosaic streams` (IPC `streams`). The panel's switch is the
+  widget setting `recoverStreams` (on by default).
+- **What a reload keeps.** The window, its slot, containment, the tab's
+  mute, and its volume (set again when the page finishes loading). A
+  theater mode or in-tile fullscreen inside the page is lost.
+- **Checked 2026-10-08** with a headless Chromium (scratch profile and
+  config, bridge socket pointed nowhere) on a local Media Source
+  Extensions player, which is how Twitch plays too: normal playback stayed
+  `playing`, a hand pause `idle`; appended junk gave `dropped` with
+  `MEDIA_ERR_DECODE` after 4 s; starving the buffer gave `dropped`
+  (`frozen`) 12 s after it ran out; a Twitch-style overlay gave `dropped`
+  (`Error #2000`); a `reload` command cleared the state and the page
+  reported `playing` again 3 s later. The service's side was checked in a
+  throwaway shell against a fake bridge reporting the user's two Twitch
+  tiles: one reload at once, "recovered" when it played, the next one
+  only 30 s after it dropped again, and the healthy tile left alone.
+  **Not checked:** a real Twitch drop, the frames check (a decoder that
+  stops while audio keeps time), Kick's error overlay (it has no known
+  selector, so only the generic checks apply there), and pages on hidden
+  workspaces, where Chromium may throttle the 2 s timer.
 
 ## Sessions and the store
 
@@ -185,6 +245,47 @@ Sessions are sorted by name (tiles without a session tag go to `default`),
 and tiles by store order. `index` is 1-based across all sessions. `state` is
 `contained`, `uncontained`, `floating`, or `fullscreen`. `version` changes
 only on incompatible changes; adding a field doesn't bump it.
+
+## Saved sessions
+
+A saved session is a live session kept under its own name, to open again
+from the panel's **Saved** tab, `mosaic restore NAME`, or at login (the
+user's choices, 2026-10-07). `$XDG_STATE_HOME/mosaic/saved.json`:
+
+```json
+{ "version": 1, "sessions": { "streams": { "monitor": "DP-4", "workspace": 10,
+  "layout": "stack", "login": true,
+  "tiles": [ { "url": "https://twitch.tv/…", "volume": 0.4, "muted": false } ] } } }
+```
+
+Personal URLs live only there, never in this repository.
+
+- **Save** (`Model.snapshotSession`) takes the session's tiles that have a
+  URL in `tiles.json`, in list order, up to 9; the monitor and workspace of
+  its first tiled tile; that workspace's layout choice; and each tile's
+  volume and mute from the extension. While "Only the focused tile plays"
+  is on, mutes are that mode's, so none is saved. Saving again replaces
+  the entry but keeps its login switch.
+- **Restore** opens only what's missing (`Model.missingTiles`): a saved
+  URL counts as open once per live tile of the session with that URL, so a
+  second restore opens nothing. It runs through add's phases, with two
+  more reads (`hyprctl -j workspaces` and `workspacerules`) to choose the
+  workspace (`Model.restoreWorkspace`): the session's open tiles' workspace,
+  else the saved workspace if it is on the saved monitor or a rule puts it
+  there, else that monitor's current workspace, else (monitor gone) the
+  focused one.
+- The saved layout is applied afterwards (`Model.restoreLayout`) unless
+  it is Hyprland's own (a restore doesn't take a layout away), the
+  workspace has it already, or it was a custom layout since deleted. It
+  goes through `planWorkspaceLayout` on fresh clients, so the tiles stay
+  contained.
+- Volume and mute wait in `pendingAudio` until the extension matches the
+  new tile, for up to two minutes; with "Only the focused tile plays" on,
+  that mode decides mutes.
+- **At login**: sessions with `login` on open a few seconds after the
+  shell starts, one after another. A marker beside the bridge socket in
+  the runtime directory (`pym-mosaic-login`) is written first, so this runs
+  once per login, not on every shell restart or plugin reload.
 
 ## Layouts
 

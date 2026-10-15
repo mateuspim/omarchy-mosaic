@@ -51,6 +51,8 @@ Click the icon, or middle-click it to refresh.
 | 1–9 | Add that web app to the session |
 | A | Type a URL or web app name to add (Enter adds, Esc returns to the list) |
 | C | Turn fullscreen containment back on |
+| Shift+R | Turn "Recover dropped streams" on or off |
+| P | Reload the selected tile's page (needs the browser extension) |
 | R | Refresh the tiles |
 | Esc | Close the panel |
 
@@ -115,6 +117,19 @@ Tiles stay tiled, so Omarchy's window bindings (swapping included) keep
 working. Mosaic saves the choices in `~/.local/state/mosaic/layouts.json`
 and applies them again after a Hyprland config reload.
 
+## Saved sessions
+
+Keep a session to open it again later: its tiles, in order, with the
+monitor and workspace they were on, that workspace's layout, and each
+tile's volume and mute. On the Tiles tab, the 󰆓 button on a session's
+header (or **W** on one of its tiles) saves it under its own name, and
+saving again updates it. The **Saved** tab lists saved sessions: **Enter**
+opens the tiles that aren't open yet, back where they were (on the
+focused monitor if that one is gone), **O** switches **Open at login** on
+or off, and **D** (twice) deletes one. Saved sessions live in
+`~/.local/state/mosaic/saved.json`. To open one with a key, bind
+`mosaic restore NAME` in your Hyprland config.
+
 ## Audio
 
 Each tile row has a speaker button showing whether the tile is playing
@@ -131,6 +146,26 @@ mutes the rest, and focusing any other window leaves them as they are.
 Turning it off unmutes every tile. From scripts: `omarchy-shell pym.mosaic
 mute TILE on|off|toggle`, `volume TILE 40` (or `+10`, `-10`), `media TILE
 play|pause|toggle`, and `reloadTile TILE`.
+
+## Dropped streams
+
+Twitch sometimes drops a stream: the picture freezes or the player shows
+an error such as "Error #3000", and only a page reload brings it back.
+With the browser extension connected, **Recover dropped streams** at the
+top of the Tiles tab (on by default, Shift+R) does that reload for you.
+The extension watches each tile's video, and a tile counts as dropped
+when its video fails, the site shows its player error, or a video that
+was playing stands still for 12 seconds without being paused. Pausing,
+a stream that ends, and a page still loading don't count.
+
+It reloads a dropped tile right away, then waits 30 seconds and 2 minutes
+before trying again. After three tries in ten minutes it stops and the
+tile's row says **stream stalled**; P reloads it by hand. A tile's row
+also says when a stream was recovered. It only acts on the sites in the
+widget's **Stream recovery sites** setting, `twitch.tv, kick.com` by
+default (YouTube doesn't need it). `mosaic streams` shows each tile's
+stream and the recent recoveries with the reason, such as
+`MEDIA_ERR_DECODE`; they are logged to the shell's journal too.
 
 ## The browser extension (for audio control)
 
@@ -186,6 +221,13 @@ mosaic contain
 mosaic layout                          # workspaces' layouts and your own
 mosaic layout --workspace 8 grid       # grid, stack, main, fit, yours, default
 mosaic layout --session streams three  # the workspace the session is on
+mosaic save streams                    # keep the session to open it later
+mosaic restore streams                 # open its tiles that aren't open
+mosaic saved           # or: mosaic saved --json
+mosaic login streams on                # open it at login (or off)
+mosaic forget streams
+mosaic reload 2                        # reload a tile's page
+mosaic streams                         # each tile's stream, recent recoveries
 mosaic webapps         # or: mosaic webapps --json
 mosaic monitors
 ```

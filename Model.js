@@ -1273,6 +1273,16 @@ function windowCounts(clients) {
   return counts
 }
 
+// The titles of the windows in `clients` that are not tiles, sorted and
+// without repeats, for matchTiles.
+function otherTitles(clients) {
+  var titles = []
+  ;(clients || []).forEach(function(client) {
+    if (sessionOf(client.tags) === null && client.title !== "" && titles.indexOf(client.title) === -1) titles.push(client.title)
+  })
+  return titles.sort(compareText)
+}
+
 // Custom layouts by name: [{ slug, def }].
 function customRows(custom) {
   return Object.keys(custom || {}).map(function(slug) { return { slug: slug, def: custom[slug] } })
@@ -1296,6 +1306,222 @@ function layoutsText(state) {
     lines.push("", "Custom layouts:")
     slugs.forEach(function(slug) { lines.push("  " + state.custom[slug].name + "  (" + customSummary(state.custom[slug]) + ")") })
   }
+  return lines.join("\n")
+}
+
+// Saved sessions (saved.json beside tiles.json): a named set of tiles to
+// open again, from the panel, `mosaic restore NAME`, or at login. The name
+// is the session's own, so a restore reopens the same session.
+//   { "version": 1, "sessions": { NAME: { "monitor", "workspace", "layout",
+//     "login", "tiles": [{ "url", "volume", "muted" }] } } }
+// `monitor` and `workspace` are where the tiles were (workspace 0 for
+// unknown), `layout` that workspace's layout choice, and `login` whether
+// the session opens by itself at login.
+var SAVED_VERSION = 1
+// How long a restored tile's volume and mute wait for the extension to
+// find it.
+var SAVED_AUDIO_WAIT_MS = 120000
+
+function savedUrl(text) {
+  var url = String(text || "")
+  return /^(https?|file):\/\/\S+$/i.test(url) && url.length <= 2048 ? url : ""
+}
+
+function savedMonitor(text) {
+  var name = String(text || "")
+  return /^[A-Za-z0-9_.:+-]{1,64}$/.test(name) ? name : ""
+}
+
+// A saved.json entry, cleaned, or null when it has no usable tile.
+function cleanSaved(entry) {
+  if (!entry || typeof entry !== "object" || !Array.isArray(entry.tiles)) return null
+  var tiles = []
+  entry.tiles.forEach(function(tile) {
+    var url = tile ? savedUrl(tile.url) : ""
+    if (url === "" || tiles.length >= MAX_ADD) return
+    var volume = Number(tile.volume)
+    tiles.push({ url: url, volume: tile.volume !== undefined && volume >= 0 && volume <= 1 ? Math.round(volume * 100) / 100 : 1, muted: tile.muted === true })
+  })
+  if (tiles.length === 0) return null
+  var workspace = Number(entry.workspace)
+  var layout = String(entry.layout || "default")
+  return {
+    monitor: savedMonitor(entry.monitor),
+    workspace: workspace >= 1 && workspace <= 9999 && Math.floor(workspace) === workspace ? workspace : 0,
+    layout: layout === "default" || LAYOUTS.indexOf(layout) !== -1 || customSlug(layout) !== "" ? layout : "default",
+    login: entry.login === true,
+    tiles: tiles
+  }
+}
+
+// saved.json's sessions ({ NAME: entry }); an unreadable file has none.
+function parseSaved(text) {
+  var parsed
+  try {
+    parsed = JSON.parse(String(text || ""))
+  } catch (error) {
+    parsed = null
+  }
+  var saved = {}
+  if (!parsed || parsed.version !== SAVED_VERSION || !parsed.sessions || typeof parsed.sessions !== "object") return saved
+  Object.keys(parsed.sessions).forEach(function(name) {
+    var entry = cleanSaved(parsed.sessions[name])
+    if (entry && sessionName(name) === name) saved[name] = entry
+  })
+  return saved
+}
+
+function serializeSaved(saved) {
+  var sessions = {}
+  Object.keys(saved).sort().forEach(function(name) { sessions[name] = saved[name] })
+  return JSON.stringify({ version: SAVED_VERSION, sessions: sessions }, null, 2) + "\n"
+}
+
+// A live session as a saved.json entry: its tiles' URLs in list order,
+// with each one's volume (`volumes`, { ADDRESS: level }) and mute
+// (`audio`, Model.tileAudio), where its tiled tiles are, and that
+// workspace's layout. While only the focused tile plays (`focusMode`),
+// mutes are that mode's doing, so none is kept. `login` carries over from
+// the entry it replaces. Returns { entry } or { error }.
+function snapshotSession(list, session, layouts, volumes, audio, focusMode, previous) {
+  var sessions = list && Array.isArray(list.sessions) ? list.sessions : []
+  var found = null
+  for (var i = 0; i < sessions.length; i++) if (sessions[i].name === session) found = sessions[i]
+  if (!found) return { error: "No session " + JSON.stringify(String(session)) + " is open" }
+  var withUrl = found.tiles.filter(function(tile) { return savedUrl(tile.url) !== "" })
+  if (withUrl.length === 0) return { error: "Mosaic doesn't know the address of any tile in " + session }
+  var tiled = withUrl.filter(function(tile) { return tile.state !== "floating" })
+  var anchor = tiled.length > 0 ? tiled[0] : withUrl[0]
+  var entry = cleanSaved({
+    monitor: anchor.monitor === "?" ? "" : anchor.monitor,
+    workspace: anchor.workspace,
+    layout: workspaceChoice(layouts, anchor.workspace),
+    login: previous ? previous.login === true : false,
+    tiles: withUrl.map(function(tile) {
+      var level = volumes && volumes[tile.address] !== undefined ? volumes[tile.address] : 1
+      var muted = !focusMode && audio && audio[tile.address] ? audio[tile.address].muted === true : false
+      return { url: tile.url, volume: level, muted: muted }
+    })
+  })
+  var skipped = found.tiles.length - withUrl.length
+  return { entry: entry, skipped: skipped }
+}
+
+// The saved tiles a session doesn't have open, by URL: a saved URL counts
+// as open once for each live tile of the session that has it.
+function missingTiles(list, session, tiles) {
+  var open = {}
+  listTiles(list).forEach(function(tile) {
+    if (tile.session === session && tile.url) open[tile.url] = (open[tile.url] || 0) + 1
+  })
+  return tiles.filter(function(tile) {
+    if (open[tile.url] > 0) {
+      open[tile.url]--
+      return false
+    }
+    return true
+  })
+}
+
+// Workspaces from `hyprctl -j workspaces`, as [{ id, monitor }], or null.
+function parseWorkspaces(text) {
+  var parsed
+  try {
+    parsed = JSON.parse(String(text || ""))
+  } catch (error) {
+    return null
+  }
+  if (!Array.isArray(parsed)) return null
+  return parsed.filter(function(workspace) { return workspace && typeof workspace.id === "number" })
+    .map(function(workspace) { return { id: workspace.id, monitor: String(workspace.monitor || "") } })
+}
+
+// Workspace rules from `hyprctl -j workspacerules`, as [{ workspace,
+// monitor }] (the workspace as the rule writes it), or null.
+function parseWorkspaceRules(text) {
+  var parsed
+  try {
+    parsed = JSON.parse(String(text || ""))
+  } catch (error) {
+    return null
+  }
+  if (!Array.isArray(parsed)) return null
+  return parsed.filter(function(rule) { return rule && typeof rule.workspaceString === "string" })
+    .map(function(rule) { return { workspace: rule.workspaceString, monitor: String(rule.monitor || "") } })
+}
+
+// Where a restore opens its tiles. Tiles of the session that are still
+// open decide; else the saved workspace, if it is on the saved monitor or
+// will be (a workspace rule puts it there once it exists); else that
+// monitor's current workspace; else, with the monitor gone, the focused
+// monitor's. Returns { workspace, moved } (`moved`: not where it was
+// saved) or { error }.
+function restoreWorkspace(list, monitors, workspaces, rules, session, entry) {
+  var open = sessionWorkspace(list, session)
+  if (open !== null) return { workspace: open, moved: entry.workspace !== 0 && open !== entry.workspace }
+  var monitor = null
+  for (var m = 0; m < monitors.length; m++) if (monitors[m].name === entry.monitor) monitor = monitors[m]
+  if (!monitor) {
+    var chosen = chooseWorkspace(list, monitors, session, "")
+    return chosen.error ? chosen : { workspace: chosen.workspace, moved: true }
+  }
+  if (entry.workspace > 0) {
+    var where = null
+    workspaces.forEach(function(workspace) { if (workspace.id === entry.workspace) where = workspace.monitor })
+    var ruled = rules.some(function(rule) { return rule.workspace === String(entry.workspace) && rule.monitor === monitor.name })
+    if (where === monitor.name || (where === null && ruled)) return { workspace: entry.workspace, moved: false }
+  }
+  return { workspace: monitor.activeWorkspace, moved: entry.workspace !== 0 && monitor.activeWorkspace !== entry.workspace }
+}
+
+// The layout a restore gives its workspace: the saved choice, unless it
+// is Hyprland's own (a restore doesn't take a layout away), the workspace
+// already has it, or it was a custom layout since deleted. Returns {
+// layout } ("" for none) and, for a deleted one, `missing`.
+function restoreLayout(entry, layouts, workspace) {
+  if (!entry.layout || entry.layout === "default") return { layout: "" }
+  var slug = customSlug(entry.layout)
+  if (slug !== "" && !layouts.custom[slug]) return { layout: "", missing: slug }
+  return { layout: workspaceChoice(layouts, workspace) === entry.layout ? "" : entry.layout }
+}
+
+// The Saved tab's rows, by name: [{ name, entry, open, total, sites,
+// detail }]. `open` counts the saved tiles the session has open now.
+function savedRows(saved, list, custom) {
+  return Object.keys(saved).sort().map(function(name) {
+    var entry = saved[name]
+    var missing = missingTiles(list, name, entry.tiles).length
+    var sites = []
+    entry.tiles.forEach(function(tile) {
+      var site = siteOf(tile.url)
+      if (sites.indexOf(site) === -1) sites.push(site)
+    })
+    var place = entry.monitor !== "" ? entry.monitor + (entry.workspace > 0 ? " · workspace " + entry.workspace : "") : ""
+    var layout = entry.layout !== "default" ? layoutLabel(entry.layout, custom || {}) : ""
+    var detail = [entry.tiles.length + (entry.tiles.length === 1 ? " tile" : " tiles"), place, layout]
+      .filter(function(part) { return part !== "" }).join(" · ")
+    return { name: name, entry: entry, open: entry.tiles.length - missing, total: entry.tiles.length, sites: sites, detail: detail }
+  })
+}
+
+// The names of the sessions that open at login.
+function loginSessions(saved) {
+  return Object.keys(saved).sort().filter(function(name) { return saved[name].login })
+}
+
+// `mosaic saved`: one line per saved session, then its tiles.
+function savedText(saved, list, custom) {
+  var rows = savedRows(saved, list, custom)
+  if (rows.length === 0) return "No saved sessions. Save one with `mosaic save SESSION`."
+  var lines = []
+  rows.forEach(function(row) {
+    lines.push(row.name + "  " + row.detail + (row.entry.login ? " · opens at login" : "")
+      + (row.open > 0 ? "  (" + row.open + " of " + row.total + " open)" : ""))
+    row.entry.tiles.forEach(function(tile) {
+      var audio = tile.muted ? "  muted" : tile.volume < 1 ? "  " + Math.round(tile.volume * 100) + "%" : ""
+      lines.push("  " + tile.url + audio)
+    })
+  })
   return lines.join("\n")
 }
 
@@ -1708,12 +1934,23 @@ function bridgeWindows(list) {
       if (!tab || !Number.isInteger(tab.id)) continue
       var volume = Number(tab.volume)
       tabs.push({ id: tab.id, url: String(tab.url || ""), title: String(tab.title || ""), favIconUrl: String(tab.favIconUrl || ""),
-        audible: tab.audible === true, muted: tab.muted === true, volume: tab.volume === undefined || !(volume >= 0 && volume <= 1) ? 1 : volume })
+        audible: tab.audible === true, muted: tab.muted === true, volume: tab.volume === undefined || !(volume >= 0 && volume <= 1) ? 1 : volume,
+        stream: parseStream(tab.stream) })
     }
     windows.push({ id: window.id, type: String(window.type || ""), focused: window.focused === true, tabs: tabs })
   }
   return windows
 }
+
+// A tab's stream as an extension with "stream" reports it ({ state,
+// reason, detail, since }), or null.
+function parseStream(stream) {
+  if (!stream || typeof stream !== "object" || STREAM_STATES.indexOf(stream.state) === -1) return null
+  var since = Number(stream.since)
+  return { state: stream.state, reason: String(stream.reason || ""), detail: String(stream.detail || ""), since: since > 0 ? since : 0 }
+}
+
+var STREAM_STATES = ["playing", "idle", "dropped"]
 
 function siteOf(url) {
   var match = /^[a-z]+:\/\/(?:www\.)?([^\/?#:]+)/i.exec(String(url || ""))
@@ -1729,9 +1966,12 @@ function siteOf(url) {
 // both can only be told apart by focus: `focused` (optional) is the
 // address of the window Hyprland has focused, which then takes the one
 // window on its site that the browser, in this fresh report, says has
-// focus. Returns { total, matched, tiles: { ADDRESS: { bridge, window,
-// tab } }, missing: [labels] }.
-function matchTiles(tiles, bridges, previous, focused) {
+// focus. `others` (optional) are the Hyprland titles of windows that are
+// not tiles: a tab showing one of those titles, and no tile's, is that
+// other window's, so no step pairs a tile with it, and a tile that was
+// paired with it is matched afresh. Returns { total, matched, tiles: {
+// ADDRESS: { bridge, window, tab } }, missing: [labels] }.
+function matchTiles(tiles, bridges, previous, focused, others) {
   var candidates = []
   for (var b = 0; b < bridges.length; b++) {
     var windows = bridges[b].windows || []
@@ -1740,11 +1980,17 @@ function matchTiles(tiles, bridges, previous, focused) {
         candidates.push({ bridge: b, window: windows[w].id, focused: windows[w].focused === true, tab: windows[w].tabs[0] })
     }
   }
+  var tileTitles = tiles.map(function(tile) { return tile.title })
+  var otherTitles = others || []
+  function elsewhere(candidate) {
+    var title = candidate.tab.title
+    return title !== "" && otherTitles.indexOf(title) !== -1 && tileTitles.indexOf(title) === -1
+  }
   var found = {}
   var taken = []
   function claim(tile, test) {
     if (found[tile.address]) return
-    var hits = candidates.filter(function(candidate) { return taken.indexOf(candidate) === -1 && test(candidate) })
+    var hits = candidates.filter(function(candidate) { return taken.indexOf(candidate) === -1 && !elsewhere(candidate) && test(candidate) })
     if (hits.length !== 1) return
     taken.push(hits[0])
     found[tile.address] = { bridge: hits[0].bridge, window: hits[0].window, tab: hits[0].tab.id }
@@ -1990,7 +2236,8 @@ function tileAudio(check, bridges) {
     if (!bridge) return
     bridge.windows.forEach(function(window) {
       window.tabs.forEach(function(tab) {
-        if (tab.id === found.tab) audio[address] = { bridge: found.bridge, tab: tab.id, audible: tab.audible, muted: tab.muted, volume: tab.volume }
+        if (tab.id === found.tab) audio[address] = { bridge: found.bridge, tab: tab.id, audible: tab.audible, muted: tab.muted, volume: tab.volume,
+          url: tab.url, stream: tab.stream || null }
       })
     })
   })
@@ -2017,17 +2264,144 @@ function audioIcon(entry) {
   return entry.volume !== undefined && entry.volume < 0.5 ? "󰖀" : "󰕾"
 }
 
+// Stream recovery: a tile whose stream dropped (the extension's "stream"
+// feature watches each page's video) is reloaded, on the sites the user
+// picked. Reloads back off, so a stream that keeps failing or a channel
+// that went offline can't reload forever: at most RECOVERY_TRIES within
+// RECOVERY_WINDOW_MS, waiting RECOVERY_WAITS_MS[n] after the nth, then the
+// tile is "stalled" until its stream plays again or the user reloads it.
+var RECOVERY_SITES = "twitch.tv, kick.com"
+var RECOVERY_TRIES = 3
+var RECOVERY_WINDOW_MS = 600000
+var RECOVERY_WAITS_MS = [0, 30000, 120000]
+var RECOVERY_LOG_SIZE = 50
+
+// Whether `url` is on one of `sitesText`'s sites (comma separated, such as
+// "twitch.tv, kick.com"), its subdomains included.
+function recoverySite(url, sitesText) {
+  var site = siteOf(url)
+  if (site === "") return false
+  return String(sitesText || "").split(",").some(function(entry) {
+    var wanted = entry.trim().toLowerCase().replace(/^[a-z]+:\/\//, "").replace(/^www\./, "").replace(/\/.*$/, "")
+    return wanted !== "" && (site === wanted || site.slice(-wanted.length - 1) === "." + wanted)
+  })
+}
+
+// What to do about dropped streams. `audio` is Model.tileAudio's output,
+// `recovery` the last result's state by address ({ tab, tries: [ms],
+// waiting: when the last reload was sent, until the stream plays again,
+// recovered: how many reloads brought it back, stalled }), `sitesText` the sites to recover ("" for none),
+// `live` the tiles' addresses, `now` in ms. Returns { recovery, reload:
+// [address], events: [{ address, action, reason, detail, url }] }, where
+// action is "reloaded", "stalled", or "recovered".
+function planRecovery(audio, recovery, sitesText, live, now) {
+  var next = {}
+  var reload = []
+  var events = []
+  live.forEach(function(address) {
+    var entry = audio[address]
+    var old = recovery[address]
+    if (!entry) {
+      if (old) next[address] = old
+      return
+    }
+    var record = old && old.tab === entry.tab ? {
+      tab: old.tab, tries: old.tries.filter(function(at) { return now - at < RECOVERY_WINDOW_MS }),
+      waiting: old.waiting, recovered: old.recovered, stalled: old.stalled
+    } : { tab: entry.tab, tries: [], waiting: 0, recovered: 0, stalled: false }
+    var stream = entry.stream
+    var event = function(action) {
+      events.push({ address: address, action: action, reason: stream ? stream.reason : "", detail: stream ? stream.detail : "", url: entry.url || "" })
+    }
+    if (stream && stream.state === "playing") {
+      if (record.waiting > 0 && now - record.waiting < RECOVERY_WINDOW_MS) {
+        record.recovered++
+        event("recovered")
+      }
+      record.waiting = 0
+      record.stalled = false
+    } else if (stream && stream.state === "dropped" && recoverySite(entry.url, sitesText) && !record.stalled) {
+      var last = record.tries.length > 0 ? record.tries[record.tries.length - 1] : -Infinity
+      if (record.tries.length >= RECOVERY_TRIES) {
+        record.stalled = true
+        record.waiting = 0
+        event("stalled")
+      } else if (now - last >= RECOVERY_WAITS_MS[record.tries.length]) {
+        record.tries.push(now)
+        record.waiting = now
+        reload.push(address)
+        event("reloaded")
+      }
+    }
+    next[address] = record
+  })
+  return { recovery: next, reload: reload, events: events }
+}
+
+// A tile's stream for its panel row: { text, warn }, or text "" for
+// nothing to show. `enabled`: whether its site is recovered. A reload
+// shows for a minute at most, since a channel that went offline never
+// plays again.
+function streamStatus(entry, record, enabled, now) {
+  var stream = entry ? entry.stream : null
+  if (record && record.stalled) return { text: "stream stalled; P reloads it", warn: true }
+  if (stream && stream.state === "dropped")
+    return enabled ? { text: "stream dropped; reloading", warn: true } : { text: "stream dropped", warn: true }
+  if (record && record.waiting > 0 && now - record.waiting < 60000) return { text: "reloading the stream", warn: false }
+  if (record && record.recovered > 0)
+    return { text: "stream recovered" + (record.recovered > 1 ? " " + record.recovered + "×" : ""), warn: false }
+  return { text: "", warn: false }
+}
+
+// Adds `events` to the newest-first `log`, kept short.
+function recoveryLog(log, events, now, labels) {
+  var added = events.slice().reverse().map(function(event) {
+    return { time: now, tile: labels[event.address] || event.address, address: event.address, action: event.action,
+      reason: event.reason, detail: event.detail, url: event.url }
+  })
+  return added.concat(log).slice(0, RECOVERY_LOG_SIZE)
+}
+
+function pad2(n) {
+  return (n < 10 ? "0" : "") + n
+}
+
+// `mosaic streams`: each tile's stream, then the recovery log.
+function streamsText(list, audio, recovery, log, sitesText) {
+  var lines = []
+  listTiles(list).forEach(function(tile) {
+    var entry = audio[tile.address]
+    var stream = entry ? entry.stream : null
+    var record = recovery[tile.address]
+    var state = !entry ? "not found by the extension" : !stream ? "no video report" : stream.state
+      + (stream.state === "dropped" ? " (" + stream.reason + (stream.detail ? ": " + stream.detail : "") + ")" : "")
+    var extra = record && record.stalled ? ", stalled" : record && record.recovered > 0 ? ", recovered " + record.recovered + "×" : ""
+    lines.push(tile.index + "  " + tileLabel(tile) + "  " + state + extra
+      + (entry && !recoverySite(entry.url, sitesText) ? "  (not recovered here)" : ""))
+  })
+  if (lines.length === 0) lines.push("No tiles open")
+  lines.push("")
+  lines.push(log.length === 0 ? "No recoveries yet." : "Recent:")
+  log.forEach(function(item) {
+    var at = new Date(item.time)
+    lines.push(pad2(at.getHours()) + ":" + pad2(at.getMinutes()) + ":" + pad2(at.getSeconds()) + "  " + item.tile + "  " + item.action
+      + (item.reason ? " (" + item.reason + (item.detail ? ": " + item.detail : "") + ")" : ""))
+  })
+  return lines.join("\n")
+}
+
 // The panel's key bar: [key, what it does] pairs for `context` (a tab, or
 // "swap", "adding", "editor", "extension-restart", "extension-off"). The
 // first few show at once; `all` shows the rest, which "?" toggles.
 // `apps` is how many web apps have number keys.
 var KEY_HINTS = {
   tiles: { main: [["↑↓", "select"], ["Enter", "focus"], ["S", "swap"], ["A", "add"]],
-    more: [["M", "mute"], ["−/+", "volume"], ["G", "layout"], ["F", "focused only"], ["⇧C", "keep contained"],
-      ["C", "contain now"], ["X", "remove"], ["⇧D", "close session"], ["R", "refresh"], ["H/L", "tabs"]] },
+    more: [["M", "mute"], ["−/+", "volume"], ["G", "layout"], ["W", "save session"], ["F", "focused only"], ["⇧C", "keep contained"],
+      ["C", "contain now"], ["P", "reload page"], ["⇧R", "recover streams"], ["X", "remove"], ["⇧D", "close session"], ["R", "refresh"], ["H/L", "tabs"]] },
   swap: { main: [["#", "web app"], ["A", "address"], ["Enter", "replace"], ["Esc", "cancel"]], more: [] },
   adding: { main: [["#", "web app"], ["Enter", "add"], ["Esc", "close"]], more: [] },
   hidden: { main: [["↑↓", "select"], ["Enter", "show again"], ["H/L", "tabs"]], more: [["R", "refresh"]] },
+  saved: { main: [["↑↓", "select"], ["Enter", "restore"], ["O", "at login"], ["D", "delete"]], more: [["H/L", "tabs"]] },
   layouts: { main: [["↑↓", "select"], ["Enter", "next layout"], ["N", "new"], ["E", "edit"]],
     more: [["0", "Hyprland's"], ["W", "all workspaces"], ["D", "delete"], ["H/L", "tabs"]] },
   editor: { main: [["←→", "zone"], ["Enter", "save"], ["Esc", "cancel"]],

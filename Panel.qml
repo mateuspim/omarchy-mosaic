@@ -29,10 +29,13 @@ Panel {
   // The web apps that get a button; hidden ones can still be typed.
   readonly property var shownWebapps: Model.visibleWebapps(webapps, setting("hiddenWebapps", ""))
   readonly property var hiddenRows: Model.hiddenEntries(webapps, setting("hiddenWebapps", ""))
-  // The panel's tab: "tiles", "hidden" for the hidden web apps, or
-  // "extension" for the browser extension's setup and health.
+  // The panel's tab: "tiles", "saved" for saved sessions, "hidden" for the
+  // hidden web apps, "layouts", or "extension" for the browser extension's
+  // setup and health.
   property string view: "tiles"
-  readonly property var views: ["tiles", "hidden", "layouts", "extension"]
+  readonly property var views: ["tiles", "saved", "hidden", "layouts", "extension"]
+  // The Saved tab's rows (Model.savedRows).
+  readonly property var savedRows: service ? Model.savedRows(service.savedSessions, service.list, layoutCustom) : []
   // The Layouts tab: workspaces and custom layouts from the service, and
   // the editor (see openEditor), or null.
   readonly property var layoutCustom: service ? service.layoutState.custom : ({})
@@ -66,6 +69,13 @@ Panel {
   // The autoContain setting: keep fullscreen in every tile, re-containing
   // tiles that lose it; the service does the work.
   readonly property bool autoContain: setting("autoContain", false) === true
+  // The recoverStreams and recoverSites settings: reload tiles whose
+  // stream dropped, on these sites; the service does the work.
+  readonly property bool recoverStreams: setting("recoverStreams", true) !== false
+  readonly property string recoverSites: String(setting("recoverSites", Model.RECOVERY_SITES))
+  // Now, in ms, ticking while the panel is open, so a tile's "reloading"
+  // line expires.
+  property real clock: Date.now()
   // Audio controls show on the Tiles tab once the extension is connected
   // and a tile is open.
   readonly property bool audioReady: extensionState === "connected" && tiles.length > 0
@@ -82,6 +92,7 @@ Panel {
     ? (restartNeeded ? "extension-restart" : extensionState === "connected" ? "extension" : "extension-off")
     : view === "layouts" ? (layoutEditor ? "editor" : "layouts")
     : view === "hidden" ? "hidden"
+    : view === "saved" ? "saved"
     : swapTile ? "swap" : addOpen && tiles.length > 0 ? "adding" : "tiles"
   // The address field on the tile being swapped, while it shows.
   property var swapField: null
@@ -110,8 +121,10 @@ Panel {
   // The swapKey setting, which the service binds in Hyprland.
   readonly property string swapKey: String(setting("swapKey", Model.DEFAULT_SWAP_KEY))
   readonly property int cursorCount: view === "tiles" ? tiles.length : view === "hidden" ? hiddenRows.length
+    : view === "saved" ? savedRows.length
     : view === "layouts" && !layoutEditor ? workspaceRows.length + customRows.length : 0
   readonly property var selectedTile: view === "tiles" && cursor >= 0 && cursor < tiles.length ? tiles[cursor] : null
+  readonly property var selectedSaved: view === "saved" && cursor >= 0 && cursor < savedRows.length ? savedRows[cursor] : null
   readonly property var selectedHidden: view === "hidden" && cursor >= 0 && cursor < hiddenRows.length ? hiddenRows[cursor] : null
   readonly property var selectedWorkspace: view === "layouts" && !layoutEditor && cursor >= 0 && cursor < workspaceRows.length ? workspaceRows[cursor] : null
   readonly property var selectedCustom: view === "layouts" && !layoutEditor && cursor >= workspaceRows.length
@@ -298,9 +311,19 @@ Panel {
     saveSetting("autoContain", !autoContain)
   }
 
+  function toggleRecoverStreams() {
+    saveSetting("recoverStreams", !recoverStreams)
+  }
+
+  function reloadTile(tile) {
+    if (!tile) return
+    runService(function(engine) { return engine.reloadTile(tile.address) })
+    showStatus("Reloading " + Model.tileLabel(tile) + ".", false)
+  }
+
   function hideWebapp(app) {
     if (app && saveHidden(Model.hideWebapp(setting("hiddenWebapps", ""), app)))
-      showStatus("Hid " + app.name + ". The Hidden tab (L) brings it back.", false)
+      showStatus("Hid " + app.name + ". The Hidden tab brings it back.", false)
   }
 
   function showHidden(entry) {
@@ -390,6 +413,38 @@ Panel {
 
   function closeSession(name) {
     runService(function(engine) { return engine.close(name) })
+  }
+
+  // Saves a live session under its own name (see MosaicService.saveSession).
+  function saveSession(name) {
+    if (!service || !name) return
+    var error = service.saveSession(name)
+    if (error) showStatus(error, true)
+    else showStatus("Saved session " + name + ". The Saved tab opens it again.", false)
+  }
+
+  function restoreSaved(row) {
+    if (!row) return
+    if (row.open === row.total) return showStatus(row.name + " is already open.", false)
+    runService(function(engine) { return engine.restore(row.name, { browser: root.browser }, "Restoring " + row.name) })
+  }
+
+  function toggleSavedLogin(row) {
+    if (!row) return
+    runService(function(engine) { return engine.setSavedLogin(row.name, !row.entry.login) })
+  }
+
+  // The first press only asks, as for custom layouts.
+  function forgetSaved(row) {
+    if (!row) return
+    if (confirmDelete !== "saved:" + row.name) {
+      confirmDelete = "saved:" + row.name
+      showStatus("Press D again to delete the saved session " + row.name + ". Its open tiles stay open.", false)
+      return
+    }
+    confirmDelete = ""
+    runService(function(engine) { return engine.forgetSaved(row.name) })
+    showStatus("Deleted the saved session " + row.name + ".", false)
   }
 
   // Gives a session the next layout in Model.LAYOUT_CHOICES.
@@ -608,6 +663,28 @@ Panel {
 
   Binding {
     target: root.service
+    property: "recoverStreams"
+    value: root.recoverStreams
+    when: root.service !== null
+  }
+
+  Binding {
+    target: root.service
+    property: "recoverSites"
+    value: root.recoverSites
+    when: root.service !== null
+  }
+
+  Timer {
+    interval: 10000
+    repeat: true
+    running: root.opened
+    triggeredOnStart: true
+    onTriggered: root.clock = Date.now()
+  }
+
+  Binding {
+    target: root.service
     property: "hiddenWebapps"
     value: String(root.setting("hiddenWebapps", ""))
     when: root.service !== null
@@ -685,6 +762,7 @@ Panel {
         if (root.layoutEditor) return root.saveLayout()
         if (!root.cursorActive) return
         if (root.view === "hidden") root.showHidden(root.selectedHidden)
+        else if (root.view === "saved") root.restoreSaved(root.selectedSaved)
         else if (root.view === "layouts") {
           if (root.selectedWorkspace) root.cycleWorkspaceLayout(root.selectedWorkspace)
           else root.editLayout(root.selectedCustom)
@@ -695,6 +773,7 @@ Panel {
         if (root.layoutEditor) return root.editorRemove(root.layoutEditor.zone)
         if (!root.cursorActive) return
         if (root.view === "layouts") root.deleteLayout(root.selectedCustom)
+        else if (root.view === "saved") root.forgetSaved(root.selectedSaved)
         else if (root.view === "tiles") root.removeTile(root.selectedTile)
       }
       onCloseRequested: {
@@ -707,10 +786,17 @@ Panel {
       onTextKey: function(t) {
         if (t === "?") { root.allKeys = !root.allKeys; return }
         if (root.view === "layouts" && root.layoutKey(t)) return
+        if (root.view === "saved") {
+          if ((t === "o" || t === "O") && root.cursorActive) root.toggleSavedLogin(root.selectedSaved)
+          else if ((t === "d" || t === "D") && root.cursorActive) root.forgetSaved(root.selectedSaved)
+          else if (t === "r" || t === "R") root.refresh()
+          return
+        }
         if (t === "a" || t === "A") root.startAdding()
         else if (t === "d" && root.cursorActive) root.removeTile(root.selectedTile)
         else if (t === "D" && root.cursorActive && root.selectedTile) root.closeSession(root.selectedTile.session)
         else if ((t === "g" || t === "G") && root.view === "tiles" && root.cursorActive && root.selectedTile) root.cycleLayout(root.selectedTile.session)
+        else if (t === "R" && root.view === "tiles") root.toggleRecoverStreams()
         else if (t === "r" || t === "R") root.refresh()
         else if (root.view === "extension") {
           if (t === "e" || t === "E") root.enableExtension()
@@ -721,7 +807,9 @@ Panel {
         else if (t === "C") root.toggleAutoContain()
         else if (t === "c") root.contain()
         else if ((t === "s" || t === "S") && root.cursorActive) root.startSwap(root.selectedTile)
+        else if ((t === "w" || t === "W") && root.cursorActive && root.selectedTile) root.saveSession(root.selectedTile.session)
         else if ((t === "m" || t === "M") && root.cursorActive) root.toggleMute(root.selectedTile)
+        else if ((t === "p" || t === "P") && root.cursorActive) root.reloadTile(root.selectedTile)
         else if ((t === "f" || t === "F") && root.audioReady) root.toggleAudioFocus()
         else if (t === "-" && root.cursorActive) root.stepVolume(root.selectedTile, -0.1)
         else if ((t === "+" || t === "=") && root.cursorActive) root.stepVolume(root.selectedTile, 0.1)
@@ -773,6 +861,7 @@ Panel {
             value: root.view
             options: [
               { value: "tiles", label: "Tiles", tooltip: "H/L or ←/→" },
+              { value: "saved", label: "Saved" + (root.savedRows.length > 0 ? "  ·  " + root.savedRows.length : ""), tooltip: "Saved sessions · H/L or ←/→" },
               { value: "hidden", label: "Hidden" + (root.hiddenRows.length > 0 ? "  ·  " + root.hiddenRows.length : ""), tooltip: "Hidden web apps · H/L or ←/→" },
               { value: "layouts", label: "Layouts", tooltip: "Workspace layouts and your own · H/L or ←/→" },
               { value: "extension", label: "Extension" + (root.extensionMissing || (root.service !== null && root.service.extensionOutdated) ? "  ·  !" : ""), tooltip: "The browser extension that audio control needs · H/L or ←/→" }
@@ -836,6 +925,19 @@ Panel {
               onToggled: root.toggleAutoContain()
             }
 
+            SwitchRow {
+              visible: root.audioReady
+              width: parent.width
+              checked: root.recoverStreams
+              iconOn: "󰑓"
+              iconOff: "󰑓"
+              text: "Recover dropped streams"
+              keyLabel: "⇧R"
+              tooltip: "Reloads a tile whose video froze or failed, on " + root.recoverSites
+                + " (the Sites setting). Three tries in ten minutes at most; P reloads a tile by hand"
+              onToggled: root.toggleRecoverStreams()
+            }
+
             Repeater {
               model: root.sessions
 
@@ -858,6 +960,12 @@ Panel {
                   }
                   LayoutChip {
                     session: sessionColumn.modelData
+                  }
+                  PanelActionButton {
+                    iconText: "󰆓"
+                    tooltipText: "Save " + sessionColumn.modelData.name + " to open it again later · W"
+                    foreground: root.foreground
+                    onClicked: root.saveSession(sessionColumn.modelData.name)
                   }
                   PanelActionButton {
                     iconText: "󰅙"
@@ -955,6 +1063,45 @@ Panel {
               iconText: "󰊓"
               foreground: root.foreground
               onClicked: root.contain()
+            }
+          }
+
+          Column {
+            visible: root.view === "saved"
+            width: parent.width
+            spacing: Style.space(6)
+
+            Notice {
+              visible: root.service !== null && root.service.savedError !== ""
+              text: root.service ? root.service.savedError : ""
+              warning: true
+            }
+
+            PanelSectionHeader {
+              text: "SAVED SESSIONS  ·  " + root.savedRows.length
+              foreground: root.foreground
+              fontFamily: root.fontFamily
+            }
+
+            Text {
+              visible: root.savedRows.length === 0
+              width: parent.width
+              text: "No saved sessions. On the Tiles tab, save a session with its 󰆓 button or W, to open its tiles again later, or at login."
+              color: root.dim
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+              wrapMode: Text.WordWrap
+            }
+
+            Repeater {
+              model: root.savedRows
+              SavedRow {
+                required property var modelData
+                required property int index
+                width: parent.width
+                entry: modelData
+                position: index
+              }
             }
           }
 
@@ -2023,6 +2170,98 @@ Panel {
     }
   }
 
+  // A saved session: its first site's logo, name, sites, and place; a
+  // switch for opening it at login; restore and delete.
+  component SavedRow: CursorSurface {
+    id: savedRow
+    property var entry: null
+    property int position: 0
+    readonly property var app: entry ? Model.tileApp(root.webapps, entry.entry.tiles[0]) : null
+    readonly property bool allOpen: entry !== null && entry.open === entry.total
+    hasCursor: root.cursorActive && root.view === "saved" && root.cursor === position
+    foreground: root.foreground
+    implicitHeight: savedContent.implicitHeight + Style.spacing.rowPaddingX
+
+    MouseArea {
+      anchors.fill: parent
+      hoverEnabled: true
+      onContainsMouseChanged: if (containsMouse) { root.cursorActive = true; root.cursor = savedRow.position }
+      onClicked: root.restoreSaved(savedRow.entry)
+    }
+
+    RowLayout {
+      anchors.left: parent.left
+      anchors.right: parent.right
+      anchors.verticalCenter: parent.verticalCenter
+      anchors.leftMargin: Style.space(8)
+      anchors.rightMargin: Style.space(6)
+      spacing: Style.space(10)
+
+      SiteLogo {
+        source: savedRow.app ? root.iconSource(savedRow.app.icon) : ""
+        initial: savedRow.entry ? savedRow.entry.name.charAt(0).toUpperCase() : ""
+      }
+
+      ColumnLayout {
+        id: savedContent
+        Layout.fillWidth: true
+        spacing: Style.space(1)
+        Text {
+          Layout.fillWidth: true
+          textFormat: Text.PlainText
+          text: !savedRow.entry ? "" : savedRow.entry.name
+            + (savedRow.allOpen ? "  ·  open" : savedRow.entry.open > 0 ? "  ·  " + savedRow.entry.open + " of " + savedRow.entry.total + " open" : "")
+          color: root.foreground
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.body
+          elide: Text.ElideRight
+        }
+        Text {
+          Layout.fillWidth: true
+          textFormat: Text.PlainText
+          text: savedRow.entry ? savedRow.entry.sites.join(", ") : ""
+          color: root.dim
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
+          elide: Text.ElideRight
+        }
+        Text {
+          Layout.fillWidth: true
+          textFormat: Text.PlainText
+          text: savedRow.entry ? savedRow.entry.detail : ""
+          color: root.dim
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
+          elide: Text.ElideRight
+        }
+      }
+
+      ToggleSwitch {
+        checked: savedRow.entry !== null && savedRow.entry.entry.login
+        foreground: root.foreground
+        onToggled: root.toggleSavedLogin(savedRow.entry)
+        PanelToolTip {
+          visible: parent.containsMouse
+          text: "Open at login · O"
+        }
+      }
+      PanelActionButton {
+        iconText: "󰐊"
+        enabled: !savedRow.allOpen
+        tooltipText: savedRow.allOpen ? "Every tile is open" : "Open the tiles that aren't open · Enter"
+        foreground: root.foreground
+        onClicked: root.restoreSaved(savedRow.entry)
+      }
+      PanelActionButton {
+        iconText: "󰆴"
+        tooltipText: root.confirmDelete === "saved:" + (savedRow.entry ? savedRow.entry.name : "") ? "Click again to delete" : "Delete · D"
+        foreground: root.foreground
+        hoverColor: root.urgent
+        onClicked: root.forgetSaved(savedRow.entry)
+      }
+    }
+  }
+
   component HiddenRow: CursorSurface {
     id: hiddenRow
     property var entry: null
@@ -2375,6 +2614,11 @@ Panel {
       return tab && /^(https?|data):/.test(tab.favIconUrl || "") ? tab.favIconUrl : ""
     }
     readonly property string meta: tile ? Model.tileMeta(tile, place, app) : ""
+    // How its stream is doing, when there is something to say.
+    readonly property var stream: tile ? Model.streamStatus(audio,
+      root.service ? root.service.recovery[tile.address] : undefined,
+      root.recoverStreams && audio !== undefined && Model.recoverySite(audio.url, root.recoverSites), root.clock)
+      : ({ text: "", warn: false })
     // The volume slider shows on the row under the cursor only, so the
     // list stays one line per tile.
     readonly property bool showSlider: audio !== undefined && hasCursor && !swapping
@@ -2434,6 +2678,16 @@ Panel {
             textFormat: Text.PlainText
             text: row.meta
             color: row.tile && row.tile.state === "uncontained" ? root.urgent : root.dim
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+            elide: Text.ElideRight
+          }
+          Text {
+            visible: row.stream.text !== ""
+            Layout.fillWidth: true
+            textFormat: Text.PlainText
+            text: "󰑓  " + row.stream.text
+            color: row.stream.warn ? root.urgent : root.dim
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
             elide: Text.ElideRight

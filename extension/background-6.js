@@ -6,7 +6,8 @@
 // Messages are JSON objects with a `type`:
 //   to the service:   hello { extension, script, features }
 //                     windows { id?, windows }: the app windows, their tabs'
-//                       url, title, favIcon, audible, muted, and volume
+//                       url, title, favIcon, audible, muted, volume, and
+//                       stream (see pageStream), once the page has one
 //                     done { id, error }: how a command with an `id` went
 //   from the service: ping { id }, answered by windows { id, windows }
 //                     mute { tab, muted }
@@ -33,11 +34,13 @@
 // reporting the new manifest's version; a new file name per change forces
 // the new code (Omarchy's Copy URL extension does the same). Rename the file,
 // update manifest.json, and change this together.
-const SCRIPT = "background-4.js";
+const SCRIPT = "background-6.js";
 // "follow": reported volumes follow changes made with the page's own
 // controls, and survive the worker stopping, so the service mirrors them
 // instead of setting its own again.
-const FEATURES = ["mute", "volume", "follow", "navigate", "reload", "media", "favicon"];
+// "stream": tabs report how their video plays, so the service can reload
+// a stream that dropped.
+const FEATURES = ["mute", "volume", "follow", "navigate", "reload", "media", "favicon", "stream"];
 const HOST = "pym.mosaic";
 const RETRY_FIRST_MS = 1000;
 const RETRY_LAST_MS = 60000;
@@ -54,6 +57,10 @@ const volumesReady = chrome.storage.session.get("volumes").then(function(stored)
   const saved = stored && stored.volumes ? stored.volumes : {};
   Object.keys(saved).forEach(function(id) { volumes.set(Number(id), saved[id]); });
 }).catch(function() {});
+
+// Each tab's stream ({ state, reason, detail, since }), as its page last
+// reported it; forgotten when the tab loads a new page.
+const streams = new Map();
 
 function setVolume(tabId, level) {
   if (level >= 1) volumes.delete(tabId);
@@ -198,6 +205,126 @@ function pageVolume(level) {
   if (level !== null) document.querySelectorAll("video, audio").forEach(apply);
 }
 
+// Watches the page's main video and reports how it plays, once now and
+// again whenever that changes: "playing", "idle" (paused, ended, or not
+// started yet), or "dropped": a video that had played stopped for good,
+// with the media element's error, the site's error overlay, time standing
+// still while not paused, no new frames while the page is visible, or the
+// video gone. A short stall is a normal rebuffer, so a problem only counts
+// once it lasts. Sites such as Twitch change pages without loading one,
+// so a video counts only on the page (path) where it played: leaving a
+// channel for its directory isn't a drop. `resend` reports the current
+// state again, for a worker that started after the page did. Runs in the page's main frame
+// (isolated world).
+function pageStream(resend) {
+  const CHECK_MS = 2000;
+  // How long a problem lasts before it counts: errors don't clear by
+  // themselves, a stall might.
+  const ERROR_MS = 4000;
+  const STALL_MS = 12000;
+  const state = globalThis.__mosaicStream || (globalThis.__mosaicStream = {
+    timer: 0, video: null, time: -1, frames: -1, played: false, page: "", problem: "", detail: "", since: 0, stream: null, sent: ""
+  });
+  function report(stream) {
+    const key = stream.state + "/" + stream.reason;
+    if (key === state.sent && !resend) return;
+    state.sent = key;
+    state.stream = stream;
+    try {
+      chrome.runtime.sendMessage({ type: "pageStream", stream: stream }).catch(function() {});
+    } catch (error) { /* The extension was updated or removed. */ }
+  }
+  // The largest video with something loaded: players keep spare ones.
+  function mainVideo() {
+    let best = null;
+    let area = 0;
+    document.querySelectorAll("video").forEach(function(video) {
+      if (!video.currentSrc && !video.srcObject) return;
+      const box = video.getBoundingClientRect();
+      if (box.width * box.height > area) {
+        best = video;
+        area = box.width * box.height;
+      }
+    });
+    return best;
+  }
+  function frames(video) {
+    try {
+      return video.getVideoPlaybackQuality ? video.getVideoPlaybackQuality().totalVideoFrames : -1;
+    } catch (error) {
+      return -1;
+    }
+  }
+  const ERRORS = { 1: "MEDIA_ERR_ABORTED", 2: "MEDIA_ERR_NETWORK", 3: "MEDIA_ERR_DECODE", 4: "MEDIA_ERR_SRC_NOT_SUPPORTED" };
+  // The site's own error over the player, such as Twitch's "Error #3000".
+  function siteError() {
+    const gate = document.querySelector('[data-a-target="player-overlay-content-gate"]');
+    const text = gate ? gate.textContent || "" : "";
+    const match = /error\s*#\s*(\d+)/i.exec(text);
+    return match ? "Error #" + match[1] : "";
+  }
+  function check() {
+    const page = location.origin + location.pathname;
+    if (state.played && page !== state.page) {
+      state.played = false;
+      state.video = null;
+    }
+    const video = mainVideo();
+    let problem = "";
+    let detail = "";
+    if (video) {
+      const time = video.currentTime;
+      const count = frames(video);
+      const fresh = video !== state.video;
+      const moved = !fresh && Math.abs(time - state.time) > 0.01;
+      const drew = !fresh && count > state.frames;
+      if (moved && !video.paused) {
+        state.played = true;
+        state.page = page;
+      }
+      const site = siteError();
+      if (video.error && video.error.code !== 1) {
+        problem = "error";
+        detail = (ERRORS[video.error.code] || "error " + video.error.code) + (video.error.message ? ": " + video.error.message : "");
+      } else if (site) {
+        problem = "error";
+        detail = site;
+      } else if (state.played && !fresh && !video.paused && !video.ended) {
+        if (!moved) {
+          problem = "frozen";
+          detail = "time stopped at " + time.toFixed(1) + " s (readyState " + video.readyState + ", networkState " + video.networkState + ")";
+        } else if (document.visibilityState === "visible" && count >= 0 && state.frames >= 0 && !drew && video.videoWidth > 0) {
+          problem = "frozen";
+          detail = "no new frames while time runs (" + count + " decoded, " + video.videoWidth + "×" + video.videoHeight + ")";
+        }
+      }
+      state.video = video;
+      state.time = time;
+      state.frames = count;
+    } else if (state.played) {
+      problem = "gone";
+      detail = "the video went away";
+      state.video = null;
+    }
+    const now = Date.now();
+    if (problem !== state.problem) {
+      state.problem = problem;
+      state.since = now;
+    }
+    state.detail = detail;
+    if (problem && now - state.since >= (problem === "error" ? ERROR_MS : STALL_MS)) {
+      report({ state: "dropped", reason: problem, detail: detail, since: state.since });
+    } else if (!problem) {
+      const playing = video && state.played && !video.paused && !video.ended;
+      report({ state: playing ? "playing" : "idle", reason: "", detail: "", since: now });
+    } else if (resend && state.stream) {
+      report(state.stream);
+    }
+  }
+  if (!state.timer) state.timer = setInterval(check, CHECK_MS);
+  check();
+}
+
 function pageMedia(action) {
   document.querySelectorAll("video, audio").forEach(function(element) {
     if (action === "play" || (action === "toggle" && element.paused)) element.play().catch(function() {});
@@ -225,7 +352,8 @@ async function reportWindows(id) {
             favIconUrl: tab.favIconUrl || "",
             audible: !!tab.audible,
             muted: !!(tab.mutedInfo && tab.mutedInfo.muted),
-            volume: volumes.has(tab.id) ? volumes.get(tab.id) : 1
+            volume: volumes.has(tab.id) ? volumes.get(tab.id) : 1,
+            stream: streams.get(tab.id) || null
           };
         })
       };
@@ -243,6 +371,23 @@ function windowsChanged() {
   clearTimeout(windowsTimer);
   windowsTimer = setTimeout(function() { reportWindows(); }, 250);
 }
+
+// A page's stream, reported by pageStream from its main frame.
+chrome.runtime.onMessage.addListener(function(message, sender) {
+  if (!message || message.type !== "pageStream" || !sender.tab || sender.frameId !== 0) return;
+  const stream = message.stream || {};
+  if (["playing", "idle", "dropped"].indexOf(stream.state) === -1) return;
+  const tabId = sender.tab.id;
+  tileTab(tabId).then(function() {
+    streams.set(tabId, {
+      state: stream.state,
+      reason: String(stream.reason || "").slice(0, 32),
+      detail: String(stream.detail || "").slice(0, 200),
+      since: Number(stream.since) || Date.now()
+    });
+    windowsChanged();
+  }).catch(function() {});
+});
 
 // A page's own volume controls, reported by pageVolume.
 chrome.runtime.onMessage.addListener(function(message, sender) {
@@ -268,13 +413,18 @@ async function watchPage(tabId) {
   }
   await volumesReady;
   applyVolume(tabId, volumes.has(tabId) ? volumes.get(tabId) : null);
+  chrome.scripting.executeScript({ target: { tabId: tabId, frameIds: [0] }, func: pageStream, args: [true] })
+    .catch(function() { /* A page that can't take scripts, such as an error page. */ });
 }
 
 chrome.tabs.onUpdated.addListener(function(tabId, change) {
+  // A new page starts without a stream; its watcher reports one.
+  if (change.status === "loading" && streams.delete(tabId)) windowsChanged();
   if (change.status === "complete") watchPage(tabId);
   if ("title" in change || "url" in change || "audible" in change || "mutedInfo" in change || "favIconUrl" in change) windowsChanged();
 });
 chrome.tabs.onRemoved.addListener(function(tabId) {
+  streams.delete(tabId);
   if (volumes.has(tabId)) setVolume(tabId, 1);
   windowsChanged();
 });

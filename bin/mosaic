@@ -15,6 +15,13 @@ Usage: mosaic [add] [--session NAME] [--monitor NAME] [--browser CMD] URL|WEBAPP
        mosaic close [--session NAME]
        mosaic contain [--session NAME]
        mosaic layout [--workspace N | --session NAME] [LAYOUT]
+       mosaic save SESSION
+       mosaic restore [--browser CMD] NAME
+       mosaic saved [--json]
+       mosaic forget NAME
+       mosaic login NAME on|off
+       mosaic reload TILE
+       mosaic streams
        mosaic webapps [--json]
        mosaic monitors
        mosaic --version
@@ -31,6 +38,17 @@ Usage: mosaic [add] [--session NAME] [--monitor NAME] [--browser CMD] URL|WEBAPP
   layout    Show the workspaces' layouts and the custom ones, or set a
             workspace's (or a session's workspace's): grid, stack, main, fit,
             a custom layout's name, or default (Hyprland's own)
+  save      Save a session's tiles, monitor, workspace, layout, and audio,
+            replacing an earlier save of the same name
+  restore   Open a saved session's tiles that aren't open yet, where it was
+            saved, with its layout, volumes, and mutes
+  saved     List saved sessions
+  forget    Delete a saved session
+  login     Choose whether a saved session opens by itself at login
+  reload    Reload a tile's page in place (needs the browser extension)
+  streams   Show how each tile's stream plays and the recent recoveries:
+            tiles whose stream drops on the panel's recovery sites are
+            reloaded
   webapps   List installed web apps, such as Omarchy's, and their URLs
   monitors  List active monitors
 
@@ -83,7 +101,7 @@ run() {
 
 command=add
 case ${1:-} in
-  add | list | remove | focus | close | contain | layout | webapps | monitors)
+  add | list | remove | focus | close | contain | layout | webapps | monitors | save | restore | saved | forget | login | reload | streams)
     command=$1
     shift
     ;;
@@ -117,7 +135,8 @@ done
 
 case $command in
   add) allowed=" session monitor browser " ;;
-  list | webapps) allowed=" json " ;;
+  list | webapps | saved) allowed=" json " ;;
+  restore) allowed=" browser " ;;
   close | contain) allowed=" session " ;;
   layout) allowed=" session workspace " ;;
   *) allowed=" " ;;
@@ -134,9 +153,27 @@ case $command in
   add) ((count >= 1 && count <= 9)) || fail "Pass 1 to 9 URLs or web apps" usage ;;
   remove) ((count >= 1)) || fail "Pass the tiles to remove" usage ;;
   focus) ((count == 1)) || fail "Pass one tile to focus" usage ;;
+  reload) ((count == 1)) || fail "Pass one tile to reload" usage ;;
   layout) ((count <= 1)) || fail "Pass one layout" usage ;;
+  save | restore | forget) ((count == 1)) || fail "Pass one session name" usage ;;
+  login) ((count == 2)) && [[ ${targets[1]} == on || ${targets[1]} == off ]] || fail "Pass a session name and on or off" usage ;;
   *) ((count == 0)) || fail "Unexpected argument: ${targets[0]}" usage ;;
 esac
+
+case $command in
+  save | restore | forget | login)
+    [[ ${targets[0]} =~ ^[a-z0-9_-]{1,32}$ ]] \
+      || fail "Invalid session name \"${targets[0]}\": use up to 32 lowercase letters, digits, - or _"
+    ;;
+esac
+
+# Answers "" or "error: …" from save, forget, and login.
+quick() {
+  local answer
+  answer=$(call "$@") || exit 1
+  [[ $answer == "error: "* ]] && fail "${answer#error: }"
+  [[ -z $answer ]] || fail "Unexpected answer from the shell: $answer"
+}
 
 # Targets travel as one argument, one per line; none can contain a newline.
 for target in "${targets[@]}"; do
@@ -163,7 +200,21 @@ case $command in
       run sessionLayout "${session:-default}" "${targets[0]}"
     fi
     ;;
+  save) quick save "${targets[0]}"; echo "Saved session ${targets[0]}." ;;
+  restore) run restore "${targets[0]}" "$browser" ;;
+  forget) quick forget "${targets[0]}"; echo "Forgot session ${targets[0]}." ;;
+  login)
+    quick login "${targets[0]}" "${targets[1]}"
+    if [[ ${targets[1]} == on ]]; then echo "${targets[0]} opens at login."; else echo "${targets[0]} no longer opens at login."; fi
+    ;;
+  saved) if $json; then call saved; else call savedText; fi; echo ;;
   list) if $json; then call list; else call listText; fi; echo ;;
   webapps) if $json; then call webapps; else call webappsText; fi; echo ;;
   monitors) call monitors; echo ;;
+  reload)
+    answer=$(call reloadTile "${targets[0]}") || exit 1
+    [[ $answer == "error: "* ]] && fail "${answer#error: }"
+    echo "Reloading tile ${targets[0]}."
+    ;;
+  streams) call streams; echo ;;
 esac

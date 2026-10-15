@@ -66,7 +66,18 @@ roughly in order of value; confirm priorities with the user before starting:
   navigate, reload, media, and favicons for later features (an in-place
   swap, a richer panel) without another browser restart.
 - **Saved sessions.** Name, monitor, layout, and apps; restore with one key
-  or at login. Keep personal URLs out of the repository.
+  or at login. Keep personal URLs out of the repository. **Built
+  (2026-10-07):** the Saved tab, save from a session's header (W), restore
+  of what's missing, an Open at login switch per session, volume and mute,
+  and `mosaic save`/`restore`/`saved`/`forget`/`login` (see "Saved
+  sessions" in `docs/ARCHITECTURE.md`).
+- **Stream recovery.** Twitch drops streams now and then (the user's
+  report, 2026-10-07: "it just drops", likely a decode failure), and only
+  a reload brings them back. **Built (2026-10-08):** extension 0.5.1
+  watches each tile's video and reports `playing`, `idle`, or `dropped`;
+  the service reloads dropped tiles on the chosen sites with backoff (see
+  "Stream recovery" in `docs/ARCHITECTURE.md`). **Next:** check it on a
+  real Twitch drop with `mosaic streams`, and tune the thresholds.
 - **Monitor awareness.** Reflow on monitor changes, portrait-friendly
   layouts, and moving a whole session between monitors.
 - **Richer panel.** Per-tile loading and error status, titles and favicons,
