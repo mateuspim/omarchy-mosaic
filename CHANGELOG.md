@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.4.1 (2026-10-15)
 
 - **A taken swap key is reported**: when the swap key can't be bound,
   say because another binding already uses it, a notification says so,
