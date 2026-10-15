@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.3.0 (2026-10-15)
 
 - **Saved sessions**: save a session (its 󰆓 button, or W) to keep its
   tiles, their monitor and workspace, the workspace's layout, and each
