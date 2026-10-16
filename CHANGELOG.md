@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.5.0 (2026-10-15)
 
 - **Recover streams the player gave up on**: a Twitch tile frozen on the
   player's loading spinner wasn't reloaded, since the player had stopped
