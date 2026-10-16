@@ -61,6 +61,9 @@ Panel {
   readonly property string extensionState: service ? service.extensionState : "unknown"
   readonly property bool extensionMissing: extensionState === "off" || extensionState === "restart"
   // The browser has to restart to load the extension, or a newer one.
+  // The browser runs some copy of the extension, so its extensions page
+  // can reload it.
+  readonly property bool extensionRunning: service !== null && service.bridges.length > 0
   readonly property bool restartNeeded: extensionState === "restart" || (service !== null && service.extensionOutdated)
   // Each found tile's audio, by address (Model.tileAudio).
   readonly property var tileAudio: service ? service.tileAudio : ({})
@@ -377,6 +380,14 @@ Panel {
     }
     confirmRestart = false
     runService(function(engine) { return engine.restartBrowser({ browser: root.browser }, "Restarting the browser") })
+  }
+
+  function openExtensionsPage() {
+    if (!service) return
+    var error = service.openExtensionsPage()
+    if (error === "copied") showStatus("Copied chrome://extensions/: paste it into the browser's address bar, then press Reload on Omarchy Mosaic", false)
+    else if (error) showStatus(error, true)
+    else showStatus("Opened the extensions page: press Reload on Omarchy Mosaic", false)
   }
 
   function copyExtensionPath() {
@@ -786,7 +797,9 @@ Panel {
     bar: root.bar
     open: root.opened
     focusTarget: keyCatcher
-    contentWidth: panel.fittedContentWidth(Style.space(400))
+    // Wide enough for the tab row, which outgrew 400 with the Layouts tab
+    // and the counts and warnings on the tab labels.
+    contentWidth: panel.fittedContentWidth(Math.max(Style.space(400), Math.ceil(viewTabs.implicitWidth)))
     contentHeight: panel.fittedContentHeight(column.implicitHeight, Style.space(620))
 
     PanelKeyCatcher {
@@ -844,6 +857,7 @@ Panel {
           if (t === "e" || t === "E") root.enableExtension()
           else if (t === "v" || t === "V") root.verifyExtension()
           else if ((t === "b" || t === "B") && root.restartNeeded) root.restartBrowser()
+          else if ((t === "o" || t === "O") && root.extensionRunning) root.openExtensionsPage()
         }
         else if (root.view !== "tiles") return
         else if (t === "C") root.toggleAutoContain()
@@ -897,6 +911,7 @@ Panel {
           }
 
           ButtonGroup {
+            id: viewTabs
             focusable: false
             foreground: root.foreground
             fontFamily: root.fontFamily
@@ -1380,7 +1395,7 @@ Panel {
 
             Notice {
               visible: root.service !== null && root.service.extensionOutdated
-              text: root.service ? "The browser is running an older copy of the Mosaic extension. Restart it to load the current one (" + root.service.extensionVersion + ")." : ""
+              text: root.service ? "The browser is running an older copy of the Mosaic extension. Reload it on the extensions page (O), or restart the browser, to load the current one (" + root.service.extensionVersion + ")." : ""
             }
 
             // Button labels don't wrap or elide, so the warning goes here.
@@ -1397,6 +1412,15 @@ Panel {
               foreground: root.foreground
               enabled: root.activity === ""
               onClicked: root.restartBrowser()
+            }
+
+            Button {
+              visible: root.extensionRunning
+              width: parent.width
+              text: "Open the extensions page"
+              iconText: "󰏗"
+              foreground: root.foreground
+              onClicked: root.openExtensionsPage()
             }
 
             RowLayout {

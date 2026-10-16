@@ -162,8 +162,19 @@ With the browser extension connected, **Recover dropped streams** at the
 top of the Tiles tab (on by default, Shift+R) does that reload for you.
 The extension watches each tile's video, and a tile counts as dropped
 when its video fails, the site shows its player error, or a video that
-was playing stands still for 12 seconds without being paused. Pausing,
-a stream that ends, and a page still loading don't count.
+was playing stands still for 12 seconds without being paused. A player
+that gives up behind its spinner counts too: a video that was playing
+and then ended or was paused, not by you, for 20 seconds, and a video
+that never starts for 20 seconds, as after a reload that hangs. Pausing
+by hand (a click or a key in the tile, or `mosaic` media commands) and
+an ad playing in another video don't count. Media keys and playerctl
+give the page no sign of a hand pause, so a tile paused that way is
+reloaded after 20 seconds, at most three times.
+
+A tile that was fullscreen goes fullscreen again once the stream plays:
+Mosaic presses its f (the fullscreen key on Twitch, YouTube, and Kick),
+which briefly focuses the tile, so it waits until the tile's workspace
+is on screen, then hands focus and the cursor back.
 
 It reloads a dropped tile right away, then waits 30 seconds and 2 minutes
 before trying again. After three tries in ten minutes it stops and the
@@ -199,9 +210,12 @@ extensions page, turn on Developer mode, choose Load unpacked, and pick the
 extension folder (the tab copies its path). **Turn off** undoes Enable; do
 that before removing the plugin, so the browser isn't left loading a folder
 that's gone. When the plugin brings a newer extension, or the browser is
-still running an old copy of it, the Extension tab says so, and the browser
-loads the current one on its next restart (the tab's Restart button,
-B). The same steps are in the IPC: `omarchy-shell pym.mosaic
+still running an old copy of it, the Extension tab says so. Load the
+current one without closing your tiles: **Open the extensions page** (O)
+and press Reload on Omarchy Mosaic (turn on Developer mode if there's no
+Reload button). An extension older than 0.5.2 can't open the page, so the
+button copies `chrome://extensions/` for the address bar instead. Or
+restart the browser (the tab's Restart button, B), which also loads it. The same steps are in the IPC: `omarchy-shell pym.mosaic
 extension` (status as JSON), `extensionEnable`, `extensionVerify`, and
 `extensionDisable`.
 

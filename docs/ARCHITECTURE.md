@@ -126,6 +126,13 @@ logins and memory; the user chose an extension instead.
   `service_worker` (`extensionOutdated`); the panel then asks for a browser
   restart, and `mute` needs a script that reports its name
   (`Model.canMute`). **Rename the worker on every extension change.**
+  Since 0.5.2 (feature `extensions`), the panel's **Open the extensions
+  page** (O) has the extension open `chrome://extensions/` in a new
+  window: Chromium opens a new tab instead of its own pages given on the
+  command line (checked 2026-10-15), but `chrome.windows.create` from an
+  extension may. Reload there reloads the unpacked folder, so the new
+  worker runs without a browser restart; its `onInstalled` connects it
+  again. With an older extension the panel copies the address instead.
 - **Swap in place.** `replace` (the panel's S, the swap card, `mosaic
   replace`) sends `navigate { url }` when the extension has found the tile
   and can navigate, then rewrites only the tile's store record's URL. The
@@ -167,7 +174,7 @@ Twitch streams sometimes drop for good, most likely when video decoding
 fails, and only a page reload brings them back (the user's report,
 2026-10-07). Mosaic notices and reloads the tile.
 
-- **Detection is in the page (extension 0.5.1, `background-6.js`, feature
+- **Detection is in the page (extension 0.5.5, `background-10.js`, feature
   `stream`).** The worker injects `pageStream` into each tile's main frame
   when it finishes loading (and into open tiles when the worker starts,
   asking for a fresh report). Every 2 s it looks at the largest video
@@ -176,13 +183,28 @@ fails, and only a page reload brings them back (the user's report,
   Twitch's error overlay (`[data-a-target="player-overlay-content-gate"]`
   with "Error #N"), time standing still while not paused or ended, no new
   decoded frames while the page is visible and time runs (the picture
-  froze but audio didn't), or the video gone. An error counts after 4 s
-  and the others after 12 s, so a normal rebuffer doesn't. A video counts
+  froze but audio didn't), or the video gone. A player that gives up
+  often pauses its own video behind its spinner, with the stream still
+  buffered (a live Twitch tile sat `idle (paused: readyState 4,
+  networkState 2)`, 2026-10-15), so `stopped` counts too: the video ended,
+  or was paused not by hand. A pause by hand is one with a user
+  activation (`navigator.userActivation`, read on the `pause` event) or
+  one by the `media` command. Media keys and playerctl give no
+  activation, so they read as the player's (0.5.2 spared any pause with
+  data buffered, which missed the live case). So does `stuck`: a video
+  whose time never moved, paused or not, before it played; this also
+  covers a page the watcher joins late, such as after the extension
+  reloads. None counts
+  while another video on the page plays (an ad). An error counts after
+  4 s, `frozen` and `gone` after 12 s, and `stopped` and `stuck` after
+  20 s, so a normal rebuffer doesn't. An `idle` report carries why
+  (`paused`, `not started`, `no video`, `other`) for `mosaic streams`. A video counts
   only on the path where it played: Twitch changes pages without loading
   one, so leaving a channel for its directory once read as "gone" and
   reloaded the directory (seen live 2026-10-08; fixed in 0.5.1). The page
   reports `{ state: playing | idle | dropped, reason, detail, since }`
-  only when it changes, and the worker carries it as `stream` on the
+  only when it changes (before 0.5.5, a page injected with `resend`
+  re-reported on every check, so `since` never settled), and the worker carries it as `stream` on the
   tab in its `windows` reports. A new page starts without one (the worker
   forgets it on `loading`).
 - **Deciding is in the service.** `Model.planRecovery` (unit-tested)
@@ -199,7 +221,22 @@ fails, and only a page reload brings them back (the user's report,
   widget setting `recoverStreams` (on by default).
 - **What a reload keeps.** The window, its slot, containment, the tab's
   mute, and its volume (set again when the page finishes loading). A
-  theater mode or in-tile fullscreen inside the page is lost.
+  theater mode is lost. In-tile fullscreen comes back (0.5.4, feature
+  `fullscreen`): stream reports say whether the page is fullscreen
+  (`document.fullscreenElement`), and a tile reloaded while fullscreen
+  (by recovery or P) gets its `f` pressed once its stream has played
+  2 s, which is the fullscreen hotkey on Twitch, YouTube, and Kick
+  (`Model.planRefullscreen`, `fullscreenKeyLua`). A page may only go
+  fullscreen on a user gesture, and an extension can't make one, but a
+  key Hyprland sends (`hl.dsp.send_key_state` with the window) is real
+  input to the page. That key focuses the window, and on a hidden
+  workspace switches the monitor to it (seen in a probe), so the Lua
+  only sends it while the tile's workspace is shown, then focuses the
+  previous window and puts the cursor back. A tile on a hidden workspace
+  waits until it is shown, for 5 min at most. Checked 2026-10-15 on a
+  scratch Chromium page: the key was trusted with a user activation and
+  `requestFullscreen()` succeeded; focus, cursor, and workspaces were as
+  before; on a hidden workspace nothing happened.
 - **Checked 2026-10-08** with a headless Chromium (scratch profile and
   config, bridge socket pointed nowhere) on a local Media Source
   Extensions player, which is how Twitch plays too: normal playback stayed
@@ -211,6 +248,12 @@ fails, and only a page reload brings them back (the user's report,
   throwaway shell against a fake bridge reporting the user's two Twitch
   tiles: one reload at once, "recovered" when it played, the next one
   only 30 s after it dropped again, and the healthy tile left alone.
+  The `stopped` and `stuck` rules (0.5.3) were checked with a Node
+  harness on `pageStream` with a fake page and clock: a player pause,
+  with or without data buffered, an ended video, and a paused page the
+  watcher joined late gave `dropped` after 20 s, a pause by click or by
+  the `media` command stayed `idle`, and a playing ad kept a stopped
+  main video `idle`.
   **Not checked:** a real Twitch drop, the frames check (a decoder that
   stops while audio keeps time), Kick's error overlay (it has no known
   selector, so only the generic checks apply there), and pages on hidden

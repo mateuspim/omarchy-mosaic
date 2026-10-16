@@ -5,7 +5,7 @@ import vm from "node:vm"
 const source = fs.readFileSync(new URL("../Model.js", import.meta.url), "utf8")
   .replace(/^\.pragma library\s*/m, "")
 const model = {}
-vm.runInNewContext(source + "\nObject.assign(model, {  parseSaved, serializeSaved, snapshotSession, missingTiles, parseWorkspaces, parseWorkspaceRules, restoreWorkspace, restoreLayout, savedRows, loginSessions, savedText, zoneCount, newCustom, zoneDividers, withDivider, withoutZone, withSplit, ordinal, reconcileVolumes, layoutWorkspaceRows, shownWorkspaceRows, windowCounts, customRows, freeLayoutName, layoutChoices, layoutLabel, nextLayout, parseLayoutName, hyprLayoutName, layoutSlug, normalizeCustom, visualZones, defineLua, withZoneSize, withMain, withName, customSummary, parseLayouts, serializeLayouts, layoutsLoadLua, layoutsLoaded, layoutRuleLua, sessionWorkspace, tileStates, planWorkspaceLayout, planSyncLayouts, planSaveCustom, planDeleteCustom, workspaceChoice, layoutsText, hiddenEntries, showWebapp, nameList, visibleWebapps, hideWebapp, sessionOf, clientFromIpc, parseStore, tileState, buildList, shapeList, parseClients, validAddress, dispatchExpression, listTiles, findTile, planFocus, planRemove, planClose, planContain, planAutoContain, restoreAfterMove, monitorFromIpc, parseMonitors, resolveAddTargets, chooseWorkspace, desktopId, isChromiumFamily, isAppWindow, parseOpenWindow, tileDispatches, pruneRecords, serializeStore, planReplace, replaceRecord, parseCursorPos, cursorMoveExpression, parseKeySpec, bindConflict, tileRect, listText, webappsText, monitorsText, splitLines, parseBridgeMessage, browserLabel, bridgeWindows, siteOf, matchTiles, otherTitles, keepTabs, tileTab, navigationSettled, extensionState, extensionNotice, extensionSteps, browserClass, browserPids, tileAudio, focusMutes, audioIcon, extensionFromManifest, parseStream, recoverySite, planRecovery, streamStatus, recoveryLog, streamsText, bridgeHas, stepVolume, parseVolume, swapBindLua, unbindLua, webappUrl, webappFromEntry, buildWebapps, shapeWebapps, findWebapp, resolveTarget, parseList, tileLabel, tileMeta, sessionPlace, tileApp, tileName, webappName, webappNameError, siteRoot, planSaveWebapp, tileSubtitle, tileInitial, layoutBoxes, keyHints, normalizeUrl, sessionName, summary, anyUncontained, parseManifest });", { model })
+vm.runInNewContext(source + "\nObject.assign(model, {  parseSaved, serializeSaved, snapshotSession, missingTiles, parseWorkspaces, parseWorkspaceRules, restoreWorkspace, restoreLayout, savedRows, loginSessions, savedText, zoneCount, newCustom, zoneDividers, withDivider, withoutZone, withSplit, ordinal, reconcileVolumes, layoutWorkspaceRows, shownWorkspaceRows, windowCounts, customRows, freeLayoutName, layoutChoices, layoutLabel, nextLayout, parseLayoutName, hyprLayoutName, layoutSlug, normalizeCustom, visualZones, defineLua, withZoneSize, withMain, withName, customSummary, parseLayouts, serializeLayouts, layoutsLoadLua, layoutsLoaded, layoutRuleLua, sessionWorkspace, tileStates, planWorkspaceLayout, planSyncLayouts, planSaveCustom, planDeleteCustom, workspaceChoice, layoutsText, hiddenEntries, showWebapp, nameList, visibleWebapps, hideWebapp, sessionOf, clientFromIpc, parseStore, tileState, buildList, shapeList, parseClients, validAddress, dispatchExpression, listTiles, findTile, planFocus, planRemove, planClose, planContain, planAutoContain, restoreAfterMove, monitorFromIpc, parseMonitors, resolveAddTargets, chooseWorkspace, desktopId, isChromiumFamily, isAppWindow, parseOpenWindow, tileDispatches, pruneRecords, serializeStore, planReplace, replaceRecord, parseCursorPos, cursorMoveExpression, parseKeySpec, bindConflict, tileRect, listText, webappsText, monitorsText, splitLines, parseBridgeMessage, browserLabel, bridgeWindows, siteOf, matchTiles, otherTitles, keepTabs, tileTab, navigationSettled, extensionState, extensionNotice, extensionSteps, browserClass, browserPids, tileAudio, focusMutes, audioIcon, extensionFromManifest, parseStream, planRefullscreen, fullscreenKeyLua, tileShown, recoverySite, planRecovery, streamStatus, recoveryLog, streamsText, bridgeHas, stepVolume, parseVolume, swapBindLua, unbindLua, webappUrl, webappFromEntry, buildWebapps, shapeWebapps, findWebapp, resolveTarget, parseList, tileLabel, tileMeta, sessionPlace, tileApp, tileName, webappName, webappNameError, siteRoot, planSaveWebapp, tileSubtitle, tileInitial, layoutBoxes, keyHints, normalizeUrl, sessionName, summary, anyUncontained, parseManifest });", { model })
 
 // Values built inside the VM belong to another realm, so compare copies.
 const plain = value => JSON.parse(JSON.stringify(value))
@@ -853,7 +853,7 @@ assert.deepEqual(plain(model.keyHints("nonsense", false, 0)).at(-1), ["?", "more
 
 // Stream recovery.
 assert.deepEqual(plain(model.parseStream({ state: "dropped", reason: "error", detail: "MEDIA_ERR_DECODE", since: 5 })),
-  { state: "dropped", reason: "error", detail: "MEDIA_ERR_DECODE", since: 5 })
+  { state: "dropped", reason: "error", detail: "MEDIA_ERR_DECODE", since: 5, fullscreen: false })
 assert.equal(model.parseStream({ state: "exploded" }), null)
 assert.equal(model.parseStream("playing"), null)
 assert.equal(model.parseStream({ state: "idle", since: -3 }).since, 0)
@@ -924,7 +924,39 @@ const streamsOut = model.streamsText(streamsList, Object.assign(streamAudio(drop
 assert.equal(streamsOut[0], "1  twitch.tv/a  dropped (error: MEDIA_ERR_DECODE), stalled")
 assert.equal(streamsOut[1], "2  youtube.com  playing  (not recovered here)")
 assert.equal(streamsOut.at(-1), "No recoveries yet.")
+// An idle stream says why, so a stop that isn't a drop can be read.
+assert.equal(model.streamsText(streamsList, { "0xa": { tab: 8, url: "https://twitch.tv/a", stream: { state: "idle", reason: "paused", detail: "readyState 4, networkState 1" } } }, {}, [], sites).split("\n")[0],
+  "1  twitch.tv/a  idle (paused: readyState 4, networkState 1)")
 assert.equal(model.streamsText({ version: 1, sessions: [] }, {}, {}, [], sites).split("\n")[0], "No tiles open")
+
+// Fullscreen again after a reload.
+assert.equal(model.parseStream({ state: "playing", fullscreen: true }).fullscreen, true)
+assert.equal(model.parseStream({ state: "playing" }).fullscreen, false)
+const fsAudio = function(stream) { return { "0xa": { tab: 1, stream: stream } } }
+const shownYes = function() { return true }
+const shownNo = function() { return false }
+// Still loading: keep waiting.
+assert.deepEqual(plain(model.planRefullscreen({ "0xa": 0 }, fsAudio(null), shownYes, 1000)), { pending: { "0xa": 0 }, press: [] })
+// Playing, but only just: wait for the player's hotkeys.
+assert.deepEqual(plain(model.planRefullscreen({ "0xa": 0 }, fsAudio({ state: "playing", since: 9000, fullscreen: false }), shownYes, 10000)).press, [])
+// Playing for a moment and shown: press once, then forget it.
+assert.deepEqual(plain(model.planRefullscreen({ "0xa": 0 }, fsAudio({ state: "playing", since: 5000, fullscreen: false }), shownYes, 10000)), { pending: {}, press: ["0xa"] })
+// Hidden workspace: wait until it shows.
+assert.deepEqual(plain(model.planRefullscreen({ "0xa": 0 }, fsAudio({ state: "playing", since: 5000, fullscreen: false }), shownNo, 10000)), { pending: { "0xa": 0 }, press: [] })
+// Whether a tile's workspace is on screen.
+const shownList = { version: 1, sessions: [{ name: "s", tiles: [{ index: 1, address: "0xa", monitor: "DP-4", workspace: 9 }] }] }
+assert.equal(model.tileShown(shownList, { "DP-4": 9, "DP-5": 1 }, "0xa"), true)
+assert.equal(model.tileShown(shownList, { "DP-4": 42 }, "0xa"), false)
+assert.equal(model.tileShown(shownList, { "DP-4": 9 }, "0xb"), false)
+// The report from before the reload doesn't count, fullscreen or playing.
+assert.deepEqual(plain(model.planRefullscreen({ "0xa": 8000 }, fsAudio({ state: "playing", since: 5000, fullscreen: true }), shownYes, 10000)), { pending: { "0xa": 8000 }, press: [] })
+assert.deepEqual(plain(model.planRefullscreen({ "0xa": 8000 }, fsAudio({ state: "playing", since: 5000, fullscreen: false }), shownYes, 10000)), { pending: { "0xa": 8000 }, press: [] })
+// Already fullscreen, or waited too long: forget it.
+assert.deepEqual(plain(model.planRefullscreen({ "0xa": 0 }, fsAudio({ state: "playing", since: 5000, fullscreen: true }), shownYes, 10000)), { pending: {}, press: [] })
+assert.deepEqual(plain(model.planRefullscreen({ "0xa": 0 }, fsAudio({ state: "playing", since: 5000, fullscreen: false }), shownNo, 6 * 60000)), { pending: {}, press: [] })
+assert.equal(model.fullscreenKeyLua("0xa; os.exit()"), "")
+assert.match(model.fullscreenKeyLua("0x56f04e480c20"), /send_key_state\(\{ mods = "", key = "f", state = "down", window = "address:0x56f04e480c20" \}\)/)
+assert.match(model.fullscreenKeyLua("0x56f04e480c20"), /shown\.id ~= w\.workspace\.id then return end/)
 
 // Saving a tile as a web app.
 assert.equal(model.webappName({ url: "https://music.youtube.com/watch?v=1", title: "Song • Artist - YouTube Music" }), "YouTube Music")

@@ -201,6 +201,9 @@ Scope {
   // (Model.recoveryLog), for the panel and `mosaic streams`.
   property var recovery: ({})
   property var recoveryLog: []
+  // Tiles reloaded while their page was fullscreen, by address, with
+  // when; see Model.planRefullscreen.
+  property var refullscreen: ({})
 
   onRecoveringSitesChanged: applyRecovery()
 
@@ -212,10 +215,26 @@ Scope {
     var now = Date.now()
     var tiles = Model.listTiles(list)
     var result = Model.planRecovery(audio, recovery, recoveringSites, tiles.map(function(tile) { return tile.address }), now)
+    var pending = Object.assign({}, refullscreen)
     result.reload.forEach(function(address) {
       var entry = audio[address]
-      if (Model.bridgeHas(root.bridges[entry.bridge], "reload")) root.sendBridge(entry.bridge, { type: "reload", tab: entry.tab })
+      if (!Model.bridgeHas(root.bridges[entry.bridge], "reload")) return
+      root.sendBridge(entry.bridge, { type: "reload", tab: entry.tab })
+      if (entry.stream && entry.stream.fullscreen) pending[address] = now
     })
+    var again = Model.planRefullscreen(pending, audio, root.tileShown, now)
+    again.press.forEach(function(address) {
+      console.log("Mosaic: stream fullscreen again: " + address)
+      Quickshell.execDetached(["hyprctl", "eval", Model.fullscreenKeyLua(address)])
+    })
+    Object.keys(pending).forEach(function(address) {
+      if (!refullscreen[address]) console.log("Mosaic: stream fullscreen after the reload: " + address)
+      else if (!again.pending[address] && again.press.indexOf(address) === -1) {
+        var stream = audio[address] ? audio[address].stream : null
+        console.log("Mosaic: stream fullscreen dropped: " + address + " (" + JSON.stringify(stream) + ", pending " + pending[address] + ", now " + now + ")")
+      }
+    })
+    if (JSON.stringify(again.pending) !== JSON.stringify(refullscreen)) refullscreen = again.pending
     if (result.events.length > 0) {
       var labels = {}
       // The tab's address names the channel; the store's may not.
@@ -229,17 +248,35 @@ Scope {
       recoveryLog = Model.recoveryLog(recoveryLog, result.events, now, labels)
     }
     if (JSON.stringify(result.recovery) !== JSON.stringify(recovery)) recovery = result.recovery
-    recoveryTimer.running = recoveringSites !== "" && Object.keys(audio).some(function(address) {
+    recoveryTimer.running = Object.keys(again.pending).length > 0 || recoveringSites !== "" && Object.keys(audio).some(function(address) {
       var stream = audio[address].stream
       return stream !== null && stream.state === "dropped" && !(result.recovery[address] && result.recovery[address].stalled)
     })
   }
 
+  // Whether a tile's workspace is the one its monitor shows.
+  function tileShown(address) {
+    var outputs = Hyprland.monitors.values
+    var shown = {}
+    for (var m = 0; m < outputs.length; m++) {
+      if (outputs[m].activeWorkspace) shown[outputs[m].name] = outputs[m].activeWorkspace.id
+    }
+    return Model.tileShown(list, shown, address)
+  }
+
   // Reloads a tile's page by hand, which also gives a stalled tile its
   // tries back.
   function reloadTile(address) {
+    var entry = tileAudio[address]
     var error = tileCommand(address, "reload", {})
     if (error) return error
+    if (entry && entry.stream && entry.stream.fullscreen) {
+      var pending = Object.assign({}, refullscreen)
+      pending[address] = Date.now()
+      refullscreen = pending
+      recoveryTimer.running = true
+      console.log("Mosaic: stream fullscreen after the reload: " + address)
+    }
     var next = Object.assign({}, recovery)
     delete next[address]
     recovery = next
@@ -1321,6 +1358,20 @@ Scope {
     return sendBridge(entry.bridge, sent) ? "" : "The browser extension is not connected"
   }
 
+  // Opens the browser's extensions page, where Mosaic's Reload button
+  // loads a changed extension without restarting the browser (its
+  // worker connects again on its own). Asks the first extension that can;
+  // an older one can't, so the address is copied to paste instead.
+  // Returns "" once sent or copied, else why not.
+  function openExtensionsPage() {
+    for (var i = 0; i < bridges.length; i++) {
+      if (Model.bridgeHas(bridges[i], "extensions") && sendBridge(i, { type: "extensions" })) return ""
+    }
+    if (bridges.length === 0) return "The browser extension is not connected; restart the browser instead"
+    Quickshell.execDetached(["wl-copy", "chrome://extensions/"])
+    return "copied"
+  }
+
   // Sets a tile's volume, from 0 to 1 in whole percent; 1 hands it back
   // to the site.
   function setTileVolume(address, level) {
@@ -1554,6 +1605,9 @@ Scope {
     // `mosaic streams`: each tile's stream and the recent recoveries.
     function streams(): string {
       var text = Model.streamsText(root.list, root.tileAudio, root.recovery, root.recoveryLog, root.recoverSites)
+        + Object.keys(root.refullscreen).map(function(address) {
+          return "\nFullscreen after the reload: " + address + " (since " + root.refullscreen[address] + ", shown " + root.tileShown(address) + ")"
+        }).join("")
       return (root.recoverStreams ? "Recovering streams on " + root.recoverSites : "Stream recovery is off") + "\n\n" + text
     }
     function mute(tile: string, state: string): string {

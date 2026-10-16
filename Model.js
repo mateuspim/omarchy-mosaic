@@ -1991,11 +1991,13 @@ function bridgeWindows(list) {
 }
 
 // A tab's stream as an extension with "stream" reports it ({ state,
-// reason, detail, since }), or null.
+// reason, detail, since, fullscreen }), or null. `fullscreen` (feature
+// "fullscreen"): the page shows an element fullscreen.
 function parseStream(stream) {
   if (!stream || typeof stream !== "object" || STREAM_STATES.indexOf(stream.state) === -1) return null
   var since = Number(stream.since)
-  return { state: stream.state, reason: String(stream.reason || ""), detail: String(stream.detail || ""), since: since > 0 ? since : 0 }
+  return { state: stream.state, reason: String(stream.reason || ""), detail: String(stream.detail || ""), since: since > 0 ? since : 0,
+    fullscreen: stream.fullscreen === true }
 }
 
 var STREAM_STATES = ["playing", "idle", "dropped"]
@@ -2386,6 +2388,68 @@ function planRecovery(audio, recovery, sitesText, live, now) {
   return { recovery: next, reload: reload, events: events }
 }
 
+// Bringing a page's fullscreen back after a reload, which loses it.
+// `pending` maps the address of a tile reloaded while fullscreen to when.
+// Once its stream has played for a moment, not fullscreen, and its
+// workspace is shown (`shown(address)`), the tile's f is pressed (the
+// sites' fullscreen hotkey), once. A tile that is fullscreen again, or
+// still waiting after REFULLSCREEN_MS, is dropped. Only reports made
+// after the reload count: until the page reloads, the service still has
+// its last one, fullscreen. Returns { pending, press: [address] }.
+function planRefullscreen(pending, audio, shown, now) {
+  var next = {}
+  var press = []
+  Object.keys(pending).forEach(function(address) {
+    var entry = audio[address]
+    var stream = entry && entry.stream && entry.stream.since >= pending[address] ? entry.stream : null
+    if (now - pending[address] > REFULLSCREEN_MS || (stream && stream.fullscreen)) return
+    if (stream && stream.state === "playing" && now - stream.since >= REFULLSCREEN_SETTLE_MS && shown(address)) press.push(address)
+    else next[address] = pending[address]
+  })
+  return { pending: next, press: press }
+}
+
+// Whether the tile at `address` in the v1 `list` is on the workspace its
+// monitor shows; `shown` maps monitor names to their shown workspace id.
+function tileShown(list, shown, address) {
+  var sessions = list && Array.isArray(list.sessions) ? list.sessions : []
+  for (var i = 0; i < sessions.length; i++) {
+    var tiles = Array.isArray(sessions[i].tiles) ? sessions[i].tiles : []
+    for (var j = 0; j < tiles.length; j++) {
+      if (tiles[j].address === address) return typeof tiles[j].monitor === "string" && shown[tiles[j].monitor] === tiles[j].workspace
+    }
+  }
+  return false
+}
+
+var REFULLSCREEN_MS = 5 * 60000
+// Players bind their hotkeys a moment after the video starts.
+var REFULLSCREEN_SETTLE_MS = 2000
+
+// Lua for `hyprctl eval` that presses f in a tile (its address), as real
+// input: a page may only go fullscreen on a user gesture, and a key
+// Hyprland sends is one. The key focuses the window, so it is only sent
+// while the tile's workspace is shown (on a hidden one, the monitor would
+// switch to it), and focus and the cursor go back where they were. The
+// down/up split is Omarchy's (send_shortcut can leave a key stuck). ""
+// for an invalid address.
+function fullscreenKeyLua(address) {
+  if (!validAddress(address)) return ""
+  var target = '"address:' + address + '"'
+  return "local w = hl.get_window(" + target + ")\n"
+    + "if not w or not w.workspace or not w.monitor then return end\n"
+    + "local shown = hl.get_active_workspace(w.monitor.name)\n"
+    + "if not shown or shown.id ~= w.workspace.id then return end\n"
+    + "local before = hl.get_active_window()\n"
+    + "local cursor = hl.get_cursor_pos()\n"
+    + 'hl.dispatch(hl.dsp.send_key_state({ mods = "", key = "f", state = "down", window = ' + target + " }))\n"
+    + "hl.timer(function()\n"
+    + '  hl.dispatch(hl.dsp.send_key_state({ mods = "", key = "f", state = "up", window = ' + target + " }))\n"
+    + '  if before and before.address ~= "' + address + '" then hl.dispatch(hl.dsp.focus({ window = "address:" .. before.address })) end\n'
+    + "  if cursor then hl.dispatch(hl.dsp.cursor.move({ x = math.floor(cursor.x), y = math.floor(cursor.y) })) end\n"
+    + 'end, { timeout = 50, type = "oneshot" })'
+}
+
 // A tile's stream for its panel row: { text, warn }, or text "" for
 // nothing to show. `enabled`: whether its site is recovered. A reload
 // shows for a minute at most, since a channel that went offline never
@@ -2422,7 +2486,7 @@ function streamsText(list, audio, recovery, log, sitesText) {
     var stream = entry ? entry.stream : null
     var record = recovery[tile.address]
     var state = !entry ? "not found by the extension" : !stream ? "no video report" : stream.state
-      + (stream.state === "dropped" ? " (" + stream.reason + (stream.detail ? ": " + stream.detail : "") + ")" : "")
+      + (stream.reason ? " (" + stream.reason + (stream.detail ? ": " + stream.detail : "") + ")" : "")
     var extra = record && record.stalled ? ", stalled" : record && record.recovered > 0 ? ", recovered " + record.recovered + "×" : ""
     lines.push(tile.index + "  " + tileLabel(tile) + "  " + state + extra
       + (entry && !recoverySite(entry.url, sitesText) ? "  (not recovered here)" : ""))

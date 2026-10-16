@@ -1,5 +1,35 @@
 # Changelog
 
+## Unreleased
+
+- **Recover streams the player gave up on**: a Twitch tile frozen on the
+  player's loading spinner wasn't reloaded, since the player had stopped
+  its video itself and Mosaic took that for a pause. Now a video that
+  played and then ended or was paused, not by hand (a click or a key in
+  the tile, or a `mosaic` media command), counts as dropped after 20
+  seconds, and so does a video that never starts, such as after a reload
+  that hangs. Media keys and playerctl look like the player's own pause,
+  so a tile paused that way is reloaded too. `mosaic streams` also says
+  why an idle tile is idle.
+- **Fullscreen comes back after a reload**: a tile whose video was
+  fullscreen inside it goes fullscreen again once the reloaded stream
+  plays, by pressing its f (Twitch, YouTube, and Kick's fullscreen key)
+  as real input. That briefly focuses the tile, so it waits until the
+  tile's workspace is on screen, and focus and the cursor go back where
+  they were. This works for recovery and for P.
+- **Reload the extension without restarting the browser**: the Extension
+  tab's **Open the extensions page** (O) opens the browser's extensions
+  page, where Reload on Omarchy Mosaic loads a newer extension and keeps
+  your tiles open. Until the browser runs 0.5.2, the button copies the
+  page's address for the address bar instead.
+- **Fixed**: a tile page re-reported its stream every 2 seconds after the
+  extension started or the page loaded, each time as if it had just
+  changed.
+- **Fixed**: the panel's last tab (Extension) was cut off; the panel now
+  widens to fit its tabs.
+- These need extension 0.5.5 (`background-10.js`): reload it on the
+  extensions page (O on the Extension tab) or restart the browser.
+
 ## 1.4.1 (2026-10-15)
 
 - **A taken swap key is reported**: when the swap key can't be bound,

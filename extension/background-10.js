@@ -17,6 +17,9 @@
 //                     navigate { tab, url }: an http(s) address, in place
 //                     reload { tab }
 //                     media { tab, action }: "play", "pause", or "toggle"
+//                     extensions {}: opens the browser's extensions page
+//                       in a new window, where Mosaic's Reload button
+//                       loads a changed extension without a restart
 // Commands may carry an `id`, answered by `done`. A command's effect on the
 // tab arrives with the next windows report. Commands only ever touch tabs
 // in app windows, which are the tiles.
@@ -34,13 +37,17 @@
 // reporting the new manifest's version; a new file name per change forces
 // the new code (Omarchy's Copy URL extension does the same). Rename the file,
 // update manifest.json, and change this together.
-const SCRIPT = "background-6.js";
+const SCRIPT = "background-10.js";
 // "follow": reported volumes follow changes made with the page's own
 // controls, and survive the worker stopping, so the service mirrors them
 // instead of setting its own again.
 // "stream": tabs report how their video plays, so the service can reload
 // a stream that dropped.
-const FEATURES = ["mute", "volume", "follow", "navigate", "reload", "media", "favicon", "stream"];
+// "fullscreen": stream reports say whether the page is fullscreen.
+// "extensions": the extensions command. A browser won't open its own pages
+// from the command line (Chromium opens a new tab instead), but an
+// extension may.
+const FEATURES = ["mute", "volume", "follow", "navigate", "reload", "media", "favicon", "stream", "extensions", "fullscreen"];
 const HOST = "pym.mosaic";
 const RETRY_FIRST_MS = 1000;
 const RETRY_LAST_MS = 60000;
@@ -139,6 +146,16 @@ async function receive(message) {
   await volumesReady;
   if (!message || typeof message !== "object") return;
   if (message.type === "ping") return reportWindows(Number.isInteger(message.id) ? message.id : undefined);
+  if (message.type === "extensions") {
+    let failed = "";
+    try {
+      await chrome.windows.create({ url: "chrome://extensions/", type: "normal", focused: true });
+    } catch (failure) {
+      failed = String(failure && failure.message ? failure.message : failure);
+    }
+    if (message.id !== undefined) send({ type: "done", id: message.id, error: failed });
+    return;
+  }
   const command = COMMANDS[message.type];
   if (!command) return;
   let error = "";
@@ -207,27 +224,58 @@ function pageVolume(level) {
 
 // Watches the page's main video and reports how it plays, once now and
 // again whenever that changes: "playing", "idle" (paused, ended, or not
-// started yet), or "dropped": a video that had played stopped for good,
-// with the media element's error, the site's error overlay, time standing
+// started yet; the reason says which), or "dropped": the media element's
+// error, the site's error overlay, or, once a video played, time standing
 // still while not paused, no new frames while the page is visible, or the
-// video gone. A short stall is a normal rebuffer, so a problem only counts
-// once it lasts. Sites such as Twitch change pages without loading one,
-// so a video counts only on the page (path) where it played: leaving a
-// channel for its directory isn't a drop. `resend` reports the current
-// state again, for a worker that started after the page did. Runs in the page's main frame
-// (isolated world).
+// video gone. A player that gives up often pauses its video itself behind
+// a spinner, even with the stream still buffered (Twitch, seen live
+// 2026-10-15), so a video that played and then ended or was paused, not
+// by hand, counts too ("stopped"), as does one that never starts
+// ("stuck"), paused or not, as after a reload that hangs. A pause by hand
+// is one made with a click or a key in the page, or by the media command;
+// media keys and playerctl give the page no sign, so they count as the
+// player's. A short stall is a normal rebuffer,
+// so a problem only counts once it lasts, and none counts while another
+// video on the page plays, such as an ad. Sites such as Twitch change
+// pages without loading one, so a video counts only on the page (path)
+// where it played: leaving a channel for its directory isn't a drop.
+// `resend` reports the current state again, for a worker that started
+// after the page did. Runs in the page's main frame (isolated world).
 function pageStream(resend) {
   const CHECK_MS = 2000;
   // How long a problem lasts before it counts: errors don't clear by
-  // themselves, a stall might.
+  // themselves, a stall might, and a stopped or unstarted video gets the
+  // player's own retries time to work.
   const ERROR_MS = 4000;
   const STALL_MS = 12000;
+  const STOP_MS = 20000;
   const state = globalThis.__mosaicStream || (globalThis.__mosaicStream = {
-    timer: 0, video: null, time: -1, frames: -1, played: false, page: "", problem: "", detail: "", since: 0, stream: null, sent: ""
+    timer: 0, video: null, time: -1, frames: -1, played: false, page: "", problem: "", detail: "", since: 0, stream: null, sent: "",
+    times: new WeakMap(), held: false, mediaPause: 0
   });
-  function report(stream) {
-    const key = stream.state + "/" + stream.reason;
-    if (key === state.sent && !resend) return;
+  if (!state.times) {
+    state.times = new WeakMap();
+    state.held = false;
+    state.mediaPause = 0;
+  }
+  if (!state.listening) {
+    state.listening = true;
+    // Media events don't bubble, so listen while they go down.
+    document.addEventListener("pause", function(event) {
+      if (event.target !== state.video) return;
+      const active = navigator.userActivation ? navigator.userActivation.isActive : false;
+      state.held = active || Date.now() - state.mediaPause < 3000;
+    }, true);
+    document.addEventListener("play", function(event) {
+      if (event.target === state.video) state.held = false;
+    }, true);
+  }
+  // `fullscreen`: whether the page shows an element fullscreen (inside
+  // the tile), so the service can bring it back after a reload.
+  function report(stream, again) {
+    stream.fullscreen = !!document.fullscreenElement;
+    const key = stream.state + "/" + stream.reason + "/" + stream.fullscreen;
+    if (key === state.sent && !again) return;
     state.sent = key;
     state.stream = stream;
     try {
@@ -235,10 +283,10 @@ function pageStream(resend) {
     } catch (error) { /* The extension was updated or removed. */ }
   }
   // The largest video with something loaded: players keep spare ones.
-  function mainVideo() {
+  function mainVideo(videos) {
     let best = null;
     let area = 0;
-    document.querySelectorAll("video").forEach(function(video) {
+    videos.forEach(function(video) {
       if (!video.currentSrc && !video.srcObject) return;
       const box = video.getBoundingClientRect();
       if (box.width * box.height > area) {
@@ -263,21 +311,35 @@ function pageStream(resend) {
     const match = /error\s*#\s*(\d+)/i.exec(text);
     return match ? "Error #" + match[1] : "";
   }
-  function check() {
+  // `again`: report even if nothing changed. Only the first check of an
+  // injection asked to resend does; the timer's checks never do, or every
+  // check would report again with a new `since`.
+  function check(again) {
     const page = location.origin + location.pathname;
     if (state.played && page !== state.page) {
       state.played = false;
       state.video = null;
     }
-    const video = mainVideo();
+    const videos = Array.from(document.querySelectorAll("video"));
+    const video = mainVideo(videos);
+    // Whether a video other than the main one plays, such as an ad.
+    let other = false;
+    videos.forEach(function(each) {
+      const before = state.times.get(each);
+      if (each !== video && !each.paused && before !== undefined && Math.abs(each.currentTime - before) > 0.01) other = true;
+      state.times.set(each, each.currentTime);
+    });
     let problem = "";
     let detail = "";
+    let quiet = "";
     if (video) {
       const time = video.currentTime;
       const count = frames(video);
       const fresh = video !== state.video;
       const moved = !fresh && Math.abs(time - state.time) > 0.01;
       const drew = !fresh && count > state.frames;
+      const media = "readyState " + video.readyState + ", networkState " + video.networkState;
+      if (fresh) state.held = false;
       if (moved && !video.paused) {
         state.played = true;
         state.page = page;
@@ -289,14 +351,24 @@ function pageStream(resend) {
       } else if (site) {
         problem = "error";
         detail = site;
-      } else if (state.played && !fresh && !video.paused && !video.ended) {
-        if (!moved) {
-          problem = "frozen";
-          detail = "time stopped at " + time.toFixed(1) + " s (readyState " + video.readyState + ", networkState " + video.networkState + ")";
-        } else if (document.visibilityState === "visible" && count >= 0 && state.frames >= 0 && !drew && video.videoWidth > 0) {
-          problem = "frozen";
-          detail = "no new frames while time runs (" + count + " decoded, " + video.videoWidth + "×" + video.videoHeight + ")";
-        }
+      } else if (other) {
+        quiet = "other";
+      } else if (!fresh && !video.paused && !video.ended && !moved) {
+        problem = state.played ? "frozen" : "stuck";
+        detail = (state.played ? "time stopped at " : "never started, at ") + time.toFixed(1) + " s (" + media + ")";
+      } else if (state.played && !fresh && !video.paused && !video.ended && document.visibilityState === "visible"
+          && count >= 0 && state.frames >= 0 && !drew && video.videoWidth > 0) {
+        problem = "frozen";
+        detail = "no new frames while time runs (" + count + " decoded, " + video.videoWidth + "×" + video.videoHeight + ")";
+      } else if (state.played && video.ended) {
+        problem = "stopped";
+        detail = "the video ended at " + time.toFixed(1) + " s (" + media + ")";
+      } else if (video.paused && !state.held) {
+        problem = state.played ? "stopped" : "stuck";
+        detail = (state.played ? "paused, not by hand, at " : "never started, paused at ") + time.toFixed(1) + " s (" + media + ")";
+      } else if (video.paused) {
+        quiet = "paused";
+        detail = media;
       }
       state.video = video;
       state.time = time;
@@ -305,6 +377,8 @@ function pageStream(resend) {
       problem = "gone";
       detail = "the video went away";
       state.video = null;
+    } else {
+      quiet = "no video";
     }
     const now = Date.now();
     if (problem !== state.problem) {
@@ -312,23 +386,30 @@ function pageStream(resend) {
       state.since = now;
     }
     state.detail = detail;
-    if (problem && now - state.since >= (problem === "error" ? ERROR_MS : STALL_MS)) {
-      report({ state: "dropped", reason: problem, detail: detail, since: state.since });
+    const wait = problem === "error" ? ERROR_MS : problem === "stopped" || problem === "stuck" ? STOP_MS : STALL_MS;
+    if (problem && now - state.since >= wait) {
+      report({ state: "dropped", reason: problem, detail: detail, since: state.since }, again);
     } else if (!problem) {
       const playing = video && state.played && !video.paused && !video.ended;
-      report({ state: playing ? "playing" : "idle", reason: "", detail: "", since: now });
-    } else if (resend && state.stream) {
-      report(state.stream);
+      report(playing ? { state: "playing", reason: "", detail: "", since: now }
+        : { state: "idle", reason: quiet, detail: detail, since: now }, again);
+    } else if (again && state.stream) {
+      report(state.stream, true);
     }
   }
-  if (!state.timer) state.timer = setInterval(check, CHECK_MS);
-  check();
+  if (!state.timer) state.timer = setInterval(function() { check(false); }, CHECK_MS);
+  check(resend);
 }
 
+// Plays or pauses the page's media. A pause from here is a pause by hand,
+// which pageStream doesn't take for a drop.
 function pageMedia(action) {
   document.querySelectorAll("video, audio").forEach(function(element) {
     if (action === "play" || (action === "toggle" && element.paused)) element.play().catch(function() {});
-    else element.pause();
+    else {
+      if (globalThis.__mosaicStream) globalThis.__mosaicStream.mediaPause = Date.now();
+      element.pause();
+    }
   });
 }
 
@@ -383,7 +464,8 @@ chrome.runtime.onMessage.addListener(function(message, sender) {
       state: stream.state,
       reason: String(stream.reason || "").slice(0, 32),
       detail: String(stream.detail || "").slice(0, 200),
-      since: Number(stream.since) || Date.now()
+      since: Number(stream.since) || Date.now(),
+      fullscreen: stream.fullscreen === true
     });
     windowsChanged();
   }).catch(function() {});
