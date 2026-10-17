@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.5.1 (2026-10-17)
 
 - **Fixed**: the panel's tab row was still cut off at the Extension tab;
   the panel's width now counts its padding and border too.
