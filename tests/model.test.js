@@ -523,7 +523,7 @@ assert.equal(model.extensionState(setupOff, []), "off")
 assert.equal(model.extensionState(setupOn, []), "restart")
 assert.equal(model.extensionState(null, [bridge]), "connected")
 assert.equal(model.extensionNotice(setupOn, []), "Set up. Restart Brave Origin and Chromium to load the extension, then verify. Closing the browser also closes its tiles.")
-assert.equal(model.extensionNotice(setupOn, [bridge]), "Connected to Brave Origin. Your tiles are checked whenever they change; V checks that it still answers.")
+assert.equal(model.extensionNotice(setupOn, [bridge]), "Connected to Brave Origin. Your tiles are checked whenever they change.")
 assert.equal(model.extensionNotice({ browsers: [], flags: [] }, []).includes("load it by hand"), true)
 assert.deepEqual(plain(model.extensionSteps(setupOff, [], null)), [
   { label: "Bridge registered", done: false, detail: "Enable registers it with Brave Origin and Chromium" },
@@ -848,7 +848,8 @@ assert.deepEqual(plain(model.keyHints("tiles", false, 6)), [["↑↓", "select"]
 assert.equal(model.keyHints("tiles", true, 6).length, 19)
 assert.deepEqual(plain(model.keyHints("swap", false, 12))[0], ["1–9", "web app"])
 assert.deepEqual(plain(model.keyHints("adding", false, 0)), [["Enter", "add"], ["Esc", "close"]])
-assert.deepEqual(plain(model.keyHints("extension", false, 3)), [["V", "verify"], ["H/L", "tabs"]])
+assert.deepEqual(plain(model.keyHints("extension", false, 3)), [["O", "extensions page"], ["V", "verify"], ["?", "more"]])
+assert.deepEqual(plain(model.keyHints("hidden", true, 3)).slice(-2), [["H/L", "tabs"], ["?", "fewer"]])
 assert.deepEqual(plain(model.keyHints("nonsense", false, 0)).at(-1), ["?", "more"])
 
 // Stream recovery.

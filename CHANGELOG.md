@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- **Fixed**: the panel's tab row was still cut off at the Extension tab;
+  the panel's width now counts its padding and border too.
+- **The Extension tab's actions are rows with their keys**, like Add tile:
+  Open the extensions page (O), Verify (V), Enable (E), and Restart the
+  browser (B). Turn off comes last and has no key. Once the extension is
+  connected, its notice is a quiet line instead of a box.
+- **Saved sessions label their switch** "at login".
+- **The key bar shows H/L (tabs) under ?** on every tab, instead of on
+  some.
+
 ## 1.5.0 (2026-10-15)
 
 - **Recover streams the player gave up on**: a Twitch tile frozen on the

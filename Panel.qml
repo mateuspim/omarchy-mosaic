@@ -798,8 +798,10 @@ Panel {
     open: root.opened
     focusTarget: keyCatcher
     // Wide enough for the tab row, which outgrew 400 with the Layouts tab
-    // and the counts and warnings on the tab labels.
-    contentWidth: panel.fittedContentWidth(Math.max(Style.space(400), Math.ceil(viewTabs.implicitWidth)))
+    // and the counts and warnings on the tab labels. The width is the
+    // card's, so it counts the padding and border around the content.
+    contentWidth: panel.fittedContentWidth(Math.max(Style.space(400), Math.ceil(viewTabs.implicitWidth)
+      + panel.padding * 2 + Border.left(panel.borderSpec) + Border.right(panel.borderSpec)))
     contentHeight: panel.fittedContentHeight(column.implicitHeight, Style.space(620))
 
     PanelKeyCatcher {
@@ -1372,9 +1374,22 @@ Panel {
               }
             }
 
+            // Once connected, the notice is only a line of news; until then
+            // it says what to do, so it stands out.
             Notice {
+              visible: root.extensionState !== "connected"
               text: root.service ? Model.extensionNotice(root.service.extensionSetup, root.service.bridges) : root.listError
-              warning: root.extensionState !== "connected"
+            }
+
+            Text {
+              visible: root.extensionState === "connected"
+              width: parent.width
+              textFormat: Text.PlainText
+              text: root.service ? Model.extensionNotice(root.service.extensionSetup, root.service.bridges) : ""
+              color: root.dim
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+              wrapMode: Text.WordWrap
             }
 
             Notice {
@@ -1404,71 +1419,72 @@ Panel {
               text: "This closes every window of the browser, your tiles included, and opens it again. Press again to go ahead."
             }
 
-            Button {
-              visible: root.restartNeeded
+            // The actions, as rows with their keys like Add tile; Turn off
+            // comes last and has no key, so it is never pressed by chance.
+            Column {
               width: parent.width
-              text: root.confirmRestart ? "Press again to restart" : "Restart the browser"
-              iconText: "󰑓"
-              foreground: root.foreground
-              enabled: root.activity === ""
-              onClicked: root.restartBrowser()
-            }
+              topPadding: Style.space(6)
+              spacing: Style.space(2)
 
-            Button {
-              visible: root.extensionRunning
-              width: parent.width
-              text: "Open the extensions page"
-              iconText: "󰏗"
-              foreground: root.foreground
-              onClicked: root.openExtensionsPage()
-            }
-
-            RowLayout {
-              width: parent.width
-              spacing: Style.space(6)
-              Button {
+              ActionRow {
+                visible: root.restartNeeded
+                width: parent.width
+                iconText: "󰑓"
+                text: root.confirmRestart ? "Press again to restart the browser" : "Restart the browser"
+                keyLabel: "B"
+                enabled: root.activity === ""
+                opacity: enabled ? 1 : 0.5
+                onClicked: root.restartBrowser()
+              }
+              ActionRow {
                 visible: root.extensionState === "off" || root.extensionState === "unknown"
-                Layout.fillWidth: true
+                width: parent.width
                 text: "Enable"
-                iconText: "󰐕"
-                foreground: root.foreground
+                keyLabel: "E"
                 onClicked: root.enableExtension()
               }
-              Button {
-                visible: root.extensionState === "restart" || root.extensionState === "connected"
-                Layout.fillWidth: true
-                text: "Turn off"
-                iconText: "󰅖"
-                foreground: root.foreground
-                onClicked: root.disableExtension()
+              ActionRow {
+                visible: root.extensionRunning
+                width: parent.width
+                iconText: "󰏗"
+                text: "Open the extensions page"
+                keyLabel: "O"
+                onClicked: root.openExtensionsPage()
               }
-              Button {
-                Layout.fillWidth: true
-                text: root.service && root.service.verifying ? "Verifying…" : "Verify"
+              ActionRow {
+                width: parent.width
                 iconText: "󰄬"
-                foreground: root.foreground
+                text: root.service && root.service.verifying ? "Verifying…" : "Verify"
+                keyLabel: "V"
                 enabled: !(root.service && root.service.verifying)
+                opacity: enabled ? 1 : 0.5
                 onClicked: root.verifyExtension()
+              }
+              ActionRow {
+                visible: root.extensionState !== "connected"
+                width: parent.width
+                iconText: "󰆏"
+                text: "Copy the extension folder's path"
+                onClicked: root.copyExtensionPath()
+              }
+              ActionRow {
+                visible: root.extensionState === "restart" || root.extensionState === "connected"
+                width: parent.width
+                iconText: "󰅖"
+                text: "Turn off"
+                onClicked: root.disableExtension()
               }
             }
 
             Text {
               visible: root.extensionState !== "connected"
               width: parent.width
-              text: "By hand, in any Chromium browser: open its extensions page, turn on Developer mode, choose Load unpacked, and pick the extension folder."
+              topPadding: Style.space(4)
+              text: "By hand, in any Chromium browser: open its extensions page, turn on Developer mode, choose Load unpacked, and pick the extension folder (copied above)."
               color: root.dim
               font.family: root.fontFamily
               font.pixelSize: Style.font.caption
               wrapMode: Text.WordWrap
-            }
-
-            Button {
-              visible: root.extensionState !== "connected"
-              width: parent.width
-              text: "Copy the extension folder's path"
-              iconText: "󰆏"
-              foreground: root.foreground
-              onClicked: root.copyExtensionPath()
             }
           }
 
@@ -2303,13 +2319,25 @@ Panel {
         }
       }
 
-      ToggleSwitch {
-        checked: savedRow.entry !== null && savedRow.entry.entry.login
-        foreground: root.foreground
-        onToggled: root.toggleSavedLogin(savedRow.entry)
-        PanelToolTip {
-          visible: parent.containsMouse
-          text: "Open at login · O"
+      ColumnLayout {
+        spacing: Style.space(2)
+        ToggleSwitch {
+          Layout.alignment: Qt.AlignHCenter
+          checked: savedRow.entry !== null && savedRow.entry.entry.login
+          foreground: root.foreground
+          onToggled: root.toggleSavedLogin(savedRow.entry)
+          PanelToolTip {
+            visible: parent.containsMouse
+            text: "Open at login · O"
+          }
+        }
+        Text {
+          Layout.alignment: Qt.AlignHCenter
+          textFormat: Text.PlainText
+          text: "at login"
+          color: root.dim
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
         }
       }
       PanelActionButton {

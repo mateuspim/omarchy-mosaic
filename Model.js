@@ -2102,7 +2102,7 @@ function loadedBrowsers(setup) {
 function extensionNotice(setup, bridges) {
   var state = extensionState(setup, bridges)
   if (state === "connected")
-    return "Connected to " + joinNames(bridges.map(function(bridge) { return browserLabel(bridge.browser) })) + ". Your tiles are checked whenever they change; V checks that it still answers."
+    return "Connected to " + joinNames(bridges.map(function(bridge) { return browserLabel(bridge.browser) })) + ". Your tiles are checked whenever they change."
   if (state === "unknown") return "Checking the browser extension…"
   if (state === "restart")
     return "Set up. Restart " + loadedBrowsers(setup) + " to load the extension, then verify. Closing the browser also closes its tiles."
@@ -2513,16 +2513,16 @@ var KEY_HINTS = {
   naming: { main: [["Enter", "save web app"], ["Esc", "cancel"]], more: [] },
   swap: { main: [["#", "web app"], ["A", "address"], ["Enter", "replace"], ["Esc", "cancel"]], more: [] },
   adding: { main: [["#", "web app"], ["Enter", "add"], ["Esc", "close"]], more: [] },
-  hidden: { main: [["↑↓", "select"], ["Enter", "show again"], ["H/L", "tabs"]], more: [["R", "refresh"]] },
+  hidden: { main: [["↑↓", "select"], ["Enter", "show again"]], more: [["R", "refresh"], ["H/L", "tabs"]] },
   saved: { main: [["↑↓", "select"], ["Enter", "restore"], ["O", "at login"], ["D", "delete"]], more: [["H/L", "tabs"]] },
   layouts: { main: [["↑↓", "select"], ["Enter", "next layout"], ["N", "new"], ["E", "edit"]],
     more: [["0", "Hyprland's"], ["W", "all workspaces"], ["D", "delete"], ["H/L", "tabs"]] },
   editor: { main: [["←→", "zone"], ["Enter", "save"], ["Esc", "cancel"]],
     more: [["−/+", "size"], ["S", "split beside"], ["B", "split below"], ["X", "remove"], ["M", "main"],
       ["T", "preset"], ["N", "name"], ["F", "large"]] },
-  extension: { main: [["V", "verify"], ["H/L", "tabs"]], more: [] },
-  "extension-off": { main: [["E", "enable"], ["V", "verify"], ["H/L", "tabs"]], more: [] },
-  "extension-restart": { main: [["B", "restart browser"], ["V", "verify"], ["H/L", "tabs"]], more: [] }
+  extension: { main: [["O", "extensions page"], ["V", "verify"]], more: [["H/L", "tabs"]] },
+  "extension-off": { main: [["E", "enable"], ["V", "verify"]], more: [["H/L", "tabs"]] },
+  "extension-restart": { main: [["B", "restart browser"], ["V", "verify"]], more: [["H/L", "tabs"]] }
 }
 
 function keyHints(context, all, apps) {
