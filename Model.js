@@ -1680,10 +1680,12 @@ function chooseWorkspace(list, monitors, session, monitorName) {
 }
 
 // The desktop id `xdg-settings get default-web-browser` printed, without
-// `.desktop`, or "".
+// `.desktop`, or "". Omarchy's `omarchy-browser` entry only routes links
+// back to the browser listed after it, so it counts as no answer.
 function desktopId(text) {
   var id = String(text || "").trim().split("\n")[0].trim()
-  return id.slice(-8) === ".desktop" ? id.slice(0, -8) : id
+  id = id.slice(-8) === ".desktop" ? id.slice(0, -8) : id
+  return id === "omarchy-browser" ? "" : id
 }
 
 function isChromiumFamily(id) {

@@ -431,7 +431,11 @@ service rebuilds the list after `valuesChanged` settles.
 
 The default browser is resolved the way Omarchy's `omarchy-launch-webapp`
 does it: `xdg-settings get default-web-browser`, then the program from that
-desktop entry's `Exec`. Only Chromium-family browsers are accepted
+desktop entry's `Exec`. It runs with `BROWSER` and `XDG_CURRENT_DESKTOP`
+unset, as `omarchy-cmd-default-browser` does: Omarchy's desktop-specific
+mimeapps list names its `omarchy-browser.desktop` wrapper, which only routes
+links back to the real browser, and that wrapper never counts as an answer.
+Only Chromium-family browsers are accepted
 (Chromium, Chrome, Brave, Edge, Opera, Vivaldi, Helium), because Firefox has
 no `--app` mode. The widget's **Browser** setting overrides the default, which is also how
 tests point the plugin at a throwaway profile. Launches go through

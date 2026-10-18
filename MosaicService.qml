@@ -933,11 +933,15 @@ Scope {
   }
 
   // Asks for the desktop's default browser. BROWSER is cleared, because
-  // xdg-settings would otherwise answer with it instead of the desktop's.
+  // xdg-settings would otherwise answer with it instead of the desktop's,
+  // and so is XDG_CURRENT_DESKTOP, because Omarchy's desktop-specific list
+  // names its omarchy-browser wrapper there while mimeapps.list keeps the
+  // browser itself, as `omarchy-cmd-default-browser` reads it.
   function queryBrowser(nextPhase) {
     phase = nextPhase
-    if (nextPhase === "add-browser") runStep(["xdg-settings", "get", "default-web-browser"], { BROWSER: null })
-    else runStep(["xdg-mime", "query", "default", "x-scheme-handler/https"], { BROWSER: null })
+    var environment = { BROWSER: null, XDG_CURRENT_DESKTOP: null }
+    if (nextPhase === "add-browser") runStep(["xdg-settings", "get", "default-web-browser"], environment)
+    else runStep(["xdg-mime", "query", "default", "x-scheme-handler/https"], environment)
   }
 
   function browserFound(id) {

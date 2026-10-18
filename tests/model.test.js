@@ -312,6 +312,7 @@ assert.deepEqual(plain(model.chooseWorkspace(floatingFirst, screens, "x", "")), 
 
 assert.equal(model.desktopId("brave-origin.desktop\n"), "brave-origin")
 assert.equal(model.desktopId(""), "")
+assert.equal(model.desktopId("omarchy-browser.desktop\n"), "")
 assert.equal(model.isChromiumFamily("brave-origin"), true)
 assert.equal(model.isChromiumFamily("google-chrome"), true)
 assert.equal(model.isChromiumFamily("firefox"), false)

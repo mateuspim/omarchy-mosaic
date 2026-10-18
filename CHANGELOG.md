@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- **Fixed**: tiles failed to open with "the default browser is not
+  Chromium-based" after Omarchy began listing its `omarchy-browser`
+  link wrapper as the default browser; Mosaic now finds the browser
+  behind it, as Omarchy's own launchers do.
+
 ## 1.5.1 (2026-10-17)
 
 - **Fixed**: the panel's tab row was still cut off at the Extension tab;
