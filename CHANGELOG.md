@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.5.2 (2026-10-18)
 
 - **Fixed**: tiles failed to open with "the default browser is not
   Chromium-based" after Omarchy began listing its `omarchy-browser`
