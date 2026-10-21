@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.5.3 (2026-10-21)
+
+- **Fixed**: the native host waited for the body of an oversized message
+  before refusing it; it now rejects a frame over 1 MiB from its header
+  and closes the port.
+- **Fixed**: **Turn off** on the Extension tab removed the `pym.mosaic`
+  native-host registration even when another program had replaced it; it
+  now removes only Mosaic's own.
+- **A new README** and preview: a short landing page with a hero built from
+  real offscreen renders of the panel, and the full manual in
+  [`docs/guide/`](docs/guide/), one page per feature.
+- **Security**: [SECURITY.md](SECURITY.md) describes what Mosaic runs,
+  reads and writes, the extension's permissions and the local state, with
+  the [2026-10-19 security review](docs/security-review.md).
+- **For contributors**: decision records, specs for the IPC and the
+  `mosaic` command, the JSON files, `layouts.lua` and the native-messaging
+  protocol, development and troubleshooting runbooks, an offscreen panel
+  preview (`tests/preview.sh`), contributor and agent guides, and CI that
+  runs `npm test`.
+- The name is **Mosaic**, with a new icon and wordmarks from the same
+  slate-teal mosaic.
+
 ## 1.5.2 (2026-10-18)
 
 - **Fixed**: tiles failed to open with "the default browser is not

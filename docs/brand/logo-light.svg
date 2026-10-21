@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1030 256" role="img" aria-label="Mosaic logo for light backgrounds">
+  <!-- icon.svg, inlined so the logo renders standalone; keep in sync. -->
+  <rect x="11" y="11" width="234" height="234" rx="42" fill="#101a20" stroke="#9dbbc5" stroke-width="20" stroke-linejoin="round"/>
+  <path d="M128 11V245M11 128H245" stroke="#9dbbc5" stroke-width="20"/>
+  <rect x="31" y="31" width="77" height="77" rx="16" fill="#a8c5ce"/>
+  <rect x="148" y="31" width="77" height="77" rx="16" fill="#83a8b4"/>
+  <rect x="31" y="148" width="77" height="77" rx="16" fill="#7899a7"/>
+  <rect x="148" y="148" width="77" height="77" rx="16" fill="#b9cbd0"/>
+  <text x="300" y="196" fill="#4f7f8f" font-family="JetBrainsMono Nerd Font,JetBrains Mono,monospace" font-size="200" font-weight="700" letter-spacing="-5">Mosaic</text>
+</svg>

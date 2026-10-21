@@ -1,0 +1,22 @@
+name: Test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # npm test also runs layouts_test.lua (any Lua from 5.1 up passes) and
+      # native_host_test.py (Python 3, preinstalled on the runner).
+      - name: Install Lua
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y lua5.4
+          command -v lua || sudo ln -s "$(command -v lua5.4)" /usr/local/bin/lua
+      - run: npm test
