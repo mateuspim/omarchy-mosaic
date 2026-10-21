@@ -1,5 +1,10 @@
 # Architecture notes
 
+How the parts fit and the evidence behind them. Why each durable choice was
+made is in the [decision records](adr/README.md); the contracts (IPC, file
+formats, `layouts.lua`, the native-messaging protocol) are in
+[specs](specs/).
+
 ## Where things stand
 
 The plugin is a service (`MosaicService.qml`) plus a bar widget
