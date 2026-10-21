@@ -1,0 +1,75 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080">
+  <defs>
+    <linearGradient id="back" x2="0" y2="1"><stop stop-color="#090d14"/><stop offset="1" stop-color="#18212b"/></linearGradient>
+    <linearGradient id="blue" x2="1" y2="1"><stop stop-color="#16384a"/><stop offset="1" stop-color="#0b1827"/></linearGradient>
+    <linearGradient id="purple" x2="1" y2="1"><stop stop-color="#3c2955"/><stop offset="1" stop-color="#17172e"/></linearGradient>
+    <linearGradient id="gold" x2="1" y2="1"><stop stop-color="#50391f"/><stop offset="1" stop-color="#201a20"/></linearGradient>
+    <linearGradient id="green" x2="1" y2="1"><stop stop-color="#19443e"/><stop offset="1" stop-color="#0f2227"/></linearGradient>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="25"/></filter>
+    <pattern id="dots" width="28" height="28" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="1.2" fill="#415161" opacity=".24"/></pattern>
+  </defs>
+  <rect width="1920" height="1080" fill="url(#back)"/>
+  <rect width="1920" height="1080" fill="url(#dots)"/>
+  <ellipse cx="1390" cy="480" rx="600" ry="440" fill="#4c7b8f" opacity=".12" filter="url(#shadow)"/>
+
+  <g font-family="Liberation Sans, sans-serif">
+    <g transform="translate(105 175)">
+      <g fill="none" stroke="#9dbbc5" stroke-width="10" stroke-linejoin="round">
+        <rect width="116" height="116" rx="20"/>
+        <path d="M58 0v116M0 58h116"/>
+      </g>
+      <rect x="10" y="10" width="38" height="38" rx="8" fill="#a8c5ce"/>
+      <rect x="68" y="10" width="38" height="38" rx="8" fill="#83a8b4"/>
+      <rect x="10" y="68" width="38" height="38" rx="8" fill="#7899a7"/>
+      <rect x="68" y="68" width="38" height="38" rx="8" fill="#b9cbd0"/>
+    </g>
+    <text x="105" y="390" fill="#f0efeb" font-size="100" font-weight="700" letter-spacing="-3">Omarchy</text>
+    <text x="105" y="497" fill="#9cbec9" font-size="110" font-weight="700" letter-spacing="-4">Mosaic</text>
+    <text x="109" y="576" fill="#e1e5e6" font-size="30" font-weight="600">Every stream in its place.</text>
+    <text x="109" y="646" fill="#a8b2bb" font-size="27">Tile Twitch, Kick, YouTube and other web apps</text>
+    <text x="109" y="688" fill="#a8b2bb" font-size="27">across your monitors. Fullscreen stays in its tile.</text>
+    <g font-family="JetBrainsMono Nerd Font, monospace" font-size="20" fill="#d7e4e7">
+      <rect x="108" y="753" width="269" height="54" rx="6" fill="#202c35" stroke="#4b626d"/>
+      <text x="128" y="788">▦  Monitor aware</text>
+      <rect x="391" y="753" width="236" height="54" rx="6" fill="#202c35" stroke="#4b626d"/>
+      <text x="411" y="788">⛶  Tile fullscreen</text>
+      <rect x="108" y="823" width="235" height="54" rx="6" fill="#202c35" stroke="#4b626d"/>
+      <text x="128" y="858">♫  Per tile audio</text>
+      <rect x="357" y="823" width="270" height="54" rx="6" fill="#202c35" stroke="#4b626d"/>
+      <text x="377" y="858">↻  Stream recovery</text>
+      <rect x="108" y="915" width="604" height="67" rx="6" fill="#101820" stroke="#607985"/>
+      <text x="129" y="957" font-size="19">$ omarchy plugin add github.com/mateuspim/omarchy-mosaic</text>
+    </g>
+  </g>
+
+  <g transform="translate(830 139)" font-family="Liberation Sans, sans-serif">
+    <rect x="0" y="0" width="988" height="759" rx="22" fill="#05080c" stroke="#617985" stroke-width="3"/>
+    <rect x="15" y="15" width="958" height="45" rx="8" fill="#17212a"/>
+    <circle cx="41" cy="37" r="7" fill="#d0837b"/><circle cx="65" cy="37" r="7" fill="#caaa6a"/><circle cx="89" cy="37" r="7" fill="#84ad9c"/>
+    <text x="420" y="43" font-size="18" fill="#b6c6cc">streams · workspace 9 · grid</text>
+    <g stroke="#6a8490" stroke-width="2">
+      <rect x="25" y="72" width="460" height="309" rx="8" fill="url(#purple)"/>
+      <rect x="503" y="72" width="460" height="309" rx="8" fill="url(#blue)"/>
+      <rect x="25" y="399" width="460" height="309" rx="8" fill="url(#gold)"/>
+      <rect x="503" y="399" width="460" height="309" rx="8" fill="url(#green)"/>
+    </g>
+    <g fill="none" stroke="#ffffff" stroke-opacity=".15" stroke-width="2">
+      <path d="M29 267q90-73 173-32t147-29q75-55 131 19M508 265q120-90 196-55t254-50"/>
+      <path d="M29 616q120-83 210-25t240-42M508 608q100-60 215-36t234-83"/>
+    </g>
+    <g fill="#ffffff" opacity=".75">
+      <circle cx="255" cy="224" r="39" opacity=".12"/><path d="M247 203l29 21-29 21z"/>
+      <circle cx="733" cy="224" r="39" opacity=".12"/><path d="M725 203l29 21-29 21z"/>
+      <circle cx="255" cy="551" r="39" opacity=".12"/><path d="M247 530l29 21-29 21z"/>
+      <circle cx="733" cy="551" r="39" opacity=".12"/><path d="M725 530l29 21-29 21z"/>
+    </g>
+    <g font-size="20" fill="#e9eff0">
+      <text x="47" y="111">●  Twitch</text><text x="525" y="111">●  YouTube</text>
+      <text x="47" y="438">●  Kick</text><text x="525" y="438">●  Music</text>
+    </g>
+    <g fill="#d5e2e4" font-size="16"><text x="48" y="351">LIVE  ·  contained</text><text x="526" y="351">LIVE  ·  contained</text><text x="48" y="678">LIVE  ·  contained</text><text x="526" y="678">playing  ·  contained</text></g>
+    <rect x="15" y="720" width="958" height="24" rx="6" fill="#1b2630"/>
+    <text x="32" y="737" font-size="14" fill="#96acb5">Mosaic   ▦ Grid   ♫ Focus audio   ↻ Recover streams</text>
+  </g>
+  <text x="1745" y="1037" font-family="Liberation Sans, sans-serif" font-size="18" fill="#8296a1">Illustration</text>
+</svg>

@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Add a README preview illustration and document security, browser permissions,
+  local state, and extension setup.
+- Reject oversized native-messaging frames before reading their bodies, and
+  preserve a native-host registration that another program has replaced.
+
 ## 1.5.2 (2026-10-18)
 
 - **Fixed**: tiles failed to open with "the default browser is not

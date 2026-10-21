@@ -142,8 +142,34 @@ class Setup(unittest.TestCase):
         digest = hashlib.sha256(base64.b64decode(key)).hexdigest()[:32]
         self.assertEqual("".join(chr(ord("a") + int(c, 16)) for c in digest), host.EXTENSION_ID)
 
+    def test_remove_keeps_a_replaced_host_registration(self):
+        host.setup(self.extension)
+        path = host.host_file("chromium")
+        replacement = {"name": "pym.mosaic", "path": "/another/host"}
+        with open(path, "w") as file:
+            json.dump(replacement, file)
+        host.remove(self.extension)
+        self.assertEqual(load(path), replacement)
+
 
 class Relay(unittest.TestCase):
+    def test_rejects_an_oversized_frame_before_reading_its_body(self):
+        class HeaderOnly(io.BytesIO):
+            def read(self, size=-1):
+                if size > 4:
+                    raise AssertionError("oversized body was read")
+                return super().read(size)
+
+        class Input:
+            buffer = HeaderOnly(struct.pack("<I", host.MAX_MESSAGE + 1))
+
+        saved = sys.stdin
+        sys.stdin = Input()
+        try:
+            host.Relay().browser_loop()
+        finally:
+            sys.stdin = saved
+
     def test_frames_messages_for_the_browser(self):
         relay = host.Relay()
         out = io.BytesIO()

@@ -1,5 +1,7 @@
 # Mosaic for Omarchy
 
+![Illustration of Omarchy Mosaic arranging Twitch, YouTube, Kick and Music in four contained tiles](preview.png)
+
 Web apps such as Twitch, Kick, and YouTube, tiled as a mosaic on Hyprland,
 where a video's fullscreen stays inside its tile. It's an Omarchy shell
 plugin: a service plus a bar widget. The panel lists your mosaic sessions and
@@ -218,6 +220,33 @@ button copies `chrome://extensions/` for the address bar instead. Or
 restart the browser (the tab's Restart button, B), which also loads it. The same steps are in the IPC: `omarchy-shell pym.mosaic
 extension` (status as JSON), `extensionEnable`, `extensionVerify`, and
 `extensionDisable`.
+
+## Security and privileges
+
+Mosaic runs as your user in the Omarchy shell. It does not use `sudo` or install
+packages. Tiles load the sites you choose in your
+Chromium-family browser; those sites make their usual network requests.
+
+- **Browser access:** the optional extension requests `tabs`, `scripting`,
+  `nativeMessaging`, `storage`, and access to all URLs because Mosaic accepts
+  arbitrary web apps and watches their video and volume. It reports app-window
+  tab URLs, titles, favicons, audio and stream state to the local shell; it
+  does not send them to a Mosaic server. The native host accepts only the
+  extension ID in `extension/manifest.json`.
+- **Local changes:** enabling the extension registers `pym.mosaic` as a native
+  messaging host in browser profiles found under `~/.config` and adds its
+  folder to existing browser flags files. Turn off removes Mosaic's own host
+  registration and its flags entry. The plugin also stores tile URLs in
+  `~/.local/state/mosaic/tiles.json`, saved sessions and their URLs in
+  `saved.json`, and layouts in `layouts.json` (or under `$XDG_STATE_HOME`).
+  Do not save a URL containing a private token if you do not want that token
+  stored in these files. The bridge socket and tab mapping live under
+  `$XDG_RUNTIME_DIR`.
+- **Commands:** Mosaic launches the selected Chromium-family browser through
+  `uwsm-app`, runs `hyprctl` for tile and layout actions, and uses
+  `omarchy-webapp-install` only when you save a tile as a web app. Processes
+  receive argument lists; user input is not passed through a shell. The
+  web-app installer fetches a site's icon when you request a save.
 
 ## Compatibility
 
