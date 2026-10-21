@@ -1,0 +1,8 @@
+# Sample Omarchy theme for offscreen previews: the shell's built-in defaults
+# with Mosaic's slate teal as the accent, so README captures carry the brand
+# colour. Inside Omarchy the panel follows the user's own theme.
+mode = "dark"
+accent = "#9cbec9"
+foreground = "#cacccc"
+background = "#101315"
+muted = "#707880"

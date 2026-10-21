@@ -1,0 +1,148 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="3840" height="2160" viewBox="0 0 3840 2160">
+<!-- Editable source of the README hero. Render: rsvg-convert -o preview.png docs/brand/preview.svg
+     (see docs/runbooks/development.md#refresh-the-preview). The panel captures in
+     captures/ are offscreen renders with sample tiles (tests/preview.sh); the
+     monitor and its tiles are drawn here. Colours: docs/branding.md. -->
+<defs>
+  <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#0b1015"/><stop offset=".58" stop-color="#0a111b"/><stop offset="1" stop-color="#102236"/>
+  </linearGradient>
+  <radialGradient id="tealGlow" cx="0" cy="1" r="1">
+    <stop offset="0" stop-color="#4f7f8f" stop-opacity=".30"/><stop offset=".64" stop-color="#4f7f8f" stop-opacity="0"/>
+  </radialGradient>
+  <radialGradient id="blueGlow" cx="1" cy="0" r="1">
+    <stop offset="0" stop-color="#264d78" stop-opacity=".27"/><stop offset=".7" stop-color="#264d78" stop-opacity="0"/>
+  </radialGradient>
+  <pattern id="dots" width="56" height="56" patternUnits="userSpaceOnUse">
+    <circle cx="5" cy="5" r="2.4" fill="#7a8f9d" opacity=".16"/>
+  </pattern>
+  <linearGradient id="line" x1="0" x2="1"><stop stop-color="#9cbec9"/><stop offset="1" stop-color="#9cbec9" stop-opacity="0"/></linearGradient>
+  <filter id="shadow" x="-.2" y="-.2" width="1.5" height="1.6"><feGaussianBlur stdDeviation="45"/></filter>
+  <!-- Tile backdrops: muted stand-ins for three sites' players, not their branding. -->
+  <linearGradient id="purple" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#3c2955"/><stop offset="1" stop-color="#17172e"/></linearGradient>
+  <linearGradient id="green" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#19443e"/><stop offset="1" stop-color="#0f2227"/></linearGradient>
+  <linearGradient id="blue" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#16384a"/><stop offset="1" stop-color="#0b1827"/></linearGradient>
+  <linearGradient id="screen" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#0d1419"/><stop offset="1" stop-color="#091015"/></linearGradient>
+  <symbol id="mark" viewBox="0 0 256 256">
+    <!-- icon.svg, inlined so the hero renders standalone; keep in sync. -->
+    <rect x="11" y="11" width="234" height="234" rx="42" fill="#101a20" stroke="#9dbbc5" stroke-width="20" stroke-linejoin="round"/>
+    <path d="M128 11V245M11 128H245" stroke="#9dbbc5" stroke-width="20"/>
+    <rect x="31" y="31" width="77" height="77" rx="16" fill="#a8c5ce"/>
+    <rect x="148" y="31" width="77" height="77" rx="16" fill="#83a8b4"/>
+    <rect x="31" y="148" width="77" height="77" rx="16" fill="#7899a7"/>
+    <rect x="148" y="148" width="77" height="77" rx="16" fill="#b9cbd0"/>
+  </symbol>
+  <!-- A video frame: soft hills and a play button, scaled into each tile. -->
+  <symbol id="video" viewBox="0 0 1600 900">
+    <path d="M0 640Q260 470 520 560T1040 520T1600 430V900H0Z" fill="#ffffff" opacity=".06"/>
+    <path d="M0 760Q330 610 700 700T1600 600V900H0Z" fill="#ffffff" opacity=".05"/>
+    <path d="M0 640Q260 470 520 560T1040 520T1600 430" fill="none" stroke="#ffffff" stroke-opacity=".18" stroke-width="6"/>
+    <circle cx="800" cy="430" r="120" fill="#ffffff" opacity=".12"/>
+    <path d="M765 365L870 430L765 495Z" fill="#ffffff" opacity=".8"/>
+  </symbol>
+</defs>
+
+<!-- Background: the house navy gradient, a slate-teal glow bottom-left, a dot grid. -->
+<rect width="3840" height="2160" fill="url(#background)"/>
+<rect width="3840" height="2160" fill="url(#tealGlow)"/>
+<rect width="3840" height="2160" fill="url(#blueGlow)"/>
+<rect width="3840" height="2160" fill="url(#dots)"/>
+<rect width="3840" height="2160" fill="#070b0f" opacity=".13"/>
+
+<!-- Left column: mark, wordmark, tagline, subline, feature chips, install box. -->
+<use href="#mark" x="198" y="398" width="232" height="232"/>
+<text x="490" y="600" font-family="JetBrainsMono Nerd Font,JetBrains Mono,monospace" font-size="250" font-weight="700" letter-spacing="-6" fill="#9cbec9">Mosaic</text>
+<text x="208" y="816" font-family="JetBrainsMono Nerd Font,JetBrains Mono,monospace" font-size="88" font-weight="700" fill="#e9f0f5">Every stream in its place.</text>
+<g font-family="JetBrainsMono Nerd Font,JetBrains Mono,monospace" font-size="48" fill="#9ca9b4">
+  <text x="208" y="932">Tile Twitch, Kick, YouTube or any web app across</text>
+  <text x="208" y="1000">your monitors, with fullscreen kept in each tile.</text>
+</g>
+<!-- Chip icons are Nerd Font glyphs (JetBrainsMono Nerd Font). -->
+<g font-family="JetBrainsMono Nerd Font,JetBrains Mono,monospace" font-size="34" fill="#e6edf0">
+  <g fill="#101b22" stroke="#35454d" stroke-width="3">
+    <rect x="208" y="1095" width="581" height="104"/>
+    <rect x="811" y="1095" width="418" height="104"/>
+    <rect x="1251" y="1095" width="438" height="104"/>
+    <rect x="208" y="1220" width="479" height="104"/>
+    <rect x="709" y="1220" width="418" height="104"/>
+    <rect x="1149" y="1220" width="418" height="104"/>
+  </g>
+  <g fill="#9cbec9" font-size="40">
+    <text x="242" y="1163">&#xF0293;</text>
+    <text x="845" y="1163">&#xF057E;</text>
+    <text x="1285" y="1163">&#xF0453;</text>
+    <text x="242" y="1288">&#xF0570;</text>
+    <text x="743" y="1288">&#xF0193;</text>
+    <text x="1183" y="1288">&#xF030C;</text>
+  </g>
+  <text x="300" y="1159">Fullscreen in its tile</text>
+  <text x="903" y="1159">Per-tile audio</text>
+  <text x="1343" y="1159">Stream recovery</text>
+  <text x="300" y="1284">Workspace layouts</text>
+  <text x="801" y="1284">Saved sessions</text>
+  <text x="1241" y="1284">Keyboard first</text>
+</g>
+<rect x="208" y="1440" width="1640" height="140" fill="#0b1218" stroke="#3c505c" stroke-width="3"/>
+<text x="258" y="1525" font-family="JetBrainsMono Nerd Font,JetBrains Mono,monospace" font-size="44" fill="#9cbec9">$</text>
+<text x="316" y="1525" font-family="JetBrainsMono Nerd Font,JetBrains Mono,monospace" font-size="44" fill="#e8eff4">omarchy plugin add github.com/mateuspim/omarchy-mosaic</text>
+<path d="M209 1712H1395" stroke="url(#line)" stroke-width="5"/>
+<text x="208" y="1795" font-family="JetBrainsMono Nerd Font,JetBrains Mono,monospace" font-size="36" letter-spacing="3" fill="#71838f">OMARCHY  /  HYPRLAND  /  QUICKSHELL</text>
+
+<!-- Right: a monitor showing workspace 8 in the "Three" layout (25 / 50 / 25,
+     middle main), with the middle tile's video fullscreen inside its tile. -->
+<g transform="translate(2180 190)">
+  <rect x="30" y="44" width="1560" height="910" rx="34" fill="#000" opacity=".55" filter="url(#shadow)"/>
+  <rect width="1560" height="900" rx="30" fill="#141c22" stroke="#3a4c56" stroke-width="4"/>
+  <rect x="22" y="22" width="1516" height="856" rx="12" fill="url(#screen)"/>
+  <!-- The Omarchy bar, with workspace 8 active and the Mosaic widget. -->
+  <rect x="22" y="22" width="1516" height="46" rx="12" fill="#0b1115"/>
+  <g font-family="JetBrainsMono Nerd Font,JetBrains Mono,monospace" font-size="22" fill="#6f7f89">
+    <text x="48" y="53">1  2  3  4  5  6  7  <tspan fill="#9cbec9" font-weight="700">8</tspan>  9</text>
+    <text x="716" y="53" fill="#c6d1d7">Wed 21:30</text>
+    <text x="1356" y="53">&#xF057E;  &#xF05A9;</text>
+    <text x="1480" y="54" fill="#9cbec9" font-size="26">&#xF0570;</text>
+  </g>
+  <!-- Tiles: gaps of 14, inside the 1516 x 796 work area below the bar. -->
+  <g font-family="JetBrainsMono Nerd Font,JetBrains Mono,monospace">
+    <!-- Left: Kick, a 16:9 picture letterboxed in a tall tile. -->
+    <g transform="translate(36 82)">
+      <rect width="365" height="782" rx="8" fill="#0a0f12" stroke="#4a5d66" stroke-width="2"/>
+      <rect x="2" y="288" width="361" height="203" fill="url(#green)"/>
+      <use href="#video" x="2" y="288" width="361" height="203"/>
+      <circle cx="26" cy="36" r="6" fill="#d9e4e8"/><text x="42" y="44" font-size="24" fill="#e9eff0">Kick</text>
+      <text x="22" y="756" font-size="19" fill="#9fb0b8">LIVE · contained</text>
+    </g>
+    <!-- Middle: Twitch, the main zone, its video fullscreen inside the tile. -->
+    <g transform="translate(415 82)">
+      <rect width="730" height="782" rx="8" fill="#07090b" stroke="#9cbec9" stroke-width="4"/>
+      <rect x="2" y="186" width="726" height="410" fill="url(#purple)"/>
+      <use href="#video" x="2" y="186" width="726" height="410"/>
+      <circle cx="30" cy="40" r="7" fill="#d9e4e8"/><text x="48" y="49" font-size="28" fill="#e9eff0">Twitch</text>
+      <rect x="440" y="18" width="270" height="46" rx="6" fill="#0b1218" opacity=".85" stroke="#9cbec9" stroke-width="2"/>
+      <text x="458" y="50" font-size="22" fill="#9cbec9">&#xF0293;  fullscreen</text>
+      <text x="704" y="752" font-size="22" fill="#d5e2e4" text-anchor="end">video fullscreen · stays in its tile</text>
+    </g>
+    <!-- Right: YouTube, letterboxed and muted. -->
+    <g transform="translate(1159 82)">
+      <rect width="365" height="782" rx="8" fill="#0a0f12" stroke="#4a5d66" stroke-width="2"/>
+      <rect x="2" y="288" width="361" height="203" fill="url(#blue)"/>
+      <use href="#video" x="2" y="288" width="361" height="203"/>
+      <circle cx="26" cy="36" r="6" fill="#d9e4e8"/><text x="42" y="44" font-size="24" fill="#e9eff0">YouTube</text>
+      <text x="22" y="756" font-size="19" fill="#9fb0b8">&#xF0581; muted · contained</text>
+    </g>
+  </g>
+  <rect x="700" y="900" width="160" height="70" fill="#141c22"/>
+  <rect x="560" y="966" width="440" height="22" rx="11" fill="#141c22" stroke="#3a4c56" stroke-width="3"/>
+</g>
+
+<!-- Offscreen captures of the real panel (sample tiles, no real accounts), each
+     over a wide soft shadow. -->
+<g transform="translate(1990 820) rotate(-2.5 380 600)">
+  <rect x="26" y="38" width="760" height="1195" rx="22" fill="#000" opacity=".6" filter="url(#shadow)"/>
+  <image width="760" height="1195" href="captures/tiles.png"/>
+</g>
+<g transform="translate(3020 1150) rotate(2.5 300 370)">
+  <rect x="24" y="34" width="640" height="790" rx="20" fill="#000" opacity=".6" filter="url(#shadow)"/>
+  <image width="640" height="790" href="captures/layouts.png"/>
+</g>
+</svg>
