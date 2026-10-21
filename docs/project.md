@@ -42,7 +42,7 @@ This repository replaces the earlier Rust CLI and its planned terminal UI
    keybindings and other tools.
 
 The first milestone is parity with the Rust CLI. After that the scope is
-intentionally broad; see `docs/ROADMAP.md`.
+intentionally broad; see `docs/roadmap.md`.
 
 ## Out of scope
 

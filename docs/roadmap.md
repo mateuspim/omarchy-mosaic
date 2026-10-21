@@ -3,7 +3,7 @@
 ## Done
 
 - Proved fullscreen containment with Chromium-family `--app` windows and
-  Hyprland fullscreen state `0/2` (see `docs/ARCHITECTURE.md`).
+  Hyprland fullscreen state `0/2` (see `docs/architecture.md`).
 - Rust CLI `mosaic` with live sessions: `add`, `list`, `remove`, `focus`,
   `close`, `contain`, `webapps`, `monitors`.
 - This bar widget: lists sessions, adds web apps or URLs, focuses and removes
@@ -41,7 +41,7 @@ roughly in order of value; confirm priorities with the user before starting:
   double-click, and theater modes; then 4–6 simultaneous streams for CPU/GPU
   load. Record results per site. **Done (2026-10-06):** every check stays
   in the tile on all three sites, and six streams cost about one CPU core
-  with no frame loss (see "Real players" in `docs/ARCHITECTURE.md`).
+  with no frame loss (see "Real players" in `docs/architecture.md`).
   **Still open:** Escape by hand, and load at higher qualities on a
   landscape monitor.
 - **Layouts.** A dedicated workspace per session, and layouts the user picks:
@@ -58,7 +58,7 @@ roughly in order of value; confirm priorities with the user before starting:
   one browser process, and Chromium plays every tab through one audio
   service process, so its streams are identical ("Chromium", "Playback",
   the audio service's PID; checked 2026-09-28). The route is a browser
-  extension instead (see "The browser extension" in `docs/ARCHITECTURE.md`).
+  extension instead (see "The browser extension" in `docs/architecture.md`).
   **Done:** the extension, the native host and bridge, the setup (Enable,
   restart, Verify) with a warning in the panel, per-tile mute with a
   playing/silent/muted indicator, and muting every tile but the focused
@@ -70,13 +70,13 @@ roughly in order of value; confirm priorities with the user before starting:
   (2026-10-07):** the Saved tab, save from a session's header (W), restore
   of what's missing, an Open at login switch per session, volume and mute,
   and `mosaic save`/`restore`/`saved`/`forget`/`login` (see "Saved
-  sessions" in `docs/ARCHITECTURE.md`).
+  sessions" in `docs/architecture.md`).
 - **Stream recovery.** Twitch drops streams now and then (the user's
   report, 2026-10-07: "it just drops", likely a decode failure), and only
   a reload brings them back. **Built (2026-10-08):** extension 0.5.1
   watches each tile's video and reports `playing`, `idle`, or `dropped`;
   the service reloads dropped tiles on the chosen sites with backoff (see
-  "Stream recovery" in `docs/ARCHITECTURE.md`). **Next:** check it on a
+  "Stream recovery" in `docs/architecture.md`). **Next:** check it on a
   real Twitch drop with `mosaic streams`, and tune the thresholds.
 - **Monitor awareness.** Reflow on monitor changes, portrait-friendly
   layouts, and moving a whole session between monitors.

@@ -9,8 +9,8 @@ and it took over the whole project from the Rust CLI, now retired in
 
 **Start with `docs/HANDOFF.md`** for where to pick up, the hard-won facts,
 and how to verify. It is a local working note, kept out of git
-(`.gitignore`): update it as work goes, but never commit it. Read `docs/PROJECT.md`, `docs/ARCHITECTURE.md`, and
-`docs/ROADMAP.md` before making architectural choices.
+(`.gitignore`): update it as work goes, but never commit it. Read `docs/project.md`, `docs/architecture.md`, and
+`docs/roadmap.md` before making architectural choices.
 
 ## Decisions (settled with the user, 2026-09-27)
 
@@ -22,12 +22,12 @@ and how to verify. It is a local working note, kept out of git
   wrapper that keeps the `mosaic` command name.
 - The bar panel replaces the planned terminal UI for good.
 - Parity with the CLI comes first. After that the scope is meant to grow a
-  lot (see `docs/ROADMAP.md`, "Beyond parity").
+  lot (see `docs/roadmap.md`, "Beyond parity").
 
 ## Working conventions
 
 - Use `master` as the default branch.
-- The fullscreen-containment behavior in `docs/ARCHITECTURE.md` is the core
+- The fullscreen-containment behavior in `docs/architecture.md` is the core
   requirement. Re-run the containment check after any change to how tiles
   are launched or tiled.
 - Keep the panel keyboard-first and visually cohesive with Omarchy. Build it
