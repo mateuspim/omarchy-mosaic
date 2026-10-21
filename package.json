@@ -1,7 +1,11 @@
 {
   "name": "omarchy-mosaic",
   "version": "1.5.2",
+  "author": "Mateus Pim",
+  "license": "MIT",
   "private": true,
   "type": "module",
-  "scripts": { "test": "node tests/model.test.js && lua tests/layouts_test.lua && python3 tests/native_host_test.py" }
+  "scripts": {
+    "test": "node tests/model.test.js && lua tests/layouts_test.lua && python3 tests/native_host_test.py"
+  }
 }
