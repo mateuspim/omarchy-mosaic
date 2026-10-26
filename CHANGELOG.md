@@ -1,8 +1,8 @@
 # Changelog
 
-## Unreleased
+## 1.6.0 (2026-10-26)
 
-- **New tiles open on the focused workspace**: a switch on the Tiles tab
+- **New tiles open on the focused workspace**: a switch ("New tiles here") on the Tiles tab
   (O). With it on and no session typed, a new tile joins the session on
   the workspace you're on, or starts one there (`ws-10`), instead of going
   back to the workspace the selected tile's session is on. `mosaic add`
