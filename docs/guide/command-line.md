@@ -9,6 +9,7 @@ mosaic add --session streams twitch kick.com/somechannel
 mosaic list            # or: mosaic list --json
 mosaic remove 2
 mosaic focus 1
+mosaic move 2 streams                  # into another session, on its workspace
 mosaic close --session streams
 mosaic contain
 mosaic layout                          # workspaces' layouts and your own

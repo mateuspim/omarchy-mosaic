@@ -38,6 +38,7 @@ QtObject {
   property bool autoContain: false
   property bool recoverStreams: true
   property string recoverSites: Model.RECOVERY_SITES
+  property bool addOnFocusedWorkspace: false
 
   property bool busy: false
   property string busyLabel: ""

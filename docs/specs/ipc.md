@@ -46,11 +46,12 @@ the old CLI's command line. The user-facing walkthrough is in the
 
 | Function | Does |
 | --- | --- |
-| `add(targets, session, monitor, browser)` | Opens 1–9 URLs or web app names as tiles in `session` (default `default`), on the session's workspace, else `monitor`'s or the focused monitor's current workspace. All targets are resolved before any opens. `browser` overrides the widget's **Browser** setting. |
+| `add(targets, session, monitor, browser)` | Opens 1–9 URLs or web app names as tiles in `session` (default `default`, or with `addOnFocusedWorkspace` the focused workspace's session, see [settings](settings.md)), on the session's workspace, else `monitor`'s or the focused monitor's current workspace. All targets are resolved before any opens. `browser` overrides the widget's **Browser** setting. |
 | `replace(tile, target, browser)` | Opens `target` in `tile`'s place: in the same tab when the extension can navigate it, else a new window in the old one's slot. |
 | `saveApp(tile, name)` | Saves a tile no web app matches as an Omarchy web app for its site root (`name` defaults to the last part of the page title). |
 | `remove(tiles)` | Closes tiles (one per line). |
 | `focus(tile)` | Focuses a tile, switching to its workspace. |
+| `move(tile, session)` | Retags a tile into `session` (removes `mosaic-OLD`, adds `mosaic-SESSION`) and updates its `tiles.json` record. When the session is tiled on another workspace the tile moves there and is contained again; a new session leaves it in place. Refused for a fullscreen tile or its own session. |
 | `close(session)` | Closes a session's tiles, or every tile for `""`. |
 | `contain(session)` | Re-applies fullscreen state `0/2` to uncontained tiles, of one session or all. |
 | `layout(workspace, name)` | Sets a workspace's layout: `grid`, `stack`, `main`, `fit`, a custom layout's name or slug, or `default`. |
@@ -100,6 +101,7 @@ arguments itself, forwards them quoted, polls `result` for jobs (every
 | `mosaic list [--json]` | `listText` / `list` |
 | `mosaic remove TILE…` | `remove` |
 | `mosaic focus TILE` | `focus` |
+| `mosaic move TILE SESSION` | `move` |
 | `mosaic close [--session S]` | `close` |
 | `mosaic contain [--session S]` | `contain` |
 | `mosaic layout` | `layouts` |

@@ -15,6 +15,8 @@ ShellRoot {
   // view: the panel tab; cursor: the selected row, or -1 for none.
   readonly property var scenes: [
     { name: "tiles", view: "tiles", cursor: 1, settings: { audioFollowsFocus: false } },
+    { name: "move", view: "tiles", cursor: 1, settings: {}, move: true },
+    { name: "move-new", view: "tiles", cursor: 1, settings: {}, move: true, typing: true },
     { name: "layouts", view: "layouts", cursor: 2, settings: {} },
     { name: "saved", view: "saved", cursor: 0, settings: {} },
     { name: "extension", view: "extension", cursor: -1, settings: {} }
@@ -70,6 +72,9 @@ ShellRoot {
     widget.setView(scene.view)
     widget.cursor = Math.max(0, scene.cursor)
     widget.cursorActive = scene.cursor >= 0
+    widget.moveTile = null
+    if (scene.move) widget.startMove(widget.tiles[scene.cursor])
+    if (scene.typing) widget.startMoveTyping()
   }
 
   function capture() {

@@ -23,6 +23,7 @@
       "hiddenWebapps": "",
       "audioFollowsFocus": false,
       "recoverStreams": true,
+      "addOnFocusedWorkspace": false,
       "recoverSites": "twitch.tv, kick.com"
     },
     "schema": [
