@@ -196,6 +196,10 @@ Scope {
   // reports each page's video.
   property bool recoverStreams: true
   property string recoverSites: Model.RECOVERY_SITES
+
+  // The widget's setting: a tile added without a session joins the one on
+  // the focused workspace, else a new one there; see Model.focusedSession.
+  property bool addOnFocusedWorkspace: false
   readonly property string recoveringSites: recoverStreams ? recoverSites : ""
   // Model.planRecovery's state by address, and its events, newest first
   // (Model.recoveryLog), for the panel and `mosaic streams`.
@@ -377,6 +381,12 @@ Scope {
     return startAction(label || "Removing " + Model.stringList(targets).join(", "), function(list) { return Model.planRemove(list, targets) })
   }
 
+  // `mosaic move TILE SESSION`: puts a tile in another session, on that
+  // session's workspace; see Model.planMove.
+  function moveTile(target, session, label) {
+    return startAction(label || "Moving tile " + target + " to " + session, function(list) { return Model.planMove(list, target, session) })
+  }
+
   // `mosaic close [--session NAME]`; "" closes every tile.
   function close(session, label) {
     return startAction(label || (session ? "Closing " + session : "Closing every tile"), function(list) { return Model.planClose(list, session) })
@@ -471,16 +481,17 @@ Scope {
   }
 
   // `mosaic add [--session NAME] [--monitor NAME] [--browser CMD] TARGET...`.
-  // `options` may hold `session` (default "default"), `monitor`, and
-  // `browser`, a Chromium-family command used instead of the default
-  // browser. Targets are resolved before anything opens, so a typo opens
+  // `options` may hold `session` (default "default", or with
+  // addOnFocusedWorkspace the focused workspace's, chosen once the monitors
+  // are read), `monitor`, and `browser`, a Chromium-family command used
+  // instead of the default browser. Targets are resolved before anything opens, so a typo opens
   // nothing; then each one is launched, found by its openwindow event,
   // tagged, recorded in tiles.json, tiled, and contained, in that order.
   function add(targets, options, label) {
     if (busy) return "Still busy: " + busyLabel
     var given = options || {}
-    var session = given.session ? String(given.session) : Model.DEFAULT_SESSION
-    if (Model.sessionName(session) !== session)
+    var session = given.session ? String(given.session) : addOnFocusedWorkspace ? "" : Model.DEFAULT_SESSION
+    if (session !== "" && Model.sessionName(session) !== session)
       return "Invalid session name " + JSON.stringify(session) + ": use up to 32 lowercase letters, digits, - or _"
     var resolved = Model.resolveAddTargets(targets, Model.shapeWebapps(webapps).apps)
     if (resolved.error) return resolved.error
@@ -496,7 +507,7 @@ Scope {
       program: "",
       address: ""
     }
-    begin(label || "Adding " + Model.stringList(targets).join(", ") + " to " + session)
+    begin(label || "Adding " + Model.stringList(targets).join(", ") + " to " + (session || "the focused workspace"))
     phase = "add-clients"
     runStep(["hyprctl", "-j", "clients"])
     return ""
@@ -853,7 +864,10 @@ Scope {
       pendingPlan = null
       if (result.error) return finishAction(result.error)
       pendingMessage = result.message
-      return runQueue(result.expressions, function() { root.finishAction("") })
+      return runQueue(result.expressions, function() {
+        if (result.record) return root.saveMovedRecord(result.record)
+        root.finishAction("")
+      })
     }
     if (phase === "restart-clients") {
       restartState.clientsText = text
@@ -895,8 +909,13 @@ Scope {
         phase = "restore-workspaces"
         return runStep(["hyprctl", "-j", "workspaces"])
       }
-      var chosen = Model.chooseWorkspace(Model.buildList(addState.clients, monitors, records), monitors,
-        addState.session, addState.monitor)
+      var addList = Model.buildList(addState.clients, monitors, records)
+      if (addState.session === "") {
+        var focused = Model.focusedSession(addList, monitors, addState.monitor)
+        if (focused.error) return finishAction(focused.error)
+        addState.session = focused.session
+      }
+      var chosen = Model.chooseWorkspace(addList, monitors, addState.session, addState.monitor)
       if (chosen.error) return finishAction(chosen.error)
       addState.workspace = chosen.workspace
       return chooseBrowser()
@@ -1008,6 +1027,16 @@ Scope {
     var record = { address: addState.address, session: addState.session, url: addState.urls[addState.next] }
     records = addState.old ? Model.replaceRecord(records, addState.old.address, record) : records.concat([record])
     afterQueue = then
+    actionTimeout.restart()
+    store.setText(Model.serializeStore(records))
+  }
+
+  // After a move, the store's record takes the tile's new session, so a
+  // restart lists it there before its tags are read again.
+  function saveMovedRecord(record) {
+    phase = "add-save"
+    records = Model.replaceRecord(records, record.address, record)
+    afterQueue = function() { root.finishAction("") }
     actionTimeout.restart()
     store.setText(Model.serializeStore(records))
   }
@@ -1510,6 +1539,8 @@ Scope {
     }
     // `mosaic save-app TILE [NAME]`.
     function saveApp(tile: string, name: string): string { return root.started(root.saveWebapp(tile, name)) }
+    // `mosaic move TILE SESSION`.
+    function move(tile: string, session: string): string { return root.started(root.moveTile(tile, session)) }
     // `mosaic remove TILE...`.
     function remove(tiles: string): string { return root.started(root.remove(Model.splitLines(tiles))) }
     // `mosaic focus TILE`.

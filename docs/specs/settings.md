@@ -28,4 +28,5 @@ switches save them.
 | --- | --- | --- | --- |
 | `audioFollowsFocus` | `false` | **Only the focused tile plays** (F) | Mute every tile but the focused one; focusing a non-tile window changes nothing. Turning it off unmutes every tile. |
 | `recoverStreams` | `true` | **Recover dropped streams** (Shift+R) | Reload dropped streams on `recoverSites`. |
+| `addOnFocusedWorkspace` | `false` | **New tiles open on the focused workspace** (O) | An add with no session joins the session tiled on the focused (or `--monitor`) workspace, else `default` when it has no tiles, else a new `ws-N` (`ws-N-2`, … when taken); see `Model.focusedSession`. |
 | `autoContain` | `false` (not in the manifest's defaults) | **Keep fullscreen in tiles** (Shift+C) | Contain tiles without being asked: at once when uncontained, and a truly fullscreen tile once another window takes focus. |

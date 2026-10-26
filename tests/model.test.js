@@ -5,7 +5,7 @@ import vm from "node:vm"
 const source = fs.readFileSync(new URL("../Model.js", import.meta.url), "utf8")
   .replace(/^\.pragma library\s*/m, "")
 const model = {}
-vm.runInNewContext(source + "\nObject.assign(model, {  parseSaved, serializeSaved, snapshotSession, missingTiles, parseWorkspaces, parseWorkspaceRules, restoreWorkspace, restoreLayout, savedRows, loginSessions, savedText, zoneCount, newCustom, zoneDividers, withDivider, withoutZone, withSplit, ordinal, reconcileVolumes, layoutWorkspaceRows, shownWorkspaceRows, windowCounts, customRows, freeLayoutName, layoutChoices, layoutLabel, nextLayout, parseLayoutName, hyprLayoutName, layoutSlug, normalizeCustom, visualZones, defineLua, withZoneSize, withMain, withName, customSummary, parseLayouts, serializeLayouts, layoutsLoadLua, layoutsLoaded, layoutRuleLua, sessionWorkspace, tileStates, planWorkspaceLayout, planSyncLayouts, planSaveCustom, planDeleteCustom, workspaceChoice, layoutsText, hiddenEntries, showWebapp, nameList, visibleWebapps, hideWebapp, sessionOf, clientFromIpc, parseStore, tileState, buildList, shapeList, parseClients, validAddress, dispatchExpression, listTiles, findTile, planFocus, planRemove, planClose, planContain, planAutoContain, restoreAfterMove, monitorFromIpc, parseMonitors, resolveAddTargets, chooseWorkspace, desktopId, isChromiumFamily, isAppWindow, parseOpenWindow, tileDispatches, pruneRecords, serializeStore, planReplace, replaceRecord, parseCursorPos, cursorMoveExpression, parseKeySpec, bindConflict, tileRect, listText, webappsText, monitorsText, splitLines, parseBridgeMessage, browserLabel, bridgeWindows, siteOf, matchTiles, otherTitles, keepTabs, tileTab, navigationSettled, extensionState, extensionNotice, extensionSteps, browserClass, browserPids, tileAudio, focusMutes, audioIcon, extensionFromManifest, parseStream, planRefullscreen, fullscreenKeyLua, tileShown, recoverySite, planRecovery, streamStatus, recoveryLog, streamsText, bridgeHas, stepVolume, parseVolume, swapBindLua, unbindLua, webappUrl, webappFromEntry, buildWebapps, shapeWebapps, findWebapp, resolveTarget, parseList, tileLabel, tileMeta, sessionPlace, tileApp, tileName, webappName, webappNameError, siteRoot, planSaveWebapp, tileSubtitle, tileInitial, layoutBoxes, keyHints, normalizeUrl, sessionName, summary, anyUncontained, parseManifest });", { model })
+vm.runInNewContext(source + "\nObject.assign(model, {  parseSaved, serializeSaved, snapshotSession, missingTiles, parseWorkspaces, parseWorkspaceRules, restoreWorkspace, restoreLayout, savedRows, loginSessions, savedText, zoneCount, newCustom, zoneDividers, withDivider, withoutZone, withSplit, ordinal, reconcileVolumes, layoutWorkspaceRows, shownWorkspaceRows, windowCounts, customRows, freeLayoutName, layoutChoices, layoutLabel, nextLayout, parseLayoutName, hyprLayoutName, layoutSlug, normalizeCustom, visualZones, defineLua, withZoneSize, withMain, withName, customSummary, parseLayouts, serializeLayouts, layoutsLoadLua, layoutsLoaded, layoutRuleLua, sessionWorkspace, tileStates, planWorkspaceLayout, planSyncLayouts, planSaveCustom, planDeleteCustom, workspaceChoice, layoutsText, hiddenEntries, showWebapp, nameList, visibleWebapps, hideWebapp, sessionOf, clientFromIpc, parseStore, tileState, buildList, shapeList, parseClients, validAddress, dispatchExpression, listTiles, findTile, planFocus, planRemove, planClose, planContain, planAutoContain, restoreAfterMove, monitorFromIpc, parseMonitors, resolveAddTargets, chooseWorkspace, monitorWorkspace, focusedSession, planMove, moveChoices, desktopId, isChromiumFamily, isAppWindow, parseOpenWindow, tileDispatches, pruneRecords, serializeStore, planReplace, replaceRecord, parseCursorPos, cursorMoveExpression, parseKeySpec, bindConflict, tileRect, listText, webappsText, monitorsText, splitLines, parseBridgeMessage, browserLabel, bridgeWindows, siteOf, matchTiles, otherTitles, keepTabs, tileTab, navigationSettled, extensionState, extensionNotice, extensionSteps, browserClass, browserPids, tileAudio, focusMutes, audioIcon, extensionFromManifest, parseStream, planRefullscreen, fullscreenKeyLua, tileShown, recoverySite, planRecovery, streamStatus, recoveryLog, streamsText, bridgeHas, stepVolume, parseVolume, swapBindLua, unbindLua, webappUrl, webappFromEntry, buildWebapps, shapeWebapps, findWebapp, resolveTarget, parseList, tileLabel, tileMeta, sessionPlace, tileApp, tileName, webappName, webappNameError, siteRoot, planSaveWebapp, tileSubtitle, tileInitial, layoutBoxes, keyHints, normalizeUrl, sessionName, summary, anyUncontained, parseManifest });", { model })
 
 // Values built inside the VM belong to another realm, so compare copies.
 const plain = value => JSON.parse(JSON.stringify(value))
@@ -309,6 +309,53 @@ assert.equal(model.chooseWorkspace(live, [], "fresh", "").error, "No active Hypr
 const floatingFirst = model.buildList([client("0x1", ["mosaic", "mosaic-x"], { floating: true, workspace: 7 }),
   client("0x2", ["mosaic", "mosaic-x"], { workspace: 8 })], [], [])
 assert.deepEqual(plain(model.chooseWorkspace(floatingFirst, screens, "x", "")), { workspace: 8 })
+
+assert.deepEqual(plain(model.monitorWorkspace(screens, "")), { workspace: 1 })
+assert.deepEqual(plain(model.monitorWorkspace(screens, "DP-4")), { workspace: 10 })
+assert.deepEqual(plain(model.monitorWorkspace(screens, "DP-9")), { error: 'Monitor "DP-9" is not active' })
+// Focused on DP-5 (workspace 1, where streams is), or named DP-4 (news).
+assert.deepEqual(plain(model.focusedSession(live, screens, "")), { session: "streams" })
+assert.deepEqual(plain(model.focusedSession(live, screens, "DP-4")), { session: "news" })
+assert.equal(model.focusedSession(live, [], "").error, "No active Hyprland monitors")
+// The reported bug: default on workspace 9, the user on workspace 10.
+const onTen = [{ name: "DP-4", focused: true, activeWorkspace: 10 }]
+const defaultOnNine = model.buildList([client("0x1", ["mosaic", "mosaic-default"], { workspace: 9 })], [], [])
+assert.deepEqual(plain(model.focusedSession(defaultOnNine, onTen, "")), { session: "ws-10" })
+assert.deepEqual(plain(model.chooseWorkspace(defaultOnNine, onTen, "ws-10", "")), { workspace: 10 })
+assert.deepEqual(plain(model.focusedSession(model.buildList([], [], []), onTen, "")), { session: "default" })
+// Only floating tiles on the focused workspace don't claim it.
+assert.deepEqual(plain(model.focusedSession(floatingFirst, [{ name: "DP-4", focused: true, activeWorkspace: 7 }], "")), { session: "default" })
+const wsTenElsewhere = model.buildList([client("0x1", ["mosaic", "mosaic-default"], { workspace: 9 }),
+  client("0x2", ["mosaic", "mosaic-ws-10"], { workspace: 3 })], [], [])
+assert.deepEqual(plain(model.focusedSession(wsTenElsewhere, onTen, "")), { session: "ws-10-2" })
+
+// Moving a tile: default on 9 and 10, ws-10 on 10 (the reported case).
+const mixed = model.buildList([client("0x1", ["mosaic", "mosaic-default"], { workspace: 9 }),
+  client("0x2", ["mosaic", "mosaic-default"], { workspace: 10 }), client("0x3", ["mosaic", "mosaic-ws-10"], { workspace: 10 })], [],
+  [{ address: "0x1", session: "default", url: "https://twitch.tv" }, { address: "0x2", session: "default", url: "https://youtube.com/" },
+    { address: "0x3", session: "ws-10", url: "https://youtube.com/" }])
+const strayTile = model.listTiles(mixed).find(tile => tile.address === "0x2")
+const toTen = model.planMove(mixed, "0x2", "ws-10")
+assert.deepEqual(plain(toTen.expressions), [
+  'hl.dsp.window.tag({ window = "address:0x2", tag = "-mosaic-default" })',
+  'hl.dsp.window.tag({ window = "address:0x2", tag = "+mosaic-ws-10" })'])
+assert.deepEqual(plain(toTen.record), { address: "0x2", session: "ws-10", url: "https://youtube.com/" })
+assert.equal(toTen.message, "Moved tile " + strayTile.index + " to ws-10.")
+const toNine = model.planMove(mixed, "0x3", "default")
+assert.deepEqual(plain(toNine.expressions.slice(2)), [
+  'hl.dsp.window.move({ window = "address:0x3", workspace = "9", follow = false })',
+  'hl.dsp.window.fullscreen_state({ internal = 0, client = 2, window = "address:0x3" })'])
+assert.equal(toNine.message.endsWith("to default on workspace 9."), true)
+assert.equal(model.planMove(mixed, "0x3", "fresh").expressions.length, 2)
+assert.equal(model.planMove(mixed, "0x3", "ws-10").error, "Tile " + model.findTile(model.listTiles(mixed), "0x3").index + " is already in ws-10")
+assert.equal(model.planMove(mixed, "0x9", "x").error, 'No mosaic tile "0x9"; see `mosaic list`')
+assert.equal(model.planMove(mixed, "0x3", "Bad Name").error.startsWith('Invalid session name "Bad Name"'), true)
+assert.equal(model.planMove(mixed, "0x3", "").error.startsWith("Invalid session name"), true)
+assert.equal(model.planMove(mixed, "0x3", 'x" }) os.execute("y').error.startsWith("Invalid session name"), true)
+const fullMix = model.buildList([client("0x1", ["mosaic", "mosaic-a"], { fullscreen: 2, fullscreenClient: 0 })], [], [])
+assert.equal(model.planMove(fullMix, "0x1", "b").error, "Leave fullscreen on that tile before moving it")
+assert.deepEqual(plain(model.moveChoices(mixed, strayTile)), [{ name: "ws-10", place: "workspace 10" }])
+assert.deepEqual(plain(model.moveChoices(mixed, null).map(c => c.name)), ["default", "ws-10"])
 
 assert.equal(model.desktopId("brave-origin.desktop\n"), "brave-origin")
 assert.equal(model.desktopId(""), "")
@@ -846,9 +893,10 @@ assert.equal(model.audioIcon({ audible: true, muted: false, volume: 0.3 }), "�
 
 // The key bar: a few keys per context, the rest behind "?".
 assert.deepEqual(plain(model.keyHints("tiles", false, 6)), [["↑↓", "select"], ["Enter", "focus"], ["S", "swap"], ["A", "add"], ["?", "more"]])
-assert.equal(model.keyHints("tiles", true, 6).length, 19)
+assert.equal(model.keyHints("tiles", true, 6).length, 21)
 assert.deepEqual(plain(model.keyHints("swap", false, 12))[0], ["1–9", "web app"])
 assert.deepEqual(plain(model.keyHints("adding", false, 0)), [["Enter", "add"], ["Esc", "close"]])
+assert.deepEqual(plain(model.keyHints("moving", false, 2)), [["1–2", "session"], ["N", "new session"], ["Esc", "cancel"]])
 assert.deepEqual(plain(model.keyHints("extension", false, 3)), [["O", "extensions page"], ["V", "verify"], ["?", "more"]])
 assert.deepEqual(plain(model.keyHints("hidden", true, 3)).slice(-2), [["H/L", "tabs"], ["?", "fewer"]])
 assert.deepEqual(plain(model.keyHints("nonsense", false, 0)).at(-1), ["?", "more"])

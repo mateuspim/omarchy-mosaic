@@ -137,9 +137,9 @@
 
 <!-- Offscreen captures of the real panel (sample tiles, no real accounts), each
      over a wide soft shadow. -->
-<g transform="translate(1990 820) rotate(-2.5 380 600)">
-  <rect x="26" y="38" width="760" height="1195" rx="22" fill="#000" opacity=".6" filter="url(#shadow)"/>
-  <image width="760" height="1195" href="captures/tiles.png"/>
+<g transform="translate(1990 862) rotate(-2.5 380 558)">
+  <rect x="26" y="38" width="760" height="1115" rx="22" fill="#000" opacity=".6" filter="url(#shadow)"/>
+  <image width="760" height="1115" href="captures/tiles.png"/>
 </g>
 <g transform="translate(3020 1150) rotate(2.5 300 370)">
   <rect x="24" y="34" width="640" height="790" rx="20" fill="#000" opacity=".6" filter="url(#shadow)"/>

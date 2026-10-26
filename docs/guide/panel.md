@@ -13,12 +13,17 @@ Click the icon, or middle-click it to refresh.
 | G | Cycle the selected tile's session through the layouts: Grid, Stack, Main + small, 16:9 fit, and back to Hyprland's own |
 | S | Swap the selected tile's web app: the tile's card opens a picker: a web app (1–9), or its address to edit (A, then Enter). Esc cancels |
 | I | Save the selected tile as a web app, when no web app matches it (a tile opened from a typed address, such as `music.youtube.com`): its card asks for the name, prefilled from the page title, and Enter installs an Omarchy web app for the site with its icon. Esc cancels |
+| T | Move the selected tile to another session: its card lists the other sessions (1–9, with their workspaces), or N types a new name (Enter moves). It joins that session's workspace; a new session keeps it where it is. Esc cancels |
 | X or D | Remove the selected tile |
 | Shift+D | Close the selected tile's session |
 | 1–9 | Add that web app to the session |
 | A | Type a URL or web app name to add (Enter adds, Esc returns to the list) |
 | C | Turn fullscreen containment back on |
 | Shift+R | Turn "Recover dropped streams" on or off |
+| O | Turn "New tiles open on the focused workspace" on or off |
+
+The switches for the whole mosaic sit two to a line under the tabs, each
+with a short name, on or off, and its key; hovering one says more.
 | P | Reload the selected tile's page (needs the browser extension) |
 | R | Refresh the tiles |
 | Esc | Close the panel |
@@ -32,6 +37,16 @@ address field works for hidden ones too. A bare
 host such as `twitch.tv/name` gets `https://`. Tiles go to the session in the
 session field, or else the selected tile's session, or else `default`. New tiles join the workspace where that session already has
 tiles, and otherwise go to the focused monitor.
+
+With **New tiles open on the focused workspace** (O) on, an empty session
+field means "where I am" instead: a new tile joins the session already
+tiled on the focused workspace, or else `default` if it has no tiles yet,
+or else a new session named after the workspace (`ws-10`). Each session
+still stays on one workspace, so its layout, save and restore keep
+working. `mosaic add` without `--session` follows the switch too.
+
+A tile already in the wrong session doesn't need reopening: select it and
+press **T** to move it to another session (`mosaic move TILE SESSION`).
 
 To swap the tile you're looking at without opening the bar first, press
 **Super+Shift+S** on it. A card opens over the tile with your web apps

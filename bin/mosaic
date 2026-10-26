@@ -12,6 +12,7 @@ Usage: mosaic [add] [--session NAME] [--monitor NAME] [--browser CMD] URL|WEBAPP
        mosaic list [--json]
        mosaic remove TILE [TILE ...]
        mosaic focus TILE
+       mosaic move TILE SESSION
        mosaic close [--session NAME]
        mosaic contain [--session NAME]
        mosaic layout [--workspace N | --session NAME] [LAYOUT]
@@ -29,11 +30,15 @@ Usage: mosaic [add] [--session NAME] [--monitor NAME] [--browser CMD] URL|WEBAPP
 
   add       Open URLs as tiled browser app windows, with video fullscreen kept
             inside each tile. New tiles join the session's workspace, or the
-            monitor's current workspace. The session defaults to "default".
+            monitor's current workspace. The session defaults to "default",
+            or with the panel's "New tiles open on the focused workspace"
+            switch on, to the session on the focused workspace (else ws-N).
             A web app's name, such as Twitch, stands for its URL.
   list      Show sessions and their tiles
   remove    Close tiles by their number in `mosaic list` or window address
   focus     Focus a tile, switching to its workspace
+  move      Put a tile in another session, on that session's workspace; a
+            new session name keeps it where it is
   close     Close a session, or every mosaic tile
   contain   Turn tile-contained fullscreen back on for tiled windows
   layout    Show the workspaces' layouts and the custom ones, or set a
@@ -105,7 +110,7 @@ run() {
 
 command=add
 case ${1:-} in
-  add | list | remove | focus | close | contain | layout | webapps | monitors | save | restore | saved | forget | login | reload | save-app | streams)
+  add | list | remove | focus | move | close | contain | layout | webapps | monitors | save | restore | saved | forget | login | reload | save-app | streams)
     command=$1
     shift
     ;;
@@ -157,6 +162,7 @@ case $command in
   add) ((count >= 1 && count <= 9)) || fail "Pass 1 to 9 URLs or web apps" usage ;;
   remove) ((count >= 1)) || fail "Pass the tiles to remove" usage ;;
   focus) ((count == 1)) || fail "Pass one tile to focus" usage ;;
+  move) ((count == 2)) || fail "Pass one tile and a session name" usage ;;
   reload) ((count == 1)) || fail "Pass one tile to reload" usage ;;
   save-app) ((count == 1 || count == 2)) || fail "Pass one tile and, optionally, a name" usage ;;
   layout) ((count <= 1)) || fail "Pass one layout" usage ;;
@@ -166,6 +172,10 @@ case $command in
 esac
 
 case $command in
+  move)
+    [[ ${targets[1]} =~ ^[a-z0-9_-]{1,32}$ ]] \
+      || fail "Invalid session name \"${targets[1]}\": use up to 32 lowercase letters, digits, - or _"
+    ;;
   save | restore | forget | login)
     [[ ${targets[0]} =~ ^[a-z0-9_-]{1,32}$ ]] \
       || fail "Invalid session name \"${targets[0]}\": use up to 32 lowercase letters, digits, - or _"
@@ -190,6 +200,7 @@ case $command in
   add) run add "$lines" "$session" "$monitor" "$browser" ;;
   remove) run remove "$lines" ;;
   focus) run focus "${targets[0]}" ;;
+  move) run move "${targets[0]}" "${targets[1]}" ;;
   close) run close "$session" ;;
   contain) run contain "$session" ;;
   layout)

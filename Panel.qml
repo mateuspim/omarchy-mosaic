@@ -6,6 +6,7 @@ import Quickshell.Io
 import Quickshell.Hyprland
 import Quickshell.Wayland
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 import "Model.js" as Model
 
@@ -76,6 +77,9 @@ Panel {
   // stream dropped, on these sites; the service does the work.
   readonly property bool recoverStreams: setting("recoverStreams", true) !== false
   readonly property string recoverSites: String(setting("recoverSites", Model.RECOVERY_SITES))
+  // The addOnFocusedWorkspace setting: with no session typed, the service
+  // picks the focused workspace's session instead of the selected tile's.
+  readonly property bool addOnFocusedWorkspace: setting("addOnFocusedWorkspace", false) === true
   // Now, in ms, ticking while the panel is open, so a tile's "reloading"
   // line expires.
   property real clock: Date.now()
@@ -91,6 +95,14 @@ Panel {
   property var appTile: null
   // The name field on that row, while it shows.
   property var appField: null
+  // The tile ({ address, label, session }) being moved to another
+  // session, whose row then shows the sessions to pick (T), or null.
+  property var moveTile: null
+  // The new-session field on that row, while it shows: after N, or at
+  // once when there is no other session to pick.
+  property var moveField: null
+  property bool moveTyping: false
+  readonly property var moveChoices: moveTile ? Model.moveChoices(listing, moveTile) : []
   // The Add tile section is open (A); it is always open without tiles.
   property bool adding: false
   readonly property bool addOpen: swapTile === null && (adding || tiles.length === 0)
@@ -101,7 +113,7 @@ Panel {
     : view === "layouts" ? (layoutEditor ? "editor" : "layouts")
     : view === "hidden" ? "hidden"
     : view === "saved" ? "saved"
-    : appTile ? "naming" : swapTile ? "swap" : addOpen && tiles.length > 0 ? "adding" : "tiles"
+    : appTile ? "naming" : moveTile ? "moving" : swapTile ? "swap" : addOpen && tiles.length > 0 ? "adding" : "tiles"
   // The address field on the tile being swapped, while it shows.
   property var swapField: null
   property string status: ""
@@ -137,7 +149,7 @@ Panel {
   readonly property var selectedWorkspace: view === "layouts" && !layoutEditor && cursor >= 0 && cursor < workspaceRows.length ? workspaceRows[cursor] : null
   readonly property var selectedCustom: view === "layouts" && !layoutEditor && cursor >= workspaceRows.length
     && cursor < workspaceRows.length + customRows.length ? customRows[cursor - workspaceRows.length] : null
-  readonly property bool editing: urlField.activeFocus || sessionField.activeFocus || (swapField !== null && swapField.activeFocus) || (appField !== null && appField.activeFocus) || layoutNameField.activeFocus || dropdownOpen
+  readonly property bool editing: urlField.activeFocus || sessionField.activeFocus || (swapField !== null && swapField.activeFocus) || (appField !== null && appField.activeFocus) || (moveField !== null && moveField.activeFocus) || layoutNameField.activeFocus || dropdownOpen
 
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
@@ -154,6 +166,7 @@ Panel {
       confirmRestart = false
       swapTile = null
       appTile = null
+      moveTile = null
       if (!back) layoutEditor = null
       confirmDelete = ""
       view = back ? "layouts" : "tiles"
@@ -204,8 +217,10 @@ Panel {
   }
 
   // The session typed in the field, else the selected tile's, else default.
+  // "" with addOnFocusedWorkspace, when the service chooses.
   function targetSessionText() {
     if (sessionField.text.trim() !== "") return sessionField.text
+    if (addOnFocusedWorkspace) return ""
     return selectedTile ? selectedTile.session : ""
   }
 
@@ -218,13 +233,14 @@ Panel {
       })
       return true
     }
-    var session = Model.sessionName(targetSessionText())
-    if (session === "") {
+    var typed = targetSessionText()
+    var session = typed === "" && addOnFocusedWorkspace ? "" : Model.sessionName(typed)
+    if (session === "" && !addOnFocusedWorkspace) {
       showStatus("Session names use lowercase letters, digits, - and _", true)
       return false
     }
     runService(function(engine) {
-      return engine.add([url], { session: session, browser: root.browser }, "Adding " + label + " to " + session)
+      return engine.add([url], { session: session, browser: root.browser }, "Adding " + label + " to " + (session || "the focused workspace"))
     })
     return true
   }
@@ -324,6 +340,10 @@ Panel {
     saveSetting("recoverStreams", !recoverStreams)
   }
 
+  function toggleAddOnFocused() {
+    saveSetting("addOnFocusedWorkspace", !addOnFocusedWorkspace)
+  }
+
   function reloadTile(tile) {
     if (!tile) return
     runService(function(engine) { return engine.reloadTile(tile.address) })
@@ -344,6 +364,7 @@ Panel {
     if (view === name) return
     if (name !== "tiles") swapTile = null
     appTile = null
+    moveTile = null
     layoutEditor = null
     confirmDelete = ""
     adding = false
@@ -398,6 +419,7 @@ Panel {
 
   function startAdding() {
     appTile = null
+    moveTile = null
     if (swapTile && swapField) {
       swapField.forceActiveFocus()
       swapField.selectAll()
@@ -405,7 +427,7 @@ Panel {
     }
     setView("tiles")
     adding = true
-    if (selectedTile && sessionField.text === "") sessionField.text = selectedTile.session
+    if (selectedTile && sessionField.text === "" && !addOnFocusedWorkspace) sessionField.text = selectedTile.session
     Qt.callLater(function() { urlField.forceActiveFocus() })
   }
 
@@ -417,6 +439,7 @@ Panel {
     cursorActive = true
     cursor = tile.position
     appTile = null
+    moveTile = null
     swapTile = { address: tile.address, label: Model.tileLabel(tile), url: tile.url || "" }
     status = ""
   }
@@ -432,6 +455,7 @@ Panel {
     cursorActive = true
     cursor = tile.position
     swapTile = null
+    moveTile = null
     adding = false
     appTile = { address: tile.address, label: Model.tileLabel(tile), url: tile.url }
     status = ""
@@ -450,6 +474,53 @@ Panel {
 
   function cancelSaveApp() {
     appTile = null
+    keyCatcher.forceActiveFocus()
+  }
+
+  // Shows the sessions `tile` can move to on its row: 1–9 pick one, N
+  // types a new one.
+  function startMove(tile) {
+    if (!tile) return
+    setView("tiles")
+    cursorActive = true
+    cursor = tile.position
+    swapTile = null
+    appTile = null
+    adding = false
+    moveTile = { address: tile.address, label: Model.tileLabel(tile), session: tile.session }
+    moveTyping = moveChoices.length === 0
+    status = ""
+    // Clicking the row's button can leave focus elsewhere; 1–9 and N are
+    // read by the key catcher.
+    if (!moveTyping) keyCatcher.forceActiveFocus()
+  }
+
+  // N, or the New session chip: shows the name field.
+  function startMoveTyping() {
+    if (!moveTile) return
+    moveTyping = true
+    if (moveField) moveField.forceActiveFocus()
+  }
+
+  // Esc in the name field: back to the chips, or out when there are none.
+  function stopMoveTyping() {
+    if (moveChoices.length === 0) return cancelMove()
+    moveTyping = false
+    keyCatcher.forceActiveFocus()
+  }
+
+  function moveTo(session) {
+    var tile = moveTile
+    if (!tile) return
+    var name = String(session || "").trim()
+    if (Model.sessionName(name) !== name || name === "") return showStatus("Session names use lowercase letters, digits, - and _", true)
+    moveTile = null
+    keyCatcher.forceActiveFocus()
+    runService(function(engine) { return engine.moveTile(tile.address, name, "Moving " + tile.label + " to " + name) })
+  }
+
+  function cancelMove() {
+    moveTile = null
     keyCatcher.forceActiveFocus()
   }
 
@@ -722,6 +793,13 @@ Panel {
 
   Binding {
     target: root.service
+    property: "addOnFocusedWorkspace"
+    value: root.addOnFocusedWorkspace
+    when: root.service !== null
+  }
+
+  Binding {
+    target: root.service
     property: "recoverSites"
     value: root.recoverSites
     when: root.service !== null
@@ -835,6 +913,7 @@ Panel {
       onCloseRequested: {
         if (root.layoutEditor) root.layoutEditor = null
         else if (root.appTile) root.appTile = null
+        else if (root.moveTile) root.moveTile = null
         else if (root.swapTile) root.swapTile = null
         else if (root.adding) root.adding = false
         else root.close()
@@ -847,6 +926,11 @@ Panel {
           if ((t === "o" || t === "O") && root.cursorActive) root.toggleSavedLogin(root.selectedSaved)
           else if ((t === "d" || t === "D") && root.cursorActive) root.forgetSaved(root.selectedSaved)
           else if (t === "r" || t === "R") root.refresh()
+          return
+        }
+        if (root.view === "tiles" && root.moveTile) {
+          if (t >= "1" && t <= "9" && root.moveChoices[Number(t) - 1]) root.moveTo(root.moveChoices[Number(t) - 1].name)
+          else if (t === "n" || t === "N") root.startMoveTyping()
           return
         }
         if (t === "a" || t === "A") root.startAdding()
@@ -867,9 +951,11 @@ Panel {
         else if ((t === "s" || t === "S") && root.cursorActive) root.startSwap(root.selectedTile)
         else if ((t === "w" || t === "W") && root.cursorActive && root.selectedTile) root.saveSession(root.selectedTile.session)
         else if ((t === "i" || t === "I") && root.cursorActive) root.startSaveApp(root.selectedTile)
+        else if ((t === "t" || t === "T") && root.cursorActive) root.startMove(root.selectedTile)
         else if ((t === "m" || t === "M") && root.cursorActive) root.toggleMute(root.selectedTile)
         else if ((t === "p" || t === "P") && root.cursorActive) root.reloadTile(root.selectedTile)
         else if ((t === "f" || t === "F") && root.audioReady) root.toggleAudioFocus()
+        else if (t === "o" || t === "O") root.toggleAddOnFocused()
         else if (t === "-" && root.cursorActive) root.stepVolume(root.selectedTile, -0.1)
         else if ((t === "+" || t === "=") && root.cursorActive) root.stepVolume(root.selectedTile, 0.1)
         else if (t >= "1" && t <= "9") {
@@ -960,42 +1046,71 @@ Panel {
               onClicked: root.setView("extension")
             }
 
-            // Switches for the whole mosaic, one line each; each tile's own
+            // Switches for the whole mosaic, two to a line so the tiles
+            // start near the top; the tooltip says more. Each tile's own
             // controls are on its row.
-            SwitchRow {
-              visible: root.audioReady
+            GridLayout {
+              visible: root.audioReady || root.tiles.length > 0
               width: parent.width
-              checked: root.audioFollowsFocus
-              iconOn: "󰕾"
-              iconOff: "󰖀"
-              text: "Only the focused tile plays"
-              keyLabel: "F"
-              onToggled: root.toggleAudioFocus()
-            }
+              columns: 2
+              columnSpacing: Style.space(6)
+              rowSpacing: Style.space(6)
 
-            SwitchRow {
-              visible: root.tiles.length > 0
-              width: parent.width
-              checked: root.autoContain
-              iconOn: "󰊓"
-              iconOff: "󰊔"
-              text: "Keep fullscreen in tiles"
-              keyLabel: "⇧C"
-              tooltip: "Contains a tile again whenever it loses containment, and shrinks a fullscreen tile back once another window takes focus"
-              onToggled: root.toggleAutoContain()
-            }
+              SwitchChip {
+                Layout.fillWidth: true
+                Layout.preferredWidth: 1
+                visible: root.audioReady
+                checked: root.audioFollowsFocus
+                iconOn: "󰕾"
+                iconOff: "󰖀"
+                text: "Only the focused tile plays"
+                label: "Focused plays"
+                keyLabel: "F"
+                onToggled: root.toggleAudioFocus()
+              }
 
-            SwitchRow {
-              visible: root.audioReady
-              width: parent.width
-              checked: root.recoverStreams
-              iconOn: "󰑓"
-              iconOff: "󰑓"
-              text: "Recover dropped streams"
-              keyLabel: "⇧R"
-              tooltip: "Reloads a tile whose video froze or failed, on " + root.recoverSites
-                + " (the Sites setting). Three tries in ten minutes at most; P reloads a tile by hand"
-              onToggled: root.toggleRecoverStreams()
+              SwitchChip {
+                Layout.fillWidth: true
+                Layout.preferredWidth: 1
+                visible: root.tiles.length > 0
+                checked: root.autoContain
+                iconOn: "󰊓"
+                iconOff: "󰊔"
+                text: "Keep fullscreen in tiles"
+                label: "Keep contained"
+                keyLabel: "⇧C"
+                tooltip: "Contains a tile again whenever it loses containment, and shrinks a fullscreen tile back once another window takes focus"
+                onToggled: root.toggleAutoContain()
+              }
+
+              SwitchChip {
+                Layout.fillWidth: true
+                Layout.preferredWidth: 1
+                visible: root.audioReady
+                checked: root.recoverStreams
+                iconOn: "󰑓"
+                iconOff: "󰑓"
+                text: "Recover dropped streams"
+                label: "Recover streams"
+                keyLabel: "⇧R"
+                tooltip: "Reloads a tile whose video froze or failed, on " + root.recoverSites
+                  + " (the Sites setting). Three tries in ten minutes at most; P reloads a tile by hand"
+                onToggled: root.toggleRecoverStreams()
+              }
+
+              SwitchChip {
+                Layout.fillWidth: true
+                Layout.preferredWidth: 1
+                visible: root.tiles.length > 0
+                checked: root.addOnFocusedWorkspace
+                iconOn: "󰍹"
+                iconOff: "󰍹"
+                text: "New tiles open on the focused workspace"
+                label: "New tiles here"
+                keyLabel: "O"
+                tooltip: "With no session typed, a new tile joins the session on the workspace you're on, or starts one there (ws-N), instead of the selected tile's session"
+                onToggled: root.toggleAddOnFocused()
+              }
             }
 
             Repeater {
@@ -1100,7 +1215,8 @@ Panel {
                 TextField {
                   id: sessionField
                   Layout.fillWidth: true
-                  placeholderText: "Session (" + (root.selectedTile ? root.selectedTile.session : "default") + ")"
+                  placeholderText: "Session (" + (root.addOnFocusedWorkspace ? "focused workspace's"
+                    : root.selectedTile ? root.selectedTile.session : "default") + ")"
                   foreground: root.foreground
                   font.family: root.fontFamily
                   onAccepted: root.addTile()
@@ -1505,7 +1621,7 @@ Panel {
             width: parent.width
             spacing: Style.space(12)
             Repeater {
-              model: Model.keyHints(root.keyContext, root.allKeys, root.shownWebapps.length)
+              model: Model.keyHints(root.keyContext, root.allKeys, root.keyContext === "moving" ? root.moveChoices.length : root.shownWebapps.length)
               Row {
                 required property var modelData
                 spacing: Style.space(5)
@@ -2557,18 +2673,24 @@ Panel {
   }
 
   // A setting for the whole mosaic: an icon, what it does, and a switch.
-  component SwitchRow: CursorSurface {
-    id: switchRow
+  // A switch for the whole mosaic, as a chip: its icon, a short name,
+  // its key, and on or off; the tooltip says the rest.
+  component SwitchChip: CursorSurface {
+    id: switchChip
     property bool checked: false
     property string iconOn: ""
     property string iconOff: ""
     property string text: ""
+    property string label: ""
     property string tooltip: ""
     property string keyLabel: ""
     signal toggled()
     foreground: root.foreground
     hasCursor: switchMouse.containsMouse
-    implicitHeight: switchContent.implicitHeight + Style.space(6)
+    current: checked
+    bordered: true
+    implicitWidth: switchContent.implicitWidth + Style.space(16)
+    implicitHeight: Style.space(30)
     Accessible.role: Accessible.CheckBox
     Accessible.name: text
     Accessible.checked: checked
@@ -2577,46 +2699,49 @@ Panel {
       id: switchMouse
       anchors.fill: parent
       hoverEnabled: true
-      onClicked: switchRow.toggled()
+      onClicked: switchChip.toggled()
     }
 
     RowLayout {
       id: switchContent
-      anchors.left: parent.left
-      anchors.right: parent.right
-      anchors.verticalCenter: parent.verticalCenter
-      anchors.leftMargin: Style.space(10)
+      anchors.fill: parent
+      anchors.leftMargin: Style.space(8)
       anchors.rightMargin: Style.space(6)
-      spacing: Style.space(8)
+      spacing: Style.space(6)
       Text {
-        text: switchRow.checked ? switchRow.iconOn : switchRow.iconOff
-        color: switchRow.checked ? root.foreground : root.dim
+        text: switchChip.checked ? switchChip.iconOn : switchChip.iconOff
+        color: switchChip.checked ? Commons.Color.accent : root.dim
         font.family: root.fontFamily
         font.pixelSize: Style.font.body
       }
       Text {
         Layout.fillWidth: true
         textFormat: Text.PlainText
-        text: switchRow.text
-        color: switchRow.checked ? root.foreground : root.dim
+        text: switchChip.label
+        color: switchChip.checked ? root.foreground : root.dim
         font.family: root.fontFamily
         font.pixelSize: Style.font.caption
         elide: Text.ElideRight
       }
-      KeyCap {
-        visible: switchRow.keyLabel !== ""
-        label: switchRow.keyLabel
+      Text {
+        textFormat: Text.PlainText
+        text: switchChip.checked ? "on" : "off"
+        color: switchChip.checked ? Commons.Color.accent : root.dim
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.caption
+        font.bold: switchChip.checked
       }
-      ToggleSwitch {
-        checked: switchRow.checked
-        interactive: false
-        foreground: root.foreground
+      KeyCap {
+        visible: switchChip.keyLabel !== ""
+        label: switchChip.keyLabel
+        foreground: switchChip.checked ? root.foreground : root.dim
       }
     }
 
     PanelToolTip {
-      visible: switchMouse.containsMouse && switchRow.tooltip !== ""
-      text: switchRow.tooltip
+      visible: switchMouse.containsMouse
+      text: switchChip.text + (switchChip.checked ? ": on" : ": off") + " · " + switchChip.keyLabel
+        + (switchChip.tooltip !== "" ? "\n" + switchChip.tooltip : "")
     }
   }
 
@@ -2693,6 +2818,64 @@ Panel {
     }
   }
 
+  // A choice on a moving tile's card: its key, a session's name, and its
+  // workspace.
+  component SessionChip: CursorSurface {
+    id: sessionChip
+    property string keyLabel: ""
+    property string text: ""
+    property string detail: ""
+    property string tooltip: ""
+    property bool dim: false
+    signal activated()
+    hasCursor: sessionMouse.containsMouse
+    bordered: true
+    foreground: root.foreground
+    implicitWidth: sessionRow.implicitWidth + Style.space(14)
+    implicitHeight: Style.space(28)
+    Accessible.role: Accessible.Button
+    Accessible.name: text
+
+    Row {
+      id: sessionRow
+      anchors.centerIn: parent
+      spacing: Style.space(6)
+      KeyCap {
+        anchors.verticalCenter: parent.verticalCenter
+        label: sessionChip.keyLabel
+      }
+      Text {
+        anchors.verticalCenter: parent.verticalCenter
+        textFormat: Text.PlainText
+        text: sessionChip.text
+        color: sessionChip.dim ? root.dim : root.foreground
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.caption
+      }
+      Text {
+        visible: sessionChip.detail !== ""
+        anchors.verticalCenter: parent.verticalCenter
+        textFormat: Text.PlainText
+        text: "· " + sessionChip.detail
+        color: root.dim
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.caption
+      }
+    }
+
+    MouseArea {
+      id: sessionMouse
+      anchors.fill: parent
+      hoverEnabled: true
+      onClicked: sessionChip.activated()
+    }
+
+    PanelToolTip {
+      visible: sessionMouse.containsMouse && sessionChip.tooltip !== ""
+      text: sessionChip.tooltip
+    }
+  }
+
   component TileRow: CursorSurface {
     id: row
     property var tile: null
@@ -2700,6 +2883,7 @@ Panel {
     property string place: ""
     readonly property bool swapping: root.swapTile !== null && tile !== null && root.swapTile.address === tile.address
     readonly property bool naming: root.appTile !== null && tile !== null && root.appTile.address === tile.address
+    readonly property bool moving: root.moveTile !== null && tile !== null && root.moveTile.address === tile.address
     readonly property var audio: tile ? root.tileAudio[tile.address] : undefined
     readonly property var app: Model.tileApp(root.webapps, tile)
     // The site's logo: its web app's icon, else the tab's favicon from the
@@ -2717,14 +2901,14 @@ Panel {
       : ({ text: "", warn: false })
     // The volume slider shows on the row under the cursor only, so the
     // list stays one line per tile.
-    readonly property bool showSlider: audio !== undefined && hasCursor && !swapping && !naming
+    readonly property bool showSlider: audio !== undefined && hasCursor && !swapping && !naming && !moving
     // The level the user set, which the slider shows right away; the
     // browser's report of it arrives a moment later.
     readonly property real volume: {
       var set = root.service && tile ? root.service.tileVolumes[tile.address] : undefined
       return set !== undefined ? set : (audio ? audio.volume : 1)
     }
-    hasCursor: swapping || naming || (root.cursorActive && tile !== null && root.cursor === tile.position)
+    hasCursor: swapping || naming || moving || (root.cursorActive && tile !== null && root.cursor === tile.position)
     foreground: root.foreground
     implicitHeight: rowColumn.implicitHeight + Style.spacing.rowPaddingX
 
@@ -2762,7 +2946,7 @@ Panel {
           Text {
             Layout.fillWidth: true
             textFormat: Text.PlainText
-            text: row.tile ? (row.swapping ? "󰓡  " : row.naming ? "󰆓  " : "") + Model.tileName(row.tile, row.app) : ""
+            text: row.tile ? (row.swapping ? "󰓡  " : row.naming ? "󰆓  " : row.moving ? "󰉒  " : "") + Model.tileName(row.tile, row.app) : ""
             color: root.foreground
             font.family: root.fontFamily
             font.pixelSize: Style.font.body
@@ -2827,6 +3011,16 @@ Panel {
           onClicked: {
             if (row.naming) root.cancelSaveApp()
             else root.startSaveApp(row.tile)
+          }
+        }
+
+        PanelActionButton {
+          iconText: "󰉒"
+          tooltipText: "Move to another session · T"
+          foreground: root.foreground
+          onClicked: {
+            if (row.moving) root.cancelMove()
+            else root.startMove(row.tile)
           }
         }
 
@@ -2902,6 +3096,60 @@ Panel {
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
             wrapMode: Text.WordWrap
+          }
+        }
+      }
+
+      // Moving: the sessions it can join, as chips under its name, and a
+      // name field for a new one.
+      Loader {
+        active: row.moving
+        visible: active
+        Layout.fillWidth: true
+        Layout.leftMargin: logoBox.width + Style.space(10)
+        Layout.topMargin: Style.space(2)
+        sourceComponent: ColumnLayout {
+          spacing: Style.space(6)
+
+          Flow {
+            Layout.fillWidth: true
+            spacing: Style.space(6)
+            Repeater {
+              model: root.moveChoices
+              SessionChip {
+                required property var modelData
+                required property int index
+                keyLabel: String(index + 1)
+                text: modelData.name
+                detail: modelData.place
+                tooltip: "Join " + modelData.name + (modelData.place !== "" ? " on " + modelData.place : "") + ", without reloading"
+                onActivated: root.moveTo(modelData.name)
+              }
+            }
+            SessionChip {
+              visible: !root.moveTyping
+              keyLabel: "N"
+              text: "New session"
+              dim: true
+              tooltip: "Start a session for this tile; it stays on workspace " + (row.tile ? row.tile.workspace : "")
+              onActivated: root.startMoveTyping()
+            }
+          }
+
+          TextField {
+            id: moveName
+            visible: root.moveTyping
+            Layout.fillWidth: true
+            placeholderText: "New session name, then Enter"
+            foreground: root.foreground
+            font.family: root.fontFamily
+            onAccepted: root.moveTo(text)
+            Keys.onEscapePressed: root.stopMoveTyping()
+            Component.onCompleted: {
+              root.moveField = moveName
+              if (root.moveTyping) forceActiveFocus()
+            }
+            Component.onDestruction: if (root.moveField === moveName) root.moveField = null
           }
         }
       }

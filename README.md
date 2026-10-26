@@ -1,6 +1,6 @@
 # <img src="icon.svg" alt="" width="32" height="32" align="top"> Mosaic
 
-![Mosaic: every stream in its place. On the right, a monitor shows workspace 8 in a three-zone layout: a wide Twitch tile in the middle whose video is fullscreen inside the tile, with Kick and a muted YouTube tile letterboxed beside it. In front, two offscreen renders of the Mosaic panel with sample tiles: the Tiles tab with two sessions, per-tile volume, a recovered stream and the audio, containment and recovery switches, and the Layouts tab with a layout per workspace and a custom "Three" layout](preview.png)
+![Mosaic: every stream in its place. On the right, a monitor shows workspace 8 in a three-zone layout: a wide Twitch tile in the middle whose video is fullscreen inside the tile, with Kick and a muted YouTube tile letterboxed beside it. In front, two offscreen renders of the Mosaic panel with sample tiles: the Tiles tab with two sessions, per-tile volume, a recovered stream and the audio, containment, recovery and "new tiles here" switches, and the Layouts tab with a layout per workspace and a custom "Three" layout](preview.png)
 
 **Twitch, Kick, YouTube and any other web app, tiled as a monitor-aware
 mosaic on Hyprland, where a video's fullscreen stays inside its tile.**
@@ -20,7 +20,8 @@ type any address.
 - **Fullscreen in its tile**: a video's fullscreen fills its tile, not the
   monitor, and Mosaic can put it back when something takes it away.
 - **A keyboard-first panel** in the Omarchy bar: sessions and their tiles;
-  add, focus, swap, reload and remove tiles; in your theme's colours.
+  add, focus, swap, reload and remove tiles, move them between sessions,
+  and open new ones on the workspace you're on; in your theme's colours.
 - **Swap a tile in place** with a card over the tile (`Super+Shift+S`):
   another web app or another address, same slot.
 - **Layouts per workspace**: Grid, Stack, Main + small, 16:9 fit, or your

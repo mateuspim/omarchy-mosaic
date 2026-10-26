@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.6.0 (2026-10-26)
+
+- **New tiles open on the focused workspace**: a switch ("New tiles here") on the Tiles tab
+  (O). With it on and no session typed, a new tile joins the session on
+  the workspace you're on, or starts one there (`ws-10`), instead of going
+  back to the workspace the selected tile's session is on. `mosaic add`
+  without `--session` follows it too.
+- **Move a tile to another session**: T on a tile lists the other sessions
+  (1–9) or takes a new name (N), and the tile joins that session's
+  workspace, with no reopening. Also `mosaic move TILE SESSION`.
+- **A shorter panel**: the switches for the whole mosaic are a two-column
+  grid of labelled chips (name, on or off, key), instead of a line each.
+
 ## 1.5.3 (2026-10-21)
 
 - **Fixed**: the native host waited for the body of an oversized message

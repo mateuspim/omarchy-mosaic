@@ -1660,23 +1660,86 @@ function resolveAddTargets(targets, apps) {
 // the focused monitor's. Returns { workspace } or { error }.
 function chooseWorkspace(list, monitors, session, monitorName) {
   if (monitors.length === 0) return { error: "No active Hyprland monitors" }
-  if (monitorName) {
-    for (var i = 0; i < monitors.length; i++) {
-      if (monitors[i].name === monitorName) return { workspace: monitors[i].activeWorkspace }
-    }
-    return { error: "Monitor " + JSON.stringify(String(monitorName)) + " is not active" }
+  if (monitorName) return monitorWorkspace(monitors, monitorName)
+  var open = sessionWorkspace(list, session)
+  return open !== null ? { workspace: open } : monitorWorkspace(monitors, "")
+}
+
+// The named monitor's active workspace, else the focused monitor's.
+// Returns { workspace } or { error }.
+function monitorWorkspace(monitors, monitorName) {
+  if (monitors.length === 0) return { error: "No active Hyprland monitors" }
+  for (var i = 0; i < monitors.length; i++) {
+    if (monitorName ? monitors[i].name === monitorName : monitors[i].focused) return { workspace: monitors[i].activeWorkspace }
   }
-  var sessions = list && Array.isArray(list.sessions) ? list.sessions : []
-  for (var s = 0; s < sessions.length; s++) {
-    if (sessions[s].name !== session) continue
-    for (var t = 0; t < sessions[s].tiles.length; t++) {
-      if (sessions[s].tiles[t].state !== "floating") return { workspace: sessions[s].tiles[t].workspace }
-    }
-  }
-  for (var m = 0; m < monitors.length; m++) {
-    if (monitors[m].focused) return { workspace: monitors[m].activeWorkspace }
-  }
+  if (monitorName) return { error: "Monitor " + JSON.stringify(String(monitorName)) + " is not active" }
   return { workspace: monitors[0].activeWorkspace }
+}
+
+// With the addOnFocusedWorkspace setting, the session new tiles join when
+// none is named, so they open on the workspace the user is on instead of
+// where `default` already is: the session already tiled there, else
+// `default` when it has no tiles, else `ws-N` for workspace N (`ws-N-2`,
+// … when that one is on another workspace). Returns { session } or { error }.
+function focusedSession(list, monitors, monitorName) {
+  var target = monitorWorkspace(monitors, monitorName)
+  if (target.error) return target
+  var names = (list && Array.isArray(list.sessions) ? list.sessions : []).map(function(session) { return session.name })
+  for (var i = 0; i < names.length; i++) {
+    if (sessionWorkspace(list, names[i]) === target.workspace) return { session: names[i] }
+  }
+  if (sessionWorkspace(list, DEFAULT_SESSION) === null) return { session: DEFAULT_SESSION }
+  var base = "ws-" + target.workspace
+  var name = base
+  for (var n = 2; sessionWorkspace(list, name) !== null; n++) name = base + "-" + n
+  return { session: name }
+}
+
+// `mosaic move TILE SESSION`: retags the tile into `session` and, when
+// that session is tiled on another workspace, moves it there and contains
+// it again. A new session stays where the tile is. Tags decide membership
+// (ADR 2); the store's record follows once the dispatches succeed.
+// Returns { tile, session, record, expressions, message } or { error }.
+function planMove(list, target, session) {
+  var tile = findTile(listTiles(list), target)
+  if (!tile) return { error: "No mosaic tile " + JSON.stringify(String(target)) + "; see `mosaic list`" }
+  var name = String(session || "").trim()
+  if (name === "" || sessionName(name) !== name)
+    return { error: "Invalid session name " + JSON.stringify(name) + ": use up to 32 lowercase letters, digits, - or _" }
+  if (tile.session === name) return { error: "Tile " + tile.index + " is already in " + name }
+  if (tile.state === "fullscreen") return { error: "Leave fullscreen on that tile before moving it" }
+  if (!validAddress(tile.address)) return { error: "Unexpected Hyprland window address " + JSON.stringify(String(tile.address)) }
+  var window = 'window = "address:' + tile.address + '"'
+  var expressions = [
+    "hl.dsp.window.tag({ " + window + ', tag = "-' + TAG + "-" + tile.session + '" })',
+    "hl.dsp.window.tag({ " + window + ', tag = "+' + TAG + "-" + name + '" })'
+  ]
+  var open = sessionWorkspace(list, name)
+  var workspace = open === null ? tile.workspace : open
+  if (workspace !== tile.workspace) {
+    expressions.push("hl.dsp.window.move({ " + window + ', workspace = "' + workspace + '", follow = false })')
+    expressions.push(dispatchExpression("contain", tile.address))
+  }
+  return {
+    tile: tile,
+    session: name,
+    record: { address: tile.address, session: name, url: tile.url || "" },
+    expressions: expressions,
+    message: "Moved tile " + tile.index + " to " + name + (workspace !== tile.workspace ? " on workspace " + workspace : "") + "."
+  }
+}
+
+// The sessions a tile can move to, for the panel's picker: the other
+// sessions in list order, at most nine (keys 1–9), each with where it is.
+function moveChoices(list, tile) {
+  var sessions = list && Array.isArray(list.sessions) ? list.sessions : []
+  var choices = []
+  for (var i = 0; i < sessions.length && choices.length < 9; i++) {
+    if (tile && sessions[i].name === tile.session) continue
+    var open = sessionWorkspace(list, sessions[i].name)
+    choices.push({ name: sessions[i].name, place: open === null ? "" : "workspace " + open })
+  }
+  return choices
 }
 
 // The desktop id `xdg-settings get default-web-browser` printed, without
@@ -2510,11 +2573,12 @@ function streamsText(list, audio, recovery, log, sitesText) {
 // `apps` is how many web apps have number keys.
 var KEY_HINTS = {
   tiles: { main: [["↑↓", "select"], ["Enter", "focus"], ["S", "swap"], ["A", "add"]],
-    more: [["M", "mute"], ["−/+", "volume"], ["G", "layout"], ["W", "save session"], ["I", "save as web app"], ["F", "focused only"], ["⇧C", "keep contained"],
+    more: [["M", "mute"], ["−/+", "volume"], ["G", "layout"], ["W", "save session"], ["T", "move to session"], ["I", "save as web app"], ["F", "focused only"], ["O", "add on focused workspace"], ["⇧C", "keep contained"],
       ["C", "contain now"], ["P", "reload page"], ["⇧R", "recover streams"], ["X", "remove"], ["⇧D", "close session"], ["R", "refresh"], ["H/L", "tabs"]] },
   naming: { main: [["Enter", "save web app"], ["Esc", "cancel"]], more: [] },
   swap: { main: [["#", "web app"], ["A", "address"], ["Enter", "replace"], ["Esc", "cancel"]], more: [] },
   adding: { main: [["#", "web app"], ["Enter", "add"], ["Esc", "close"]], more: [] },
+  moving: { main: [["#", "session"], ["N", "new session"], ["Esc", "cancel"]], more: [] },
   hidden: { main: [["↑↓", "select"], ["Enter", "show again"]], more: [["R", "refresh"], ["H/L", "tabs"]] },
   saved: { main: [["↑↓", "select"], ["Enter", "restore"], ["O", "at login"], ["D", "delete"]], more: [["H/L", "tabs"]] },
   layouts: { main: [["↑↓", "select"], ["Enter", "next layout"], ["N", "new"], ["E", "edit"]],
