@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- **Move a tile to another monitor**: the move picker (T) now also lists
+  each other monitor whose workspace has no session. Choosing one moves
+  the tile there in a new session, named as "New tiles here" would name
+  it (`default` when free, else `ws-N`); before, a new session stayed on
+  the tile's workspace beside the old one.
+
 ## 1.6.1 (2026-10-27)
 
 - **Fixed**: a Twitch tile that a recovery reload brought back to the

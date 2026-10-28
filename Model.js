@@ -1697,10 +1697,12 @@ function focusedSession(list, monitors, monitorName) {
 
 // `mosaic move TILE SESSION`: retags the tile into `session` and, when
 // that session is tiled on another workspace, moves it there and contains
-// it again. A new session stays where the tile is. Tags decide membership
-// (ADR 2); the store's record follows once the dispatches succeed.
-// Returns { tile, session, record, expressions, message } or { error }.
-function planMove(list, target, session) {
+// it again. A new session stays where the tile is, or starts on
+// `workspace` when one is given (the panel's monitor choices). Tags decide
+// membership (ADR 2); the store's record follows once the dispatches
+// succeed. Returns { tile, session, record, expressions, message } or
+// { error }.
+function planMove(list, target, session, workspace) {
   var tile = findTile(listTiles(list), target)
   if (!tile) return { error: "No mosaic tile " + JSON.stringify(String(target)) + "; see `mosaic list`" }
   var name = String(session || "").trim()
@@ -1709,15 +1711,17 @@ function planMove(list, target, session) {
   if (tile.session === name) return { error: "Tile " + tile.index + " is already in " + name }
   if (tile.state === "fullscreen") return { error: "Leave fullscreen on that tile before moving it" }
   if (!validAddress(tile.address)) return { error: "Unexpected Hyprland window address " + JSON.stringify(String(tile.address)) }
+  if (workspace !== undefined && workspace !== null && workspace !== 0 && !(Number.isInteger(workspace) && workspace > 0))
+    return { error: "Invalid workspace " + JSON.stringify(String(workspace)) }
   var window = 'window = "address:' + tile.address + '"'
   var expressions = [
     "hl.dsp.window.tag({ " + window + ', tag = "-' + TAG + "-" + tile.session + '" })',
     "hl.dsp.window.tag({ " + window + ', tag = "+' + TAG + "-" + name + '" })'
   ]
   var open = sessionWorkspace(list, name)
-  var workspace = open === null ? tile.workspace : open
-  if (workspace !== tile.workspace) {
-    expressions.push("hl.dsp.window.move({ " + window + ', workspace = "' + workspace + '", follow = false })')
+  var destination = open !== null ? open : workspace ? workspace : tile.workspace
+  if (destination !== tile.workspace) {
+    expressions.push("hl.dsp.window.move({ " + window + ', workspace = "' + destination + '", follow = false })')
     expressions.push(dispatchExpression("contain", tile.address))
   }
   return {
@@ -1725,19 +1729,37 @@ function planMove(list, target, session) {
     session: name,
     record: { address: tile.address, session: name, url: tile.url || "" },
     expressions: expressions,
-    message: "Moved tile " + tile.index + " to " + name + (workspace !== tile.workspace ? " on workspace " + workspace : "") + "."
+    message: "Moved tile " + tile.index + " to " + name + (destination !== tile.workspace ? " on workspace " + destination : "") + "."
   }
 }
 
 // The sessions a tile can move to, for the panel's picker: the other
-// sessions in list order, at most nine (keys 1–9), each with where it is.
-function moveChoices(list, tile) {
+// sessions in list order, then a new session on each other monitor
+// (`monitors` as monitorWorkspace takes them) whose workspace has none, at
+// most nine (keys 1–9), each with where it is. A monitor choice carries
+// its `workspace` for planMove; a session's is 0.
+function moveChoices(list, tile, monitors) {
   var sessions = list && Array.isArray(list.sessions) ? list.sessions : []
   var choices = []
+  var taken = {}
   for (var i = 0; i < sessions.length && choices.length < 9; i++) {
-    if (tile && sessions[i].name === tile.session) continue
     var open = sessionWorkspace(list, sessions[i].name)
-    choices.push({ name: sessions[i].name, place: open === null ? "" : "workspace " + open })
+    if (open !== null) taken[open] = true
+    if (tile && sessions[i].name === tile.session) continue
+    choices.push({ name: sessions[i].name, place: open === null ? "" : "workspace " + open, monitor: "", workspace: 0 })
+  }
+  // Then each other monitor whose workspace holds no session: the tile
+  // starts one there, named as an add with addOnFocusedWorkspace would.
+  var screens = Array.isArray(monitors) ? monitors : []
+  for (var m = 0; m < screens.length && choices.length < 9; m++) {
+    var workspace = screens[m].activeWorkspace
+    if (!(Number.isInteger(workspace) && workspace > 0) || taken[workspace]) continue
+    if (tile && (screens[m].name === tile.monitor || workspace === tile.workspace)) continue
+    var named = focusedSession(list, screens, screens[m].name)
+    if (named.error) continue
+    // `default` can be free on several monitors; only the first gets it.
+    var name = choices.some(function(choice) { return choice.name === named.session }) ? "ws-" + workspace : named.session
+    choices.push({ name: name, place: screens[m].name + " · workspace " + workspace, monitor: screens[m].name, workspace: workspace })
   }
   return choices
 }

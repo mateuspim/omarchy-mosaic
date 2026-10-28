@@ -102,7 +102,12 @@ Panel {
   // once when there is no other session to pick.
   property var moveField: null
   property bool moveTyping: false
-  readonly property var moveChoices: moveTile ? Model.moveChoices(listing, moveTile) : []
+  readonly property var moveChoices: moveTile ? Model.moveChoices(listing, moveTile, liveMonitors) : []
+  // Hyprland's monitors as Model.monitorWorkspace takes them, live, for the
+  // move picker's other-monitor choices.
+  readonly property var liveMonitors: Hyprland.monitors.values.map(function(monitor) {
+    return { name: monitor.name, focused: monitor.focused === true, activeWorkspace: monitor.activeWorkspace ? monitor.activeWorkspace.id : 0 }
+  })
   // The Add tile section is open (A); it is always open without tiles.
   property bool adding: false
   readonly property bool addOpen: swapTile === null && (adding || tiles.length === 0)
@@ -511,7 +516,7 @@ Panel {
     swapTile = null
     appTile = null
     adding = false
-    moveTile = { address: tile.address, label: Model.tileLabel(tile), session: tile.session }
+    moveTile = { address: tile.address, label: Model.tileLabel(tile), session: tile.session, monitor: tile.monitor, workspace: tile.workspace }
     moveTyping = moveChoices.length === 0
     status = ""
     // Clicking the row's button can leave focus elsewhere; 1–9 and N are
@@ -533,14 +538,16 @@ Panel {
     keyCatcher.forceActiveFocus()
   }
 
-  function moveTo(session) {
+  // `workspace`, from a monitor choice, is where a new session starts.
+  function moveTo(session, workspace) {
     var tile = moveTile
     if (!tile) return
     var name = String(session || "").trim()
     if (Model.sessionName(name) !== name || name === "") return showStatus("Session names use lowercase letters, digits, - and _", true)
     moveTile = null
     keyCatcher.forceActiveFocus()
-    runService(function(engine) { return engine.moveTile(tile.address, name, "Moving " + tile.label + " to " + name) })
+    var label = "Moving " + tile.label + " to " + name + (workspace ? " on workspace " + workspace : "")
+    runService(function(engine) { return engine.moveTile(tile.address, name, label, workspace || 0) })
   }
 
   function cancelMove() {
@@ -956,7 +963,7 @@ Panel {
           return
         }
         if (root.view === "tiles" && root.moveTile) {
-          if (t >= "1" && t <= "9" && root.moveChoices[Number(t) - 1]) root.moveTo(root.moveChoices[Number(t) - 1].name)
+          if (t >= "1" && t <= "9" && root.moveChoices[Number(t) - 1]) root.moveTo(root.moveChoices[Number(t) - 1].name, root.moveChoices[Number(t) - 1].workspace)
           else if (t === "n" || t === "N") root.startMoveTyping()
           return
         }
@@ -3162,8 +3169,10 @@ Panel {
                 keyLabel: String(index + 1)
                 text: modelData.name
                 detail: modelData.place
-                tooltip: "Join " + modelData.name + (modelData.place !== "" ? " on " + modelData.place : "") + ", without reloading"
-                onActivated: root.moveTo(modelData.name)
+                tooltip: modelData.monitor !== ""
+                  ? "Start " + modelData.name + " on " + modelData.place + " and move the tile there, without reloading"
+                  : "Join " + modelData.name + (modelData.place !== "" ? " on " + modelData.place : "") + ", without reloading"
+                onActivated: root.moveTo(modelData.name, modelData.workspace)
               }
             }
             SessionChip {
@@ -3171,7 +3180,7 @@ Panel {
               keyLabel: "N"
               text: "New session"
               dim: true
-              tooltip: "Start a session for this tile; it stays on workspace " + (row.tile ? row.tile.workspace : "")
+              tooltip: "Start a named session for this tile; it stays on workspace " + (row.tile ? row.tile.workspace : "")
               onActivated: root.startMoveTyping()
             }
           }

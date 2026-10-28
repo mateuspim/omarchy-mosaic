@@ -354,8 +354,29 @@ assert.equal(model.planMove(mixed, "0x3", "").error.startsWith("Invalid session 
 assert.equal(model.planMove(mixed, "0x3", 'x" }) os.execute("y').error.startsWith("Invalid session name"), true)
 const fullMix = model.buildList([client("0x1", ["mosaic", "mosaic-a"], { fullscreen: 2, fullscreenClient: 0 })], [], [])
 assert.equal(model.planMove(fullMix, "0x1", "b").error, "Leave fullscreen on that tile before moving it")
-assert.deepEqual(plain(model.moveChoices(mixed, strayTile)), [{ name: "ws-10", place: "workspace 10" }])
+assert.deepEqual(plain(model.moveChoices(mixed, strayTile)), [{ name: "ws-10", place: "workspace 10", monitor: "", workspace: 0 }])
 assert.deepEqual(plain(model.moveChoices(mixed, null).map(c => c.name)), ["default", "ws-10"])
+// A new session on another monitor (the reported case: a session made
+// with N stayed beside default on DP-4, not on the portable display).
+const toPortable = model.planMove(mixed, "0x2", "ws-3", 3)
+assert.deepEqual(plain(toPortable.expressions.slice(2)), [
+  'hl.dsp.window.move({ window = "address:0x2", workspace = "3", follow = false })',
+  'hl.dsp.window.fullscreen_state({ internal = 0, client = 2, window = "address:0x2" })'])
+assert.equal(toPortable.message, "Moved tile " + strayTile.index + " to ws-3 on workspace 3.")
+// An open session keeps its own workspace over the one given.
+assert.equal(model.planMove(mixed, "0x3", "default", 3).message.endsWith("to default on workspace 9."), true)
+assert.equal(model.planMove(mixed, "0x2", "x", 0).expressions.length, 2)
+assert.equal(model.planMove(mixed, "0x2", "x", "3; os").error, 'Invalid workspace "3; os"')
+assert.equal(model.planMove(mixed, "0x2", "x", -1).error, 'Invalid workspace "-1"')
+// The tile is on DP-4 (workspace 10); DP-5 shows 9, where default is,
+// HDMI-A-2 shows the free workspace 3, and a special workspace is skipped.
+const threeScreens = [{ name: "DP-4", focused: true, activeWorkspace: 10 }, { name: "DP-5", focused: false, activeWorkspace: 9 },
+  { name: "HDMI-A-2", focused: false, activeWorkspace: 3 }, { name: "HDMI-A-3", focused: false, activeWorkspace: -98 }]
+const placedTile = Object.assign({}, strayTile, { monitor: "DP-4" })
+assert.deepEqual(plain(model.moveChoices(mixed, placedTile, threeScreens)), [
+  { name: "ws-10", place: "workspace 10", monitor: "", workspace: 0 },
+  { name: "ws-3", place: "HDMI-A-2 · workspace 3", monitor: "HDMI-A-2", workspace: 3 }])
+assert.deepEqual(plain(model.moveChoices(model.buildList([], [], []), null, threeScreens).map(c => c.name)), ["default", "ws-9", "ws-3"])
 
 assert.equal(model.desktopId("brave-origin.desktop\n"), "brave-origin")
 assert.equal(model.desktopId(""), "")

@@ -382,9 +382,12 @@ Scope {
   }
 
   // `mosaic move TILE SESSION`: puts a tile in another session, on that
-  // session's workspace; see Model.planMove.
-  function moveTile(target, session, label) {
-    return startAction(label || "Moving tile " + target + " to " + session, function(list) { return Model.planMove(list, target, session) })
+  // session's workspace, or for a new session on `workspace` when the
+  // panel names one; see Model.planMove.
+  function moveTile(target, session, label, workspace) {
+    return startAction(label || "Moving tile " + target + " to " + session, function(list) {
+      return Model.planMove(list, target, session, workspace || 0)
+    })
   }
 
   // `mosaic close [--session NAME]`; "" closes every tile.
