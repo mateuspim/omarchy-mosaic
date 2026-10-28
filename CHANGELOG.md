@@ -6,6 +6,14 @@
   "network error (#2000)" screen stayed there, since the page had no
   video to watch. A reload that doesn't play again within 45 seconds
   now counts as a failed try and is retried, within the usual three.
+- **Fixed**: with "New tiles here" on, a tile added from the panel on
+  another monitor opened where Hyprland's focus was, not on that monitor,
+  and a session the field had filled in earlier kept winning until the
+  panel reopened. The panel now sends its own monitor and leaves the
+  session field empty.
+- **Fixed**: the panel stopped at 620 pixels and scrolled with a laggy
+  fling; it now grows to the screen's free height, scrolls a fixed step
+  per wheel notch, and brings the add form into view when it opens.
 
 ## 1.6.0 (2026-10-26)
 
