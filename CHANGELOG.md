@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.6.1 (2026-10-27)
 
 - **Fixed**: a Twitch tile that a recovery reload brought back to the
   "network error (#2000)" screen stayed there, since the page had no
