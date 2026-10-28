@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- **Fixed**: a Twitch tile that a recovery reload brought back to the
+  "network error (#2000)" screen stayed there, since the page had no
+  video to watch. A reload that doesn't play again within 45 seconds
+  now counts as a failed try and is retried, within the usual three.
+
 ## 1.6.0 (2026-10-26)
 
 - **New tiles open on the focused workspace**: a switch ("New tiles here") on the Tiles tab

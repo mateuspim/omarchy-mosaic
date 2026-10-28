@@ -2389,6 +2389,10 @@ var RECOVERY_SITES = "twitch.tv, kick.com"
 var RECOVERY_TRIES = 3
 var RECOVERY_WINDOW_MS = 600000
 var RECOVERY_WAITS_MS = [0, 30000, 120000]
+// A reload that doesn't play again within this long counts as a failed
+// try: Twitch can come back on its "Error #2000" screen with no video at
+// all, which the extension reports as a quiet idle (seen 2026-10-26).
+var RECOVERY_RETURN_MS = 45000
 var RECOVERY_LOG_SIZE = 50
 
 // Whether `url` is on one of `sitesText`'s sites (comma separated, such as
@@ -2405,7 +2409,8 @@ function recoverySite(url, sitesText) {
 // What to do about dropped streams. `audio` is Model.tileAudio's output,
 // `recovery` the last result's state by address ({ tab, tries: [ms],
 // waiting: when the last reload was sent, until the stream plays again,
-// recovered: how many reloads brought it back, stalled }), `sitesText` the sites to recover ("" for none),
+// url: the tab's address then, recovered: how many reloads brought it
+// back, stalled }), `sitesText` the sites to recover ("" for none),
 // `live` the tiles' addresses, `now` in ms. Returns { recovery, reload:
 // [address], events: [{ address, action, reason, detail, url }] }, where
 // action is "reloaded", "stalled", or "recovered".
@@ -2422,9 +2427,11 @@ function planRecovery(audio, recovery, sitesText, live, now) {
     }
     var record = old && old.tab === entry.tab ? {
       tab: old.tab, tries: old.tries.filter(function(at) { return now - at < RECOVERY_WINDOW_MS }),
-      waiting: old.waiting, recovered: old.recovered, stalled: old.stalled
-    } : { tab: entry.tab, tries: [], waiting: 0, recovered: 0, stalled: false }
-    var stream = entry.stream
+      waiting: old.waiting, url: old.url, recovered: old.recovered, stalled: old.stalled
+    } : { tab: entry.tab, tries: [], waiting: 0, url: "", recovered: 0, stalled: false }
+    // The user browsed elsewhere since the reload: nothing to wait for.
+    if (record.waiting > 0 && entry.url !== record.url) record.waiting = 0
+    var stream = notBack(entry.stream, record, now) || entry.stream
     var event = function(action) {
       events.push({ address: address, action: action, reason: stream ? stream.reason : "", detail: stream ? stream.detail : "", url: entry.url || "" })
     }
@@ -2444,6 +2451,7 @@ function planRecovery(audio, recovery, sitesText, live, now) {
       } else if (now - last >= RECOVERY_WAITS_MS[record.tries.length]) {
         record.tries.push(now)
         record.waiting = now
+        record.url = entry.url || ""
         reload.push(address)
         event("reloaded")
       }
@@ -2451,6 +2459,25 @@ function planRecovery(audio, recovery, sitesText, live, now) {
     next[address] = record
   })
   return { recovery: next, reload: reload, events: events }
+}
+
+// A recovery reload whose page is still idle RECOVERY_RETURN_MS later,
+// as a drop, so planRecovery tries again; null otherwise. A pause by hand
+// is the user's.
+function notBack(stream, record, now) {
+  if (!stream || stream.state !== "idle" || stream.reason === "paused") return null
+  if (record.waiting <= 0 || now - record.waiting < RECOVERY_RETURN_MS) return null
+  return {
+    state: "dropped", reason: "not back", since: record.waiting, fullscreen: stream.fullscreen,
+    detail: "still idle (" + (stream.reason || "unknown") + ") " + Math.round((now - record.waiting) / 1000) + " s after the reload"
+  }
+}
+
+// Whether any tile waits on a recovery reload that may still fail.
+function recoveryWaiting(recovery) {
+  return Object.keys(recovery).some(function(address) {
+    return recovery[address].waiting > 0 && !recovery[address].stalled
+  })
 }
 
 // Bringing a page's fullscreen back after a reload, which loses it.

@@ -252,7 +252,7 @@ Scope {
       recoveryLog = Model.recoveryLog(recoveryLog, result.events, now, labels)
     }
     if (JSON.stringify(result.recovery) !== JSON.stringify(recovery)) recovery = result.recovery
-    recoveryTimer.running = Object.keys(again.pending).length > 0 || recoveringSites !== "" && Object.keys(audio).some(function(address) {
+    recoveryTimer.running = Object.keys(again.pending).length > 0 || Model.recoveryWaiting(result.recovery) || recoveringSites !== "" && Object.keys(audio).some(function(address) {
       var stream = audio[address].stream
       return stream !== null && stream.state === "dropped" && !(result.recovery[address] && result.recovery[address].stalled)
     })
@@ -1703,7 +1703,8 @@ Scope {
     onTriggered: if (root.focusProbe === root.focusedWindow) root.verifyExtension()
   }
 
-  // Retries a dropped stream's reload once its wait is over.
+  // Retries a dropped stream's reload once its wait is over, and checks
+  // that a reload played again.
   Timer {
     id: recoveryTimer
     interval: 5000

@@ -21,7 +21,9 @@ which briefly focuses the tile, so it waits until the tile's workspace
 is on screen, then hands focus and the cursor back.
 
 It reloads a dropped tile right away, then waits 30 seconds and 2 minutes
-before trying again. After three tries in ten minutes it stops and the
+before trying again. A reload that doesn't bring the stream back within
+45 seconds, such as one that lands on Twitch's "network error" screen,
+counts as a failed try. After three tries in ten minutes it stops and the
 tile's row says **stream stalled**; P reloads it by hand. A tile's row
 also says when a stream was recovered. It only acts on the sites in the
 widget's **Stream recovery sites** setting, `twitch.tv, kick.com` by
