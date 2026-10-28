@@ -20,8 +20,9 @@ type any address.
 - **Fullscreen in its tile**: a video's fullscreen fills its tile, not the
   monitor, and Mosaic can put it back when something takes it away.
 - **A keyboard-first panel** in the Omarchy bar: sessions and their tiles;
-  add, focus, swap, reload and remove tiles, move them between sessions,
-  and open new ones on the workspace you're on; in your theme's colours.
+  add, focus, swap, reload and remove tiles, move them between sessions
+  or monitors, and open new ones on the workspace you're on; in your
+  theme's colours.
 - **Swap a tile in place** with a card over the tile (`Super+Shift+S`):
   another web app or another address, same slot.
 - **Layouts per workspace**: Grid, Stack, Main + small, 16:9 fit, or your

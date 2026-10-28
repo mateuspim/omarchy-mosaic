@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.7.0 (2026-10-27)
 
 - **Move a tile to another monitor**: the move picker (T) now also lists
   each other monitor whose workspace has no session. Choosing one moves
