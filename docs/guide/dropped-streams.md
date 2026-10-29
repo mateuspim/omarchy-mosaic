@@ -27,7 +27,8 @@ counts as a failed try. After three tries in ten minutes it stops and the
 tile's row says **stream stalled**; P reloads it by hand. A tile's row
 also says when a stream was recovered. It only acts on the sites in the
 widget's **Stream recovery sites** setting, `twitch.tv, kick.com` by
-default (YouTube doesn't need it). `mosaic streams` shows each tile's
+default (YouTube doesn't need it); a tile on another site shows no
+stream warning on its row. `mosaic streams` shows each tile's
 stream and the recent recoveries with the reason, such as
 `MEDIA_ERR_DECODE`; they are logged to the shell's journal too.
 

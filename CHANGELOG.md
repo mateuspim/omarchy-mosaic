@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- **Fixed**: a tile on a site outside "Stream recovery sites", such as
+  YouTube Music, could say **stream dropped** while it played, after a
+  song ended or with its player hidden. Only recovered sites show a
+  stream warning now; `mosaic streams` still shows every tile's state.
+
 ## 1.7.0 (2026-10-27)
 
 - **Move a tile to another monitor**: the move picker (T) now also lists

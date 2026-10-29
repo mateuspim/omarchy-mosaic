@@ -2565,14 +2565,17 @@ function fullscreenKeyLua(address) {
 }
 
 // A tile's stream for its panel row: { text, warn }, or text "" for
-// nothing to show. `enabled`: whether its site is recovered. A reload
-// shows for a minute at most, since a channel that went offline never
-// plays again.
+// nothing to show. `enabled`: whether its site is recovered; on other
+// sites a "drop" is often just music or a video doing what it should (a
+// song that ended, a pause from a media key, YouTube Music's player
+// hidden while browsing, seen 2026-10-29), so only `mosaic streams` says
+// it. A reload shows for a minute at most, since a channel that went
+// offline never plays again.
 function streamStatus(entry, record, enabled, now) {
+  if (!enabled) return { text: "", warn: false }
   var stream = entry ? entry.stream : null
   if (record && record.stalled) return { text: "stream stalled; P reloads it", warn: true }
-  if (stream && stream.state === "dropped")
-    return enabled ? { text: "stream dropped; reloading", warn: true } : { text: "stream dropped", warn: true }
+  if (stream && stream.state === "dropped") return { text: "stream dropped; reloading", warn: true }
   if (record && record.waiting > 0 && now - record.waiting < 60000) return { text: "reloading the stream", warn: false }
   if (record && record.recovered > 0)
     return { text: "stream recovered" + (record.recovered > 1 ? " " + record.recovered + "×" : ""), warn: false }

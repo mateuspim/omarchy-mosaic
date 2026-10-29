@@ -996,7 +996,9 @@ assert.equal(model.planRecovery({}, plan.recovery, sites, ["0xa"], 500000).recov
 assert.deepEqual(plain(model.planRecovery({}, plan.recovery, sites, [], 500000).recovery), {})
 // The panel's line.
 assert.deepEqual(plain(model.streamStatus(streamAudio(dropped)["0xa"], undefined, true, 0)), { text: "stream dropped; reloading", warn: true })
-assert.deepEqual(plain(model.streamStatus(streamAudio(dropped)["0xa"], undefined, false, 0)), { text: "stream dropped", warn: true })
+// A site not recovered says nothing: YouTube Music reported "gone" while
+// playing, with its player hidden (2026-10-29).
+assert.deepEqual(plain(model.streamStatus(streamAudio(dropped)["0xa"], undefined, false, 0)), { text: "", warn: false })
 assert.equal(model.streamStatus(undefined, undefined, true, 0).text, "")
 assert.equal(model.streamStatus(streamAudio(null)["0xa"], { waiting: 1000, recovered: 0 }, true, 30000).text, "reloading the stream")
 assert.equal(model.streamStatus(streamAudio(null)["0xa"], { waiting: 1000, recovered: 0 }, true, 70000).text, "")
