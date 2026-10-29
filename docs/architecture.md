@@ -219,8 +219,13 @@ fails, and only a page reload brings them back (the user's report,
   tries in ten minutes. After that the tile is `stalled` until its
   stream plays again or the user reloads it by hand (P, `mosaic reload`,
   `reloadTile`), which also gives its tries back. A tile whose stream
-  plays again after a reload counts as recovered. The service runs the
-  plan on every report and every 5 s while a reload waits its turn, logs
+  plays again after a reload counts as recovered. A reload whose page is
+  still idle 45 s later, on the same address and not paused by hand,
+  counts as a failed try (`not back`): Twitch can come back on its
+  "Error #2000" screen with no video element at all, which the page
+  reports as a quiet `idle (no video)` (seen 2026-10-26). The service runs the
+  plan on every report and every 5 s while a reload waits its turn or
+  for its page to play, logs
   each event to the journal ("Mosaic: stream reloaded: …"), and keeps the
   last 50 for `mosaic streams` (IPC `streams`). The panel's switch is the
   widget setting `recoverStreams` (on by default).

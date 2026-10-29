@@ -1,5 +1,35 @@
 # Changelog
 
+## 1.7.1 (2026-10-29)
+
+- **Fixed**: a tile on a site outside "Stream recovery sites", such as
+  YouTube Music, could say **stream dropped** while it played, after a
+  song ended or with its player hidden. Only recovered sites show a
+  stream warning now; `mosaic streams` still shows every tile's state.
+
+## 1.7.0 (2026-10-27)
+
+- **Move a tile to another monitor**: the move picker (T) now also lists
+  each other monitor whose workspace has no session. Choosing one moves
+  the tile there in a new session, named as "New tiles here" would name
+  it (`default` when free, else `ws-N`); before, a new session stayed on
+  the tile's workspace beside the old one.
+
+## 1.6.1 (2026-10-27)
+
+- **Fixed**: a Twitch tile that a recovery reload brought back to the
+  "network error (#2000)" screen stayed there, since the page had no
+  video to watch. A reload that doesn't play again within 45 seconds
+  now counts as a failed try and is retried, within the usual three.
+- **Fixed**: with "New tiles here" on, a tile added from the panel on
+  another monitor opened where Hyprland's focus was, not on that monitor,
+  and a session the field had filled in earlier kept winning until the
+  panel reopened. The panel now sends its own monitor and leaves the
+  session field empty.
+- **Fixed**: the panel stopped at 620 pixels and scrolled with a laggy
+  fling; it now grows to the screen's free height, scrolls a fixed step
+  per wheel notch, and brings the add form into view when it opens.
+
 ## 1.6.0 (2026-10-26)
 
 - **New tiles open on the focused workspace**: a switch ("New tiles here") on the Tiles tab

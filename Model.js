@@ -1697,10 +1697,12 @@ function focusedSession(list, monitors, monitorName) {
 
 // `mosaic move TILE SESSION`: retags the tile into `session` and, when
 // that session is tiled on another workspace, moves it there and contains
-// it again. A new session stays where the tile is. Tags decide membership
-// (ADR 2); the store's record follows once the dispatches succeed.
-// Returns { tile, session, record, expressions, message } or { error }.
-function planMove(list, target, session) {
+// it again. A new session stays where the tile is, or starts on
+// `workspace` when one is given (the panel's monitor choices). Tags decide
+// membership (ADR 2); the store's record follows once the dispatches
+// succeed. Returns { tile, session, record, expressions, message } or
+// { error }.
+function planMove(list, target, session, workspace) {
   var tile = findTile(listTiles(list), target)
   if (!tile) return { error: "No mosaic tile " + JSON.stringify(String(target)) + "; see `mosaic list`" }
   var name = String(session || "").trim()
@@ -1709,15 +1711,17 @@ function planMove(list, target, session) {
   if (tile.session === name) return { error: "Tile " + tile.index + " is already in " + name }
   if (tile.state === "fullscreen") return { error: "Leave fullscreen on that tile before moving it" }
   if (!validAddress(tile.address)) return { error: "Unexpected Hyprland window address " + JSON.stringify(String(tile.address)) }
+  if (workspace !== undefined && workspace !== null && workspace !== 0 && !(Number.isInteger(workspace) && workspace > 0))
+    return { error: "Invalid workspace " + JSON.stringify(String(workspace)) }
   var window = 'window = "address:' + tile.address + '"'
   var expressions = [
     "hl.dsp.window.tag({ " + window + ', tag = "-' + TAG + "-" + tile.session + '" })',
     "hl.dsp.window.tag({ " + window + ', tag = "+' + TAG + "-" + name + '" })'
   ]
   var open = sessionWorkspace(list, name)
-  var workspace = open === null ? tile.workspace : open
-  if (workspace !== tile.workspace) {
-    expressions.push("hl.dsp.window.move({ " + window + ', workspace = "' + workspace + '", follow = false })')
+  var destination = open !== null ? open : workspace ? workspace : tile.workspace
+  if (destination !== tile.workspace) {
+    expressions.push("hl.dsp.window.move({ " + window + ', workspace = "' + destination + '", follow = false })')
     expressions.push(dispatchExpression("contain", tile.address))
   }
   return {
@@ -1725,19 +1729,37 @@ function planMove(list, target, session) {
     session: name,
     record: { address: tile.address, session: name, url: tile.url || "" },
     expressions: expressions,
-    message: "Moved tile " + tile.index + " to " + name + (workspace !== tile.workspace ? " on workspace " + workspace : "") + "."
+    message: "Moved tile " + tile.index + " to " + name + (destination !== tile.workspace ? " on workspace " + destination : "") + "."
   }
 }
 
 // The sessions a tile can move to, for the panel's picker: the other
-// sessions in list order, at most nine (keys 1–9), each with where it is.
-function moveChoices(list, tile) {
+// sessions in list order, then a new session on each other monitor
+// (`monitors` as monitorWorkspace takes them) whose workspace has none, at
+// most nine (keys 1–9), each with where it is. A monitor choice carries
+// its `workspace` for planMove; a session's is 0.
+function moveChoices(list, tile, monitors) {
   var sessions = list && Array.isArray(list.sessions) ? list.sessions : []
   var choices = []
+  var taken = {}
   for (var i = 0; i < sessions.length && choices.length < 9; i++) {
-    if (tile && sessions[i].name === tile.session) continue
     var open = sessionWorkspace(list, sessions[i].name)
-    choices.push({ name: sessions[i].name, place: open === null ? "" : "workspace " + open })
+    if (open !== null) taken[open] = true
+    if (tile && sessions[i].name === tile.session) continue
+    choices.push({ name: sessions[i].name, place: open === null ? "" : "workspace " + open, monitor: "", workspace: 0 })
+  }
+  // Then each other monitor whose workspace holds no session: the tile
+  // starts one there, named as an add with addOnFocusedWorkspace would.
+  var screens = Array.isArray(monitors) ? monitors : []
+  for (var m = 0; m < screens.length && choices.length < 9; m++) {
+    var workspace = screens[m].activeWorkspace
+    if (!(Number.isInteger(workspace) && workspace > 0) || taken[workspace]) continue
+    if (tile && (screens[m].name === tile.monitor || workspace === tile.workspace)) continue
+    var named = focusedSession(list, screens, screens[m].name)
+    if (named.error) continue
+    // `default` can be free on several monitors; only the first gets it.
+    var name = choices.some(function(choice) { return choice.name === named.session }) ? "ws-" + workspace : named.session
+    choices.push({ name: name, place: screens[m].name + " · workspace " + workspace, monitor: screens[m].name, workspace: workspace })
   }
   return choices
 }
@@ -2389,6 +2411,10 @@ var RECOVERY_SITES = "twitch.tv, kick.com"
 var RECOVERY_TRIES = 3
 var RECOVERY_WINDOW_MS = 600000
 var RECOVERY_WAITS_MS = [0, 30000, 120000]
+// A reload that doesn't play again within this long counts as a failed
+// try: Twitch can come back on its "Error #2000" screen with no video at
+// all, which the extension reports as a quiet idle (seen 2026-10-26).
+var RECOVERY_RETURN_MS = 45000
 var RECOVERY_LOG_SIZE = 50
 
 // Whether `url` is on one of `sitesText`'s sites (comma separated, such as
@@ -2405,7 +2431,8 @@ function recoverySite(url, sitesText) {
 // What to do about dropped streams. `audio` is Model.tileAudio's output,
 // `recovery` the last result's state by address ({ tab, tries: [ms],
 // waiting: when the last reload was sent, until the stream plays again,
-// recovered: how many reloads brought it back, stalled }), `sitesText` the sites to recover ("" for none),
+// url: the tab's address then, recovered: how many reloads brought it
+// back, stalled }), `sitesText` the sites to recover ("" for none),
 // `live` the tiles' addresses, `now` in ms. Returns { recovery, reload:
 // [address], events: [{ address, action, reason, detail, url }] }, where
 // action is "reloaded", "stalled", or "recovered".
@@ -2422,9 +2449,11 @@ function planRecovery(audio, recovery, sitesText, live, now) {
     }
     var record = old && old.tab === entry.tab ? {
       tab: old.tab, tries: old.tries.filter(function(at) { return now - at < RECOVERY_WINDOW_MS }),
-      waiting: old.waiting, recovered: old.recovered, stalled: old.stalled
-    } : { tab: entry.tab, tries: [], waiting: 0, recovered: 0, stalled: false }
-    var stream = entry.stream
+      waiting: old.waiting, url: old.url, recovered: old.recovered, stalled: old.stalled
+    } : { tab: entry.tab, tries: [], waiting: 0, url: "", recovered: 0, stalled: false }
+    // The user browsed elsewhere since the reload: nothing to wait for.
+    if (record.waiting > 0 && entry.url !== record.url) record.waiting = 0
+    var stream = notBack(entry.stream, record, now) || entry.stream
     var event = function(action) {
       events.push({ address: address, action: action, reason: stream ? stream.reason : "", detail: stream ? stream.detail : "", url: entry.url || "" })
     }
@@ -2444,6 +2473,7 @@ function planRecovery(audio, recovery, sitesText, live, now) {
       } else if (now - last >= RECOVERY_WAITS_MS[record.tries.length]) {
         record.tries.push(now)
         record.waiting = now
+        record.url = entry.url || ""
         reload.push(address)
         event("reloaded")
       }
@@ -2451,6 +2481,25 @@ function planRecovery(audio, recovery, sitesText, live, now) {
     next[address] = record
   })
   return { recovery: next, reload: reload, events: events }
+}
+
+// A recovery reload whose page is still idle RECOVERY_RETURN_MS later,
+// as a drop, so planRecovery tries again; null otherwise. A pause by hand
+// is the user's.
+function notBack(stream, record, now) {
+  if (!stream || stream.state !== "idle" || stream.reason === "paused") return null
+  if (record.waiting <= 0 || now - record.waiting < RECOVERY_RETURN_MS) return null
+  return {
+    state: "dropped", reason: "not back", since: record.waiting, fullscreen: stream.fullscreen,
+    detail: "still idle (" + (stream.reason || "unknown") + ") " + Math.round((now - record.waiting) / 1000) + " s after the reload"
+  }
+}
+
+// Whether any tile waits on a recovery reload that may still fail.
+function recoveryWaiting(recovery) {
+  return Object.keys(recovery).some(function(address) {
+    return recovery[address].waiting > 0 && !recovery[address].stalled
+  })
 }
 
 // Bringing a page's fullscreen back after a reload, which loses it.
@@ -2516,14 +2565,17 @@ function fullscreenKeyLua(address) {
 }
 
 // A tile's stream for its panel row: { text, warn }, or text "" for
-// nothing to show. `enabled`: whether its site is recovered. A reload
-// shows for a minute at most, since a channel that went offline never
-// plays again.
+// nothing to show. `enabled`: whether its site is recovered; on other
+// sites a "drop" is often just music or a video doing what it should (a
+// song that ended, a pause from a media key, YouTube Music's player
+// hidden while browsing, seen 2026-10-29), so only `mosaic streams` says
+// it. A reload shows for a minute at most, since a channel that went
+// offline never plays again.
 function streamStatus(entry, record, enabled, now) {
+  if (!enabled) return { text: "", warn: false }
   var stream = entry ? entry.stream : null
   if (record && record.stalled) return { text: "stream stalled; P reloads it", warn: true }
-  if (stream && stream.state === "dropped")
-    return enabled ? { text: "stream dropped; reloading", warn: true } : { text: "stream dropped", warn: true }
+  if (stream && stream.state === "dropped") return { text: "stream dropped; reloading", warn: true }
   if (record && record.waiting > 0 && now - record.waiting < 60000) return { text: "reloading the stream", warn: false }
   if (record && record.recovered > 0)
     return { text: "stream recovered" + (record.recovered > 1 ? " " + record.recovered + "×" : ""), warn: false }

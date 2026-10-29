@@ -102,7 +102,12 @@ Panel {
   // once when there is no other session to pick.
   property var moveField: null
   property bool moveTyping: false
-  readonly property var moveChoices: moveTile ? Model.moveChoices(listing, moveTile) : []
+  readonly property var moveChoices: moveTile ? Model.moveChoices(listing, moveTile, liveMonitors) : []
+  // Hyprland's monitors as Model.monitorWorkspace takes them, live, for the
+  // move picker's other-monitor choices.
+  readonly property var liveMonitors: Hyprland.monitors.values.map(function(monitor) {
+    return { name: monitor.name, focused: monitor.focused === true, activeWorkspace: monitor.activeWorkspace ? monitor.activeWorkspace.id : 0 }
+  })
   // The Add tile section is open (A); it is always open without tiles.
   property bool adding: false
   readonly property bool addOpen: swapTile === null && (adding || tiles.length === 0)
@@ -239,8 +244,13 @@ Panel {
       showStatus("Session names use lowercase letters, digits, - and _", true)
       return false
     }
+    // The service picks the session from the monitor this panel is open
+    // on: clicking another monitor's bar leaves Hyprland's focused monitor
+    // where it was, so "focused" alone opened tiles on the wrong display.
+    var monitor = session === "" && panel.screen ? panel.screen.name : ""
     runService(function(engine) {
-      return engine.add([url], { session: session, browser: root.browser }, "Adding " + label + " to " + (session || "the focused workspace"))
+      return engine.add([url], { session: session, monitor: monitor, browser: root.browser },
+        "Adding " + label + " to " + (session || "the workspace on " + (monitor || "the focused monitor")))
     })
     return true
   }
@@ -417,6 +427,20 @@ Panel {
     showStatus("Copied " + service.extensionDir, false)
   }
 
+  // Scrolls the panel to `y`, kept within the content.
+  function scrollTo(y) {
+    flick.contentY = Math.max(0, Math.min(y, flick.contentHeight - flick.height))
+  }
+
+  // Scrolls the least that brings `item` fully into view.
+  function revealItem(item) {
+    if (!item || flick.contentHeight <= flick.height) return
+    var top = item.mapToItem(column, 0, 0).y
+    var bottom = top + item.height
+    if (bottom > flick.contentY + flick.height) scrollTo(bottom - flick.height)
+    if (top < flick.contentY) scrollTo(top)
+  }
+
   function startAdding() {
     appTile = null
     moveTile = null
@@ -427,8 +451,13 @@ Panel {
     }
     setView("tiles")
     adding = true
-    if (selectedTile && sessionField.text === "" && !addOnFocusedWorkspace) sessionField.text = selectedTile.session
-    Qt.callLater(function() { urlField.forceActiveFocus() })
+    // The session field stays empty: its placeholder names the session the
+    // tile joins. Filling in the selected tile's session here outlived a
+    // later O, so new tiles kept joining it until the panel reopened.
+    Qt.callLater(function() {
+      urlField.forceActiveFocus()
+      revealItem(urlField.parent)
+    })
   }
 
   // Enters swap mode for `tile`: the web app buttons, 1–9, and the address
@@ -487,7 +516,7 @@ Panel {
     swapTile = null
     appTile = null
     adding = false
-    moveTile = { address: tile.address, label: Model.tileLabel(tile), session: tile.session }
+    moveTile = { address: tile.address, label: Model.tileLabel(tile), session: tile.session, monitor: tile.monitor, workspace: tile.workspace }
     moveTyping = moveChoices.length === 0
     status = ""
     // Clicking the row's button can leave focus elsewhere; 1–9 and N are
@@ -509,14 +538,16 @@ Panel {
     keyCatcher.forceActiveFocus()
   }
 
-  function moveTo(session) {
+  // `workspace`, from a monitor choice, is where a new session starts.
+  function moveTo(session, workspace) {
     var tile = moveTile
     if (!tile) return
     var name = String(session || "").trim()
     if (Model.sessionName(name) !== name || name === "") return showStatus("Session names use lowercase letters, digits, - and _", true)
     moveTile = null
     keyCatcher.forceActiveFocus()
-    runService(function(engine) { return engine.moveTile(tile.address, name, "Moving " + tile.label + " to " + name) })
+    var label = "Moving " + tile.label + " to " + name + (workspace ? " on workspace " + workspace : "")
+    runService(function(engine) { return engine.moveTile(tile.address, name, label, workspace || 0) })
   }
 
   function cancelMove() {
@@ -880,7 +911,10 @@ Panel {
     // card's, so it counts the padding and border around the content.
     contentWidth: panel.fittedContentWidth(Math.max(Style.space(400), Math.ceil(viewTabs.implicitWidth)
       + panel.padding * 2 + Border.left(panel.borderSpec) + Border.right(panel.borderSpec)))
-    contentHeight: panel.fittedContentHeight(column.implicitHeight, Style.space(620))
+    // No fixed cap: the card grows to the screen's free height, so the
+    // tiles and the add form fit without scrolling where there is room
+    // (a 620 cap made five tiles scroll on a 1440p monitor, 2026-10-27).
+    contentHeight: panel.fittedContentHeight(column.implicitHeight)
 
     PanelKeyCatcher {
       id: keyCatcher
@@ -929,7 +963,7 @@ Panel {
           return
         }
         if (root.view === "tiles" && root.moveTile) {
-          if (t >= "1" && t <= "9" && root.moveChoices[Number(t) - 1]) root.moveTo(root.moveChoices[Number(t) - 1].name)
+          if (t >= "1" && t <= "9" && root.moveChoices[Number(t) - 1]) root.moveTo(root.moveChoices[Number(t) - 1].name, root.moveChoices[Number(t) - 1].workspace)
           else if (t === "n" || t === "N") root.startMoveTyping()
           return
         }
@@ -974,6 +1008,19 @@ Panel {
         flickableDirection: Flickable.VerticalFlick
         interactive: contentHeight > height
         ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+
+        // Flickable's own wheel scrolling turns each notch into a fling
+        // that lags and overshoots; step a fixed distance per notch
+        // instead, and follow touchpads pixel for pixel.
+        WheelHandler {
+          target: null
+          acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+          onWheel: function(event) {
+            var delta = event.pixelDelta.y !== 0 ? event.pixelDelta.y : event.angleDelta.y / 120 * Style.space(72)
+            if (delta === 0) return
+            root.scrollTo(flick.contentY - delta)
+          }
+        }
 
         Column {
           id: column
@@ -1108,7 +1155,7 @@ Panel {
                 text: "New tiles open on the focused workspace"
                 label: "New tiles here"
                 keyLabel: "O"
-                tooltip: "With no session typed, a new tile joins the session on the workspace you're on, or starts one there (ws-N), instead of the selected tile's session"
+                tooltip: "With no session typed, a new tile joins the session on this monitor's workspace, or starts one there (ws-N), instead of the selected tile's session"
                 onToggled: root.toggleAddOnFocused()
               }
             }
@@ -3122,8 +3169,10 @@ Panel {
                 keyLabel: String(index + 1)
                 text: modelData.name
                 detail: modelData.place
-                tooltip: "Join " + modelData.name + (modelData.place !== "" ? " on " + modelData.place : "") + ", without reloading"
-                onActivated: root.moveTo(modelData.name)
+                tooltip: modelData.monitor !== ""
+                  ? "Start " + modelData.name + " on " + modelData.place + " and move the tile there, without reloading"
+                  : "Join " + modelData.name + (modelData.place !== "" ? " on " + modelData.place : "") + ", without reloading"
+                onActivated: root.moveTo(modelData.name, modelData.workspace)
               }
             }
             SessionChip {
@@ -3131,7 +3180,7 @@ Panel {
               keyLabel: "N"
               text: "New session"
               dim: true
-              tooltip: "Start a session for this tile; it stays on workspace " + (row.tile ? row.tile.workspace : "")
+              tooltip: "Start a named session for this tile; it stays on workspace " + (row.tile ? row.tile.workspace : "")
               onActivated: root.startMoveTyping()
             }
           }

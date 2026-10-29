@@ -5,7 +5,7 @@ import vm from "node:vm"
 const source = fs.readFileSync(new URL("../Model.js", import.meta.url), "utf8")
   .replace(/^\.pragma library\s*/m, "")
 const model = {}
-vm.runInNewContext(source + "\nObject.assign(model, {  parseSaved, serializeSaved, snapshotSession, missingTiles, parseWorkspaces, parseWorkspaceRules, restoreWorkspace, restoreLayout, savedRows, loginSessions, savedText, zoneCount, newCustom, zoneDividers, withDivider, withoutZone, withSplit, ordinal, reconcileVolumes, layoutWorkspaceRows, shownWorkspaceRows, windowCounts, customRows, freeLayoutName, layoutChoices, layoutLabel, nextLayout, parseLayoutName, hyprLayoutName, layoutSlug, normalizeCustom, visualZones, defineLua, withZoneSize, withMain, withName, customSummary, parseLayouts, serializeLayouts, layoutsLoadLua, layoutsLoaded, layoutRuleLua, sessionWorkspace, tileStates, planWorkspaceLayout, planSyncLayouts, planSaveCustom, planDeleteCustom, workspaceChoice, layoutsText, hiddenEntries, showWebapp, nameList, visibleWebapps, hideWebapp, sessionOf, clientFromIpc, parseStore, tileState, buildList, shapeList, parseClients, validAddress, dispatchExpression, listTiles, findTile, planFocus, planRemove, planClose, planContain, planAutoContain, restoreAfterMove, monitorFromIpc, parseMonitors, resolveAddTargets, chooseWorkspace, monitorWorkspace, focusedSession, planMove, moveChoices, desktopId, isChromiumFamily, isAppWindow, parseOpenWindow, tileDispatches, pruneRecords, serializeStore, planReplace, replaceRecord, parseCursorPos, cursorMoveExpression, parseKeySpec, bindConflict, tileRect, listText, webappsText, monitorsText, splitLines, parseBridgeMessage, browserLabel, bridgeWindows, siteOf, matchTiles, otherTitles, keepTabs, tileTab, navigationSettled, extensionState, extensionNotice, extensionSteps, browserClass, browserPids, tileAudio, focusMutes, audioIcon, extensionFromManifest, parseStream, planRefullscreen, fullscreenKeyLua, tileShown, recoverySite, planRecovery, streamStatus, recoveryLog, streamsText, bridgeHas, stepVolume, parseVolume, swapBindLua, unbindLua, webappUrl, webappFromEntry, buildWebapps, shapeWebapps, findWebapp, resolveTarget, parseList, tileLabel, tileMeta, sessionPlace, tileApp, tileName, webappName, webappNameError, siteRoot, planSaveWebapp, tileSubtitle, tileInitial, layoutBoxes, keyHints, normalizeUrl, sessionName, summary, anyUncontained, parseManifest });", { model })
+vm.runInNewContext(source + "\nObject.assign(model, {  parseSaved, serializeSaved, snapshotSession, missingTiles, parseWorkspaces, parseWorkspaceRules, restoreWorkspace, restoreLayout, savedRows, loginSessions, savedText, zoneCount, newCustom, zoneDividers, withDivider, withoutZone, withSplit, ordinal, reconcileVolumes, layoutWorkspaceRows, shownWorkspaceRows, windowCounts, customRows, freeLayoutName, layoutChoices, layoutLabel, nextLayout, parseLayoutName, hyprLayoutName, layoutSlug, normalizeCustom, visualZones, defineLua, withZoneSize, withMain, withName, customSummary, parseLayouts, serializeLayouts, layoutsLoadLua, layoutsLoaded, layoutRuleLua, sessionWorkspace, tileStates, planWorkspaceLayout, planSyncLayouts, planSaveCustom, planDeleteCustom, workspaceChoice, layoutsText, hiddenEntries, showWebapp, nameList, visibleWebapps, hideWebapp, sessionOf, clientFromIpc, parseStore, tileState, buildList, shapeList, parseClients, validAddress, dispatchExpression, listTiles, findTile, planFocus, planRemove, planClose, planContain, planAutoContain, restoreAfterMove, monitorFromIpc, parseMonitors, resolveAddTargets, chooseWorkspace, monitorWorkspace, focusedSession, planMove, moveChoices, desktopId, isChromiumFamily, isAppWindow, parseOpenWindow, tileDispatches, pruneRecords, serializeStore, planReplace, replaceRecord, parseCursorPos, cursorMoveExpression, parseKeySpec, bindConflict, tileRect, listText, webappsText, monitorsText, splitLines, parseBridgeMessage, browserLabel, bridgeWindows, siteOf, matchTiles, otherTitles, keepTabs, tileTab, navigationSettled, extensionState, extensionNotice, extensionSteps, browserClass, browserPids, tileAudio, focusMutes, audioIcon, extensionFromManifest, parseStream, planRefullscreen, fullscreenKeyLua, tileShown, recoverySite, planRecovery, recoveryWaiting, streamStatus, recoveryLog, streamsText, bridgeHas, stepVolume, parseVolume, swapBindLua, unbindLua, webappUrl, webappFromEntry, buildWebapps, shapeWebapps, findWebapp, resolveTarget, parseList, tileLabel, tileMeta, sessionPlace, tileApp, tileName, webappName, webappNameError, siteRoot, planSaveWebapp, tileSubtitle, tileInitial, layoutBoxes, keyHints, normalizeUrl, sessionName, summary, anyUncontained, parseManifest });", { model })
 
 // Values built inside the VM belong to another realm, so compare copies.
 const plain = value => JSON.parse(JSON.stringify(value))
@@ -354,8 +354,29 @@ assert.equal(model.planMove(mixed, "0x3", "").error.startsWith("Invalid session 
 assert.equal(model.planMove(mixed, "0x3", 'x" }) os.execute("y').error.startsWith("Invalid session name"), true)
 const fullMix = model.buildList([client("0x1", ["mosaic", "mosaic-a"], { fullscreen: 2, fullscreenClient: 0 })], [], [])
 assert.equal(model.planMove(fullMix, "0x1", "b").error, "Leave fullscreen on that tile before moving it")
-assert.deepEqual(plain(model.moveChoices(mixed, strayTile)), [{ name: "ws-10", place: "workspace 10" }])
+assert.deepEqual(plain(model.moveChoices(mixed, strayTile)), [{ name: "ws-10", place: "workspace 10", monitor: "", workspace: 0 }])
 assert.deepEqual(plain(model.moveChoices(mixed, null).map(c => c.name)), ["default", "ws-10"])
+// A new session on another monitor (the reported case: a session made
+// with N stayed beside default on DP-4, not on the portable display).
+const toPortable = model.planMove(mixed, "0x2", "ws-3", 3)
+assert.deepEqual(plain(toPortable.expressions.slice(2)), [
+  'hl.dsp.window.move({ window = "address:0x2", workspace = "3", follow = false })',
+  'hl.dsp.window.fullscreen_state({ internal = 0, client = 2, window = "address:0x2" })'])
+assert.equal(toPortable.message, "Moved tile " + strayTile.index + " to ws-3 on workspace 3.")
+// An open session keeps its own workspace over the one given.
+assert.equal(model.planMove(mixed, "0x3", "default", 3).message.endsWith("to default on workspace 9."), true)
+assert.equal(model.planMove(mixed, "0x2", "x", 0).expressions.length, 2)
+assert.equal(model.planMove(mixed, "0x2", "x", "3; os").error, 'Invalid workspace "3; os"')
+assert.equal(model.planMove(mixed, "0x2", "x", -1).error, 'Invalid workspace "-1"')
+// The tile is on DP-4 (workspace 10); DP-5 shows 9, where default is,
+// HDMI-A-2 shows the free workspace 3, and a special workspace is skipped.
+const threeScreens = [{ name: "DP-4", focused: true, activeWorkspace: 10 }, { name: "DP-5", focused: false, activeWorkspace: 9 },
+  { name: "HDMI-A-2", focused: false, activeWorkspace: 3 }, { name: "HDMI-A-3", focused: false, activeWorkspace: -98 }]
+const placedTile = Object.assign({}, strayTile, { monitor: "DP-4" })
+assert.deepEqual(plain(model.moveChoices(mixed, placedTile, threeScreens)), [
+  { name: "ws-10", place: "workspace 10", monitor: "", workspace: 0 },
+  { name: "ws-3", place: "HDMI-A-2 · workspace 3", monitor: "HDMI-A-2", workspace: 3 }])
+assert.deepEqual(plain(model.moveChoices(model.buildList([], [], []), null, threeScreens).map(c => c.name)), ["default", "ws-9", "ws-3"])
 
 assert.equal(model.desktopId("brave-origin.desktop\n"), "brave-origin")
 assert.equal(model.desktopId(""), "")
@@ -950,6 +971,23 @@ assert.deepEqual(plain(model.streamStatus(streamAudio(dropped)["0xa"], plan.reco
 assert.equal(model.planRecovery(streamAudio({ state: "playing" }), plan.recovery, sites, ["0xa"], 500000).recovery["0xa"].stalled, false)
 // Old tries leave the window.
 assert.deepEqual(plain(model.planRecovery(streamAudio(dropped), Object.assign({}, plan.recovery, { "0xa": Object.assign({}, plan.recovery["0xa"], { stalled: false }) }), sites, ["0xa"], 2000000).reload), ["0xa"])
+// A reload that came back on an error screen with no video (Twitch's
+// "Error #2000") is tried again once RECOVERY_RETURN_MS passes.
+const noVideo = { state: "idle", reason: "no video", detail: "", since: 5000 }
+let gone = model.planRecovery(streamAudio(dropped), {}, sites, ["0xa"], 1000)
+assert.equal(model.recoveryWaiting(gone.recovery), true)
+assert.deepEqual(plain(model.planRecovery(streamAudio(noVideo), gone.recovery, sites, ["0xa"], 45000).reload), [])
+gone = model.planRecovery(streamAudio(noVideo), gone.recovery, sites, ["0xa"], 46000)
+assert.deepEqual(plain(gone.reload), ["0xa"])
+assert.deepEqual(plain(gone.events), [{ address: "0xa", action: "reloaded", reason: "not back", detail: "still idle (no video) 45 s after the reload", url: "https://twitch.tv/a" }])
+assert.equal(gone.recovery["0xa"].waiting, 46000)
+// Paused by hand, or browsed to another page: left alone.
+assert.deepEqual(plain(model.planRecovery(streamAudio({ state: "idle", reason: "paused", since: 5000 }), gone.recovery, sites, ["0xa"], 200000).reload), [])
+const browsed = model.planRecovery(streamAudio(noVideo, "https://twitch.tv/directory"), gone.recovery, sites, ["0xa"], 200000)
+assert.deepEqual(plain(browsed.reload), [])
+assert.equal(model.recoveryWaiting(browsed.recovery), false)
+// Playing again ends the wait.
+assert.equal(model.recoveryWaiting(model.planRecovery(streamAudio({ state: "playing" }), gone.recovery, sites, ["0xa"], 50000).recovery), false)
 // Other sites, recovery off, a new tab, a tile the extension lost, a tile gone.
 assert.deepEqual(plain(model.planRecovery(streamAudio(dropped, "https://youtube.com/watch"), {}, sites, ["0xa"], 1000).reload), [])
 assert.deepEqual(plain(model.planRecovery(streamAudio(dropped), {}, "", ["0xa"], 1000).reload), [])
@@ -958,7 +996,9 @@ assert.equal(model.planRecovery({}, plan.recovery, sites, ["0xa"], 500000).recov
 assert.deepEqual(plain(model.planRecovery({}, plan.recovery, sites, [], 500000).recovery), {})
 // The panel's line.
 assert.deepEqual(plain(model.streamStatus(streamAudio(dropped)["0xa"], undefined, true, 0)), { text: "stream dropped; reloading", warn: true })
-assert.deepEqual(plain(model.streamStatus(streamAudio(dropped)["0xa"], undefined, false, 0)), { text: "stream dropped", warn: true })
+// A site not recovered says nothing: YouTube Music reported "gone" while
+// playing, with its player hidden (2026-10-29).
+assert.deepEqual(plain(model.streamStatus(streamAudio(dropped)["0xa"], undefined, false, 0)), { text: "", warn: false })
 assert.equal(model.streamStatus(undefined, undefined, true, 0).text, "")
 assert.equal(model.streamStatus(streamAudio(null)["0xa"], { waiting: 1000, recovered: 0 }, true, 30000).text, "reloading the stream")
 assert.equal(model.streamStatus(streamAudio(null)["0xa"], { waiting: 1000, recovered: 0 }, true, 70000).text, "")
