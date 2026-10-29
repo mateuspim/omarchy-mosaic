@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.7.1 (2026-10-29)
 
 - **Fixed**: a tile on a site outside "Stream recovery sites", such as
   YouTube Music, could say **stream dropped** while it played, after a
